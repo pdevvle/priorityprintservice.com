@@ -52,6 +52,10 @@ function pps_ms_defaults() {
     return array(
         'from'       => array( 'name' => 'Priority Print Service', 'company' => 'Priority Print Service', 'street1' => '2941 W Eastman Dr',
                                'street2' => '', 'city' => 'Anthem', 'state' => 'AZ', 'zip' => '85086', 'phone' => '(623) 267-9479', 'email' => 'Office@priorityprintservice.com' ),
+        // The return address printed on the label, and where an undeliverable parcel comes back to
+        // (owner 2026-10-19). Ship-from stays the place parcels leave from and are priced from.
+        'return'     => array( 'name' => 'Priority Print Service', 'company' => 'Priority Print Service', 'street1' => '8380 W Emile Zola Ave',
+                               'street2' => '#5224', 'city' => 'Peoria', 'state' => 'AZ', 'zip' => '85381', 'phone' => '(623) 267-9479', 'email' => 'Office@priorityprintservice.com' ),
         'allow_buy'  => false,
         'label_type' => '',
     );
@@ -63,8 +67,11 @@ function pps_ms_settings() {
     $s = is_array( $s ) ? $s : array();
     $from = $d['from'];
     foreach ( $from as $k => $v ) if ( isset( $s['from'][ $k ] ) && is_string( $s['from'][ $k ] ) ) $from[ $k ] = $s['from'][ $k ];
+    $ret = $d['return'];
+    foreach ( $ret as $k => $v ) if ( isset( $s['return'][ $k ] ) && is_string( $s['return'][ $k ] ) ) $ret[ $k ] = $s['return'][ $k ];
+    if ( trim( $ret['street1'] ) === '' || trim( $ret['zip'] ) === '' ) $ret = $from;   // a cleared return address falls back to the ship-from
     $lt = (string) ( $s['label_type'] ?? '' );
-    return array( 'from' => $from, 'allow_buy' => ! empty( $s['allow_buy'] ), 'label_type' => array_key_exists( $lt, pps_ms_label_types() ) ? $lt : '' );
+    return array( 'from' => $from, 'return' => $ret, 'allow_buy' => ! empty( $s['allow_buy'] ), 'label_type' => array_key_exists( $lt, pps_ms_label_types() ) ? $lt : '' );
 }
 
 /* ── The page's token: good for one order ─────────────────────────────────── */
@@ -403,7 +410,7 @@ function pps_ms_rates( $order_id, $to, $parcels, $ship_ymd = '', $extra = array(
     $view = pps_ms_view( $order );
     $accounts = pps_ms_accounts();
     $accounts = is_wp_error( $accounts ) ? array() : $accounts;
-    $base = array( 'address_from' => $from, 'address_to' => $to, 'address_return' => $from,
+    $base = array( 'address_from' => $from, 'address_to' => $to, 'address_return' => $s['return'] + array( 'country' => 'US' ),
                    'shipment_date' => pps_ms_shipment_date( $ship ), 'metadata' => 'Order ' . (int) $order_id );
     if ( $extra ) $base['extra'] = $extra;
     $boxes = array_sum( array_column( $groups, 'count' ) );
@@ -571,7 +578,7 @@ function pps_ms_page_html( $order, $rates_api, $buy_api ) {
     $s = pps_ms_settings();
     $cfg = wp_json_encode( array(
         'order' => (int) $order->get_id(), 'token' => pps_ms_token( $order->get_id() ), 'rates' => $rates_api, 'buy' => $buy_api,
-        'view' => pps_ms_view( $order ), 'from' => $s['from'], 'canBuy' => $s['allow_buy'], 'hasKey' => pps_ms_shippo_key() !== '',
+        'view' => pps_ms_view( $order ), 'from' => $s['from'], 'ret' => $s['return'], 'canBuy' => $s['allow_buy'], 'hasKey' => pps_ms_shippo_key() !== '',
         'signatures' => pps_ms_signatures(), 'maxBoxes' => PPS_MS_MAX_BOXES,
     ), JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES );
     return <<<HTML
@@ -672,6 +679,8 @@ function addressCard(){
   c.appendChild(g);
   var f = CFG.from;
   c.appendChild(el('div',{cls:'muted small',style:'margin-top:6px',text:'From: '+[f.company||f.name, f.street1, f.city+', '+f.state+' '+f.zip].filter(Boolean).join(', ')+(f.phone?' · '+f.phone:'')}));
+  var rt = CFG.ret;
+  if(rt && (rt.street1!==f.street1 || rt.zip!==f.zip)) c.appendChild(el('div',{cls:'muted small',text:'Return address on the label: '+[rt.company||rt.name, rt.street1+(rt.street2?' '+rt.street2:''), rt.city+', '+rt.state+' '+rt.zip].filter(Boolean).join(', ')}));
   if(!f.phone) c.appendChild(el('div',{cls:'warn small',text:'No shop phone is set for the ship-from (PPS Calculators → Missive Shipping). USPS, UPS and FedEx may refuse a label without one.'}));
   return c;
 }
@@ -799,8 +808,11 @@ add_action( 'admin_post_pps_ms_save', function () {
     $from = array();
     foreach ( array_keys( pps_ms_defaults()['from'] ) as $k ) $from[ $k ] = sanitize_text_field( wp_unslash( $_POST['from'][ $k ] ?? '' ) );
     $from['state'] = strtoupper( substr( $from['state'], 0, 2 ) );
+    $ret = array();
+    foreach ( array_keys( pps_ms_defaults()['return'] ) as $k ) $ret[ $k ] = sanitize_text_field( wp_unslash( $_POST['return'][ $k ] ?? '' ) );
+    $ret['state'] = strtoupper( substr( $ret['state'], 0, 2 ) );
     $lt = sanitize_text_field( wp_unslash( $_POST['label_type'] ?? '' ) );
-    update_option( PPS_MS_OPTION, array( 'from' => $from, 'allow_buy' => ! empty( $_POST['allow_buy'] ), 'label_type' => array_key_exists( $lt, pps_ms_label_types() ) ? $lt : '' ), false );
+    update_option( PPS_MS_OPTION, array( 'from' => $from, 'return' => $ret, 'allow_buy' => ! empty( $_POST['allow_buy'] ), 'label_type' => array_key_exists( $lt, pps_ms_label_types() ) ? $lt : '' ), false );
     delete_transient( 'pps_ms_accounts' ); delete_transient( 'pps_ms_boxes' );
     wp_safe_redirect( admin_url( 'admin.php?page=pps-missive-ship&saved=1' ) );
     exit;
@@ -814,9 +826,14 @@ function pps_ms_render_admin() {
        . ( isset( $_GET['saved'] ) ? '<div class="notice notice-success"><p>Saved.</p></div>' : '' );
     if ( pps_ms_shippo_key() === '' ) echo '<div class="notice notice-error inline"><p>No Shippo API token is set (PPS Config → Shippo Integration). The panel cannot get rates until it is.</p></div>';
     echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">' . wp_nonce_field( 'pps_ms_save', '_wpnonce', true, false )
-       . '<input type="hidden" name="action" value="pps_ms_save"><h2>Ship from</h2><p>The return address printed on every label, and where carriers price and time the shipment from.</p><table class="form-table">';
-    foreach ( array( 'name' => 'Name', 'company' => 'Company', 'street1' => 'Street', 'street2' => 'Suite', 'city' => 'City', 'state' => 'State', 'zip' => 'ZIP', 'phone' => 'Phone (carriers need one to make a label)', 'email' => 'Email (USPS needs one)' ) as $k => $label ) {
+       . '<input type="hidden" name="action" value="pps_ms_save"><h2>Ship from</h2><p>Where parcels leave from: carriers price and time the shipment from here.</p><table class="form-table">';
+    $fields = array( 'name' => 'Name', 'company' => 'Company', 'street1' => 'Street', 'street2' => 'Suite', 'city' => 'City', 'state' => 'State', 'zip' => 'ZIP', 'phone' => 'Phone (carriers need one to make a label)', 'email' => 'Email (USPS needs one)' );
+    foreach ( $fields as $k => $label ) {
         echo '<tr><th><label>' . esc_html( $label ) . '</label></th><td><input type="text" name="from[' . esc_attr( $k ) . ']" value="' . esc_attr( $f[ $k ] ) . '" class="regular-text"></td></tr>';
+    }
+    echo '</table><h2>Return address</h2><p>Printed on the label as the return address, and where an undeliverable parcel is sent back. Leave Street empty to use the ship-from.</p><table class="form-table">';
+    foreach ( $fields as $k => $label ) {
+        echo '<tr><th><label>' . esc_html( $label ) . '</label></th><td><input type="text" name="return[' . esc_attr( $k ) . ']" value="' . esc_attr( $s['return'][ $k ] ) . '" class="regular-text"></td></tr>';
     }
     echo '</table><h2>Labels</h2><p><label>Label format <select name="label_type">';
     foreach ( pps_ms_label_types() as $k => $label ) echo '<option value="' . esc_attr( $k ) . '"' . ( $k === $s['label_type'] ? ' selected' : '' ) . '>' . esc_html( $label ) . '</option>';
