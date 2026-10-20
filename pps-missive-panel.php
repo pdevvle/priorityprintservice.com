@@ -371,6 +371,56 @@ function pps_mp_board_rows( array $open, array $tasks_by_order, $today, array $t
     return $rows;
 }
 
+/**
+ * Open Missive subtasks that no board row carries (owner 2026-10-20: "I'm seeing some tasks on
+ * missive's calendar that should be appearing in our integration but are not"). The board is
+ * built from open WooCommerce jobs, so a subtask whose order is completed, pending, cancelled
+ * or not on the site — or whose conversation names no order — never showed; it was only
+ * counted. Each becomes a row of its own, dated by the task's due date, with the reason it is
+ * not on a job. Order lookups are capped at `$max` a refresh.
+ */
+function pps_mp_extra_rows( array $tasks, array $conv, array $rows, $max = 40 ) {
+    $used = array();
+    foreach ( $rows as $r ) if ( ! empty( $r['task']['id'] ) ) $used[ $r['task']['id'] ] = 1;
+    $open_orders = array();
+    foreach ( $rows as $r ) $open_orders[ (int) $r['order'] ] = 1;
+    $out = array(); $looked = array(); $n = 0;
+    $words = array( 'completed' => 'is completed', 'pending' => 'is waiting for payment', 'cancelled' => 'was cancelled', 'refunded' => 'was refunded',
+                    'failed' => 'failed payment', 'draft' => 'is a draft', 'checkout-draft' => 'is a draft' );
+    foreach ( $tasks as $t ) {
+        if ( ! is_array( $t ) || empty( $t['id'] ) || empty( $t['conversation'] ) ) continue;
+        $state = (string) ( $t['state'] ?? 'todo' );
+        if ( $state === 'closed' || isset( $used[ (string) $t['id'] ] ) ) continue;
+        $used[ (string) $t['id'] ] = 1;
+        $cid   = is_array( $t['conversation'] ) ? (string) ( $t['conversation']['id'] ?? '' ) : (string) $t['conversation'];
+        $order = pps_mp_order_in( $t['title'] ?? '' ) ?: (int) ( $conv[ $cid ] ?? 0 );
+        $customer = ''; $status = '';
+        if ( ! $order ) $reason = array_key_exists( $cid, $conv ) ? 'No order number in this conversation' : 'Conversation not read yet — it pairs on a later refresh if it names an order';
+        elseif ( isset( $open_orders[ $order ] ) ) $reason = 'Order #' . $order . ' has another subtask shown on its job';
+        else {
+            if ( ! array_key_exists( $order, $looked ) ) {
+                $looked[ $order ] = ( $n++ < $max && function_exists( 'wc_get_order' ) ) ? wc_get_order( $order ) : null;
+            }
+            $o = $looked[ $order ];
+            if ( $o && is_object( $o ) && method_exists( $o, 'get_status' ) ) {
+                $status   = (string) $o->get_status();
+                $customer = trim( ( method_exists( $o, 'get_billing_first_name' ) ? $o->get_billing_first_name() . ' ' . $o->get_billing_last_name() : '' ) );
+                $reason   = 'Order #' . $order . ' ' . ( $words[ $status ] ?? 'is ' . $status ) . ( in_array( $status, array( 'processing', 'on-hold' ), true ) ? ' but has no job the board can read' : '' );
+            } else $reason = $n > $max ? 'Order #' . $order . ' not checked this refresh' : '#' . $order . ' is not an order on the site';
+        }
+        $due = pps_mp_unix_ymd( $t['due_at'] ?? 0 );
+        $out[] = array(
+            'order' => $order, 'item' => 0, 'customer' => $customer, 'what' => (string) ( $t['title'] ?? '' ), 'qty' => 0, 'size' => '',
+            'start' => $due, 'must_ship' => $due, 'delivery' => '', 'rush' => false, 'printed' => false, 'source' => 'missive',
+            'finishing' => array(), 'addons' => array(), 'paper' => '', 'sheet' => '', 'paper_key' => '', 'sheets' => 0, 'papers' => array(),
+            'task' => array( 'id' => (string) $t['id'], 'title' => (string) ( $t['title'] ?? '' ), 'state' => $state, 'due' => $due,
+                             'started' => pps_mp_unix_ymd( $t['started_at'] ?? 0 ), 'conversation' => $cid ),
+            'drive' => '', 'due_mismatch' => false, 'missive_only' => true, 'reason' => $reason, 'order_status' => $status,
+        );
+    }
+    return $out;
+}
+
 function pps_mp_token() { return trim( (string) get_option( PPS_MP_TOKEN_OPTION, '' ) ); }
 
 /** One call to Missive's API. Returns the decoded body or a WP_Error. Never logs the token. */
@@ -497,6 +547,11 @@ function pps_mp_answer( array $ids, $conv = '' ) {
             'ship_to' => function_exists( 'pps_st_view' ) ? pps_st_view( $order ) : null );
     }
     $out['board'] = pps_mp_board_rows( $open, $by, $today, $by_item );
+    if ( isset( $tasks ) && is_array( $tasks ) ) {
+        $extra = pps_mp_extra_rows( $tasks, $map, $out['board'] );
+        $out['missive']['extra'] = count( $extra );
+        $out['board'] = array_merge( $out['board'], $extra );
+    }
     return $out;
 }
 
@@ -683,7 +738,7 @@ var CFG = {$cfg};
 var app = document.getElementById('app');
 var inMissive = typeof window.Missive !== 'undefined' && window.parent !== window;
 var LAST = { ids: [], conv: '' }, DATA = null, IMPOSE = 0, FRAME = 'impose';
-var PREF = { sort: 'ship', group: 'none', q: '', hide: true, st: 'all', when: 'all', paper: '', addon: '', rush: false, lateStart: false, subOnly: true };
+var PREF = { sort: 'ship', group: 'none', q: '', hide: true, st: 'all', when: 'all', paper: '', addon: '', rush: false, lateStart: false, subOnly: true, mOnly: true };
 try { var sp = JSON.parse(localStorage.getItem('ppsMpPref')||'null'); if (sp) for (var k in sp) PREF[k]=sp[k]; } catch(e){}
 function savePref(){ try { localStorage.setItem('ppsMpPref', JSON.stringify(PREF)); } catch(e){} }
 
@@ -876,6 +931,17 @@ function tr(r){ return r.task ? ({in_progress:0,todo:1,closed:3})[r.task.state] 
 
 function boardRow(r, here){
   var late = r.must_ship && r.must_ship < DATA.today;
+  if(r.missive_only){
+    var m = el('div',{cls:'row'});
+    m.appendChild(el('div',{},[ el('span',{cls:late?'late':'',text:r.must_ship?'due '+md(r.must_ship):'no due date'}), ' ',
+      r.order?el('a',{text:'#'+r.order,on:function(){find(r.order);}}):null,
+      r.order&&r.order_status&&CFG.ship?el('a',{cls:'small',text:' [Ship]',title:'Shipping rates and labels for this order',on:function(){ ship(r.order); }}):null,
+      ' '+(r.customer?r.customer+' — ':'')+r.what ]));
+    m.appendChild(el('div',{cls:'specs'},[ el('span',{cls:'pill pill-plain',text:'Missive task only'}), el('span',{cls:'muted small',text:' '+r.reason}),
+      el('a',{cls:'small',text:' [Find in Missive]',title:'Search Missive for this task',on:function(){ if(inMissive && Missive.search) Missive.search(r.order?String(r.order):r.what); }}) ]));
+    var tl0 = taskLine(r.task, r.start, false); if(tl0) m.appendChild(tl0);
+    return m;
+  }
   var d = el('div',{cls:'row'+(here?' here':'')});
   d.appendChild(el('div',{},[ el('span',{cls:late?'late':'',text:md(r.must_ship)}), ' ', el('a',{text:'#'+r.order,on:function(){find(r.order);}}),
     r.drive?el('a',{cls:'small',text:' [Drive]',title:'Open the order\'s Google Drive folder',on:function(){ open(r.drive); }}):null,
@@ -967,10 +1033,12 @@ function renderBoard(here){
   var lsN = DATA.board.filter(lateStart).length;
   var rush = el('input',{type:'checkbox'}); rush.checked=PREF.rush; rush.addEventListener('change',function(){ PREF.rush=rush.checked; savePref(); render(); });
   var hide = el('input',{type:'checkbox'}); hide.checked=PREF.hide; hide.addEventListener('change',function(){ PREF.hide=hide.checked; savePref(); render(); });
+  var mo = el('input',{type:'checkbox'}); mo.checked=PREF.mOnly!==false; mo.addEventListener('change',function(){ PREF.mOnly=mo.checked; savePref(); render(); });
+  var moN = DATA.board.filter(function(r){ return r.missive_only; }).length;
   var sub = el('input',{type:'checkbox'}); sub.checked=PREF.subOnly!==false; sub.addEventListener('change',function(){ PREF.subOnly=sub.checked; savePref(); render(); });
-  var reset = el('a',{cls:'small',text:'reset',on:function(){ PREF={ sort:'ship', group:'none', q:'', hide:true, st:'all', when:'all', paper:'', addon:'', rush:false, lateStart:false, subOnly:true }; savePref(); render(); }});
+  var reset = el('a',{cls:'small',text:'reset',on:function(){ PREF={ sort:'ship', group:'none', q:'', hide:true, st:'all', when:'all', paper:'', addon:'', rush:false, lateStart:false, subOnly:true, mOnly:true }; savePref(); render(); }});
   tools.appendChild(el('div',{cls:'ctl'},[q]));
-  tools.appendChild(el('div',{cls:'ctl'},[DATA.missive.connected ? el('label',{cls:'small'},[sub,' subtasks only']) : null, el('label',{cls:'small'},[rush,' rush only']), el('label',{cls:'small'+(lsN?' late':'')},[ls,' late start ('+lsN+')']), el('label',{cls:'small'},[hide,' hide printed / done']), reset]));
+  tools.appendChild(el('div',{cls:'ctl'},[DATA.missive.connected ? el('label',{cls:'small'},[sub,' subtasks only']) : null, moN ? el('label',{cls:'small',title:'Open Missive subtasks that are not on an open job: the order is completed or not on the site, or the conversation names no order'},[mo,' Missive-only tasks ('+moN+')']) : null, el('label',{cls:'small'},[rush,' rush only']), el('label',{cls:'small'+(lsN?' late':'')},[ls,' late start ('+lsN+')']), el('label',{cls:'small'},[hide,' hide printed / done']), reset]));
   var needle = PREF.q.trim().toLowerCase();
   var rows = DATA.board.filter(function(r){
     var st = stateOf(r);
@@ -978,6 +1046,7 @@ function renderBoard(here){
     // "subtasks only" (on by default): jobs with no Missive subtask are left out, unless the
     // "No subtask" chip is chosen, which asks for exactly those.
     if(DATA.missive.connected && PREF.subOnly!==false && PREF.st!=='none' && !r.task) return false;
+    if(r.missive_only && PREF.mOnly===false) return false;
     if(PREF.hide && PREF.st!=='closed' && (r.printed || st==='closed')) return false;
     if(PREF.rush && !r.rush) return false;
     if(PREF.lateStart && !lateStart(r)) return false;
@@ -990,7 +1059,21 @@ function renderBoard(here){
   });
   rows.sort(SORTS[PREF.sort] ? SORTS[PREF.sort][1] : SORTS.ship[1]);
   var tot = rows.reduce(function(s,r){ return s+r.sheets; },0);
-  tools.appendChild(el('div',{cls:'muted small',text:rows.length+' of '+DATA.board.length+' jobs'+(tot?' · '+tot+' sheets':'')}));
+  // Say which filters are narrowing the board — they are remembered in this browser, so a
+  // "Ships within 7 days" chosen last week still applies today.
+  var on = [];
+  if(PREF.when!=='all') on.push(({late:'late',today:'ships today',week:'ships within 7 days',two:'ships within 14 days'})[PREF.when]||PREF.when);
+  if(PREF.st!=='all') on.push(({todo:'to do',in_progress:'in progress',closed:'done',none:'no subtask'})[PREF.st]||PREF.st);
+  if(DATA.missive.connected && PREF.subOnly!==false && PREF.st!=='none') on.push('subtasks only');
+  if(PREF.hide) on.push('hiding printed / done');
+  if(PREF.paper) on.push('paper '+PREF.paper);
+  if(PREF.addon) on.push('add-ons');
+  if(PREF.rush) on.push('rush only');
+  if(PREF.lateStart) on.push('late start');
+  if(PREF.q.trim()) on.push('search "'+PREF.q.trim()+'"');
+  if(PREF.mOnly===false && moN) on.push('Missive-only tasks hidden');
+  var hidden = DATA.board.length - rows.length;
+  tools.appendChild(el('div',{cls:'muted small'+(hidden&&PREF.when!=='all'?' late':''),text:rows.length+' of '+DATA.board.length+' jobs'+(tot?' · '+tot+' sheets':'')+(hidden?' · '+hidden+' hidden by: '+on.join(', '):'')}));
   wrap.appendChild(tools);
   var g = GROUPS[PREF.group] ? GROUPS[PREF.group][1] : GROUPS.none[1];
   var groups = {}, order = [];

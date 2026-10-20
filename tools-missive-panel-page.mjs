@@ -14,7 +14,9 @@ const row = (o) => Object.assign({ order: 87001, item: 1, customer: 'Ann Lee', w
 const answer = { today: '2026-10-19', orders: [], missing: [], missive: { connected: false }, board: [
   row({ order: 87001, finishing: ['Coating', 'Fold'], addons: ['Coating: UV Gloss (both sides)', 'Fold: Tri-fold'] }),
   row({ order: 87002, item: 2, customer: 'Bo Ray', start: '2026-10-15', qty: '1000', size: '6×9', papers: [{ label: '80lb Matte Cardstock', sheet: '13x19', sheets: 90, key: 'm' }] }),
-  row({ order: 87003, item: 3, customer: 'Cy Doe', addons: ['Coating: Aqueous'], finishing: ['Coating'] }) ] };
+  row({ order: 87003, item: 3, customer: 'Cy Doe', addons: ['Coating: Aqueous'], finishing: ['Coating'] }),
+  row({ order: 87400, item: 0, customer: 'Dee Fox', what: 'Reprint flyers', qty: 0, size: '', start: '2026-10-30', must_ship: '2026-10-30', delivery: '', paper: '', sheet: '', sheets: 0, papers: [], source: 'missive',
+        task: { id: 'tx', title: 'Reprint flyers', state: 'todo', due: '2026-10-30', started: '', conversation: 'c1' }, missive_only: true, reason: 'Order #87400 is completed', order_status: 'completed' }) ] };
 const b = await pw.chromium.launch(); const top = await b.newPage({ viewport: { width: 380, height: 900 } });
 top.on('pageerror', e => errs.push(e.message + ' @ ' + (e.stack||'').split('\n').slice(0,3).join(' | ')));
 // Missive loads the panel in a frame and the panel listens for conversation changes; a stand-in
@@ -58,8 +60,19 @@ const calls = apiCalls;
 await p.evaluate(() => window.Missive._h['change:conversations']([])); await p.waitForTimeout(300);
 ok(apiCalls > calls && await p.evaluate(() => !!document.querySelector('iframe.imp')), 'new panel data does not close the analytics frame');
 await p.click('button:has-text("Back to the panel")'); await p.waitForTimeout(200);
-ok(await p.evaluate(() => !document.querySelector('iframe.imp') && document.querySelectorAll('.row').length === 3), 'Back returns to the board');
+ok(await p.evaluate(() => !document.querySelector('iframe.imp') && document.querySelectorAll('.row').length === 4), 'Back returns to the board');
 ok(await p.evaluate(() => { const r = document.querySelector('.pill-late').getBoundingClientRect(); return r.height < 30 && r.width < 200; }), 'a late-start pill is a small pill, not a full-screen overlay (Missive\'s own .alert class)');
+// a Missive task that is on no open job (owner 2026-10-20) — and the filters that hide rows, said
+const mrow = await p.evaluate(() => { const r = [...document.querySelectorAll('.row')].find(x => /Reprint flyers/.test(x.textContent)); return r ? r.textContent : null; });
+ok(mrow && /due Fri, Oct 30/.test(mrow) && /#87400/.test(mrow) && /Missive task only/.test(mrow) && /Order #87400 is completed/.test(mrow) && /Find in Missive/.test(mrow), 'a Missive task on no open job shows as its own row: due date, order, why it is not on a job', mrow);
+ok(await p.evaluate(() => /Missive-only tasks \(1\)/.test(document.querySelector('.tools').textContent)), 'it can be hidden with a tick that counts them');
+await p.selectOption('.tools select >> nth=0', 'week').catch(() => {});
+const when = await p.evaluate(() => { const s = [...document.querySelectorAll('.tools select')].find(x => [...x.options].some(o => o.value === 'week')); if (s) { s.value = 'week'; s.dispatchEvent(new Event('change')); } return !!s; });
+await p.waitForTimeout(150);
+const readout = await p.evaluate(() => [...document.querySelectorAll('.tools .muted.small')].map(e => e.textContent).find(t => / of \d+ jobs/.test(t)) || '');
+ok(when && /hidden by: ships within 7 days/.test(readout) && !/Reprint flyers/.test(await p.evaluate(() => document.body.textContent.split('jobs')[1] || '')), 'a ship-date filter (remembered in the browser) is named in the count line, so a week cap is visible', readout);
+await p.click('.tools a:has-text("reset")'); await p.waitForTimeout(150);
+ok(await p.evaluate(() => document.querySelectorAll('.row').length === 4), 'reset shows every row again');
 // ship-to: the order card's box, change it, what is posted
 const html2 = html.replace('"shipTo":""', '"shipTo":"https:\\/\\/site.test\\/wp-json\\/pps\\/v1\\/missive\\/ship-to"');
 const answer2 = Object.assign({}, answer, { orders: [{ order: 87001, status: 'processing', admin_url: 'https://site.test/wp-admin/x', jobs: [], conv_ok: false, needs: 0, order_task: null, drive: null, ship: null,

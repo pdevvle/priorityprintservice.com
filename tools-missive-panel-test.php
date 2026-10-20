@@ -142,6 +142,19 @@ $GLOBALS['mtasks'][0]['due_at'] = strtotime( '2026-10-19 17:00 America/Phoenix' 
 $rs = array(); foreach ( pps_mp_answer( array() )['board'] as $r ) $rs[ $r['order'] ] = $r;
 ok( $rs[87501]['due_mismatch'] === false, 'a subtask due on the job start date (the team convention) is not flagged', $rs[87501]['task'] );
 ok( $rows[87503]['task']['state'] === 'closed', 'a done subtask shows as done' );
+// Missive-only rows (owner 2026-10-20: tasks on Missive's calendar missing from the board)
+$mo = array_values( array_filter( $withconv['board'], function ( $r ) { return ! empty( $r['missive_only'] ); } ) );
+ok( count( $mo ) === 1 && $mo[0]['task']['id'] === 't3' && $mo[0]['order'] === 0 && $mo[0]['reason'] === 'No order number in this conversation' && $withconv['missive']['extra'] === 1,
+    'an open subtask on no job is listed as its own row, with the reason; a done one and a standalone task are not', $mo );
+$GLOBALS['mtasks'][] = array( 'id' => 't6', 'title' => 'Reprint #87000', 'state' => 'todo', 'due_at' => strtotime( '2026-10-23 17:00 America/Phoenix' ), 'conversation' => 'c-z', 'last_activity_at' => 0 );
+$GLOBALS['mtasks'][] = array( 'id' => 't7', 'title' => 'Check #99999', 'state' => 'in_progress', 'due_at' => 0, 'conversation' => 'c-y', 'last_activity_at' => 0 );
+$GLOBALS['mtasks'][] = array( 'id' => 't8', 'title' => 'Second task #87501', 'state' => 'todo', 'due_at' => 0, 'conversation' => 'c-w', 'last_activity_at' => 0 );
+$GLOBALS['tr'] = array();
+$mo = array(); foreach ( pps_mp_answer( array() )['board'] as $r ) if ( ! empty( $r['missive_only'] ) ) $mo[ $r['task']['id'] ] = $r;
+ok( isset( $mo['t6'] ) && $mo['t6']['reason'] === 'Order #87000 is completed' && $mo['t6']['must_ship'] === '2026-10-23' && $mo['t6']['customer'] === 'Old', 'a subtask for a completed order shows, dated by its due date, with the customer', $mo['t6'] ?? null );
+ok( isset( $mo['t7'] ) && $mo['t7']['reason'] === '#99999 is not an order on the site', 'one naming an order the site does not have says so', $mo['t7'] ?? null );
+ok( isset( $mo['t8'] ) && $mo['t8']['reason'] === 'Order #87501 has another subtask shown on its job', 'a second subtask on an open order shows beside the first', $mo['t8'] ?? null );
+array_splice( $GLOBALS['mtasks'], -3 ); $GLOBALS['tr'] = array();
 ok( strpos( pps_mp_page_html( 'K', 'a', 'b' ), 'missive_pat' ) === false, 'the token never reaches the page' );
 // state changes
 $GLOBALS['http'] = array();
@@ -242,7 +255,7 @@ ok( substr_count( strtolower( $html ), '</script>' ) === 2, 'no stray script clo
 ok( substr_count( $html, 'data-cfasync="false"' ) === 2, 'Cloudflare Rocket Loader is told to leave both scripts alone' );
 ok( strpos( $html, "class:'tools'" ) === false && strpos( $html, "{cls:'tools'}" ) !== false && strpos( $html, ".tools{position:sticky" ) !== false, 'the filter bar stays at the top while the board scrolls' );
 foreach ( array( "['todo','To do']", "['in_progress','In progress']", "['closed','Done']", "['none','No subtask']", "'Ships within 7 days'", "'Any paper'", "' rush only'" ) as $w ) ok( strpos( $html, $w ) !== false, "the panel offers the filter $w" );
-ok( strpos( $html, "subOnly: true }" ) !== false && strpos( $html, "' subtasks only'" ) !== false && strpos( $html, "PREF.subOnly!==false && PREF.st!=='none' && !r.task" ) !== false, 'a subtasks-only filter is offered and on by default' );
+ok( strpos( $html, "subOnly: true, mOnly: true }" ) !== false && strpos( $html, "' subtasks only'" ) !== false && strpos( $html, "PREF.subOnly!==false && PREF.st!=='none' && !r.task" ) !== false, 'a subtasks-only filter is offered and on by default' );
 ok( preg_match( '/"build":"[0-9a-f]{8}"/', $html ) === 1, 'the page carries a build stamp, so the version Missive shows can be told apart' );
 
 // ── the order-number finder, run as the browser runs it ──
@@ -269,7 +282,7 @@ if ( preg_match( '/function lateStart\(r\)\{.*?\}\n/s', $html, $m ) ) {
     $got = json_decode( (string) shell_exec( 'node ' . escapeshellarg( $f ) . ' 2>&1' ), true ); @unlink( $f );
     ok( $got === array( true, true, false, false, false, false, false, false ), 'late start: start date passed and not begun (no subtask, or to do); in progress, done, printed, starting today or later, or no start date is not late', $got );
 } else { ok( false, 'lateStart is in the page' ); }
-ok( strpos( $html, "if(PREF.lateStart && !lateStart(r)) return false;" ) !== false && strpos( $html, "' late start ('" ) !== false && strpos( $html, "rush:false, lateStart:false, subOnly:true }" ) !== false, 'the board offers a late-start filter with a count, applies it, and reset clears it' );
+ok( strpos( $html, "if(PREF.lateStart && !lateStart(r)) return false;" ) !== false && strpos( $html, "' late start ('" ) !== false && strpos( $html, "rush:false, lateStart:false, subOnly:true, mOnly:true }" ) !== false, 'the board offers a late-start filter with a count, applies it, and reset clears it' );
 ok( strpos( $html, "'Any add-ons'" ) !== false && strpos( $html, "if(!addonOk(r)) return false;" ) !== false && strpos( $html, "paper:'', addon:'', rush:false" ) !== false, 'the board offers the Add-ons filter, applies it, and reset clears it' );
 
 // ── the board in a browser: spec pills, the Analytics frame ──
