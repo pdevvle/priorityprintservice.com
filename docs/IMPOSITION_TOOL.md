@@ -743,6 +743,44 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### Orientation on the sheet beside the size, and a priced count that does not fit is placed, not refused (1.61)
+
+  Owner: "When I have an 8.5×11 sheet and I put a 4.25×2.5 object on it, I
+  should be able to control the object's orientation within the sheet. It
+  should be a dropdown next to the finished size that says 'Landscape on
+  sheet' / 'Portrait on sheet' that flips the imposed object without
+  flipping the sheet dimensions."
+
+  Reproduced: brochure 4.25×2.5 on a custom 11×8.5 sheet, every rotation
+  choice ended in "The calculator priced this 16-up, but 16 pieces … do not
+  fit … tick Allow best physical fit" — the priced imp (for the product's own
+  13×19) can never fit a smaller sheet, so the control was dead on exactly
+  the sheet the owner was using. The 1.56 rule had not been applied to this
+  refusal.
+
+  Two changes. **(1)** The priced-count-does-not-fit refusal is gone, flats
+  and saddle alike: the most that fits in the chosen orientation is placed,
+  `mismatch` is set (badge, slug, warning naming the priced count, the
+  placed grid and the most that fits every way), and the "allow best
+  physical fit" tick is retired — the behaviour is always on. A piece that
+  fits no way at all still refuses, naming how it would. **(2)** The
+  orientation control is a dropdown in the **Job** section directly under
+  the finished size (`select[data-art-rotate]`, flats/stickers): Auto ·
+  Landscape on sheet (W wide × H tall) · Portrait on sheet (H wide × W tall)
+  · the two head-down variants — the same `spec.artRotate` values, worded as
+  the owner thinks of them. "Landscape" and "portrait" are relative to the
+  sheet AS IT LIES, so they mean the same thing whichever way the press
+  sheet is turned. Under it, the live readout: "Piece as placed: 2.5 wide ×
+  4.25 tall (turned 90°) · 4 × 2 = 8-up on the 11 wide × 8.5 tall sheet ·
+  priced 16-up — MISMATCH flagged". The 1.60 segment in the Artwork section
+  is removed (one control, where the owner looks for it).
+
+  Verified on real output (`ui_orient2.mjs`, `fx_425.pdf`): Landscape on
+  sheet → 11×8.5 page, 6 pieces (2 × 3), text upright; Portrait on sheet →
+  11×8.5 page, 8 pieces (4 × 2), text turned; the sheet never changes. UI:
+  `ui_orient.mjs` (all five choices, readouts), `ui_sidebar.mjs` (30),
+  `ui_pick.mjs` (17).
+
   ### The controls column, reorganised (1.60)
 
   Owner: "Improve the UI, reconsider the organization of the options in the

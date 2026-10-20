@@ -121,7 +121,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-19 02:00 UTC · IMPOSE-V1.60</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-20 01:00 UTC · IMPOSE-V1.61</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -764,20 +764,23 @@ function computeLayout(calc, trimA, trimB, opts) {
       if (opts && opts.efficient) warnings.push(`Efficient mode applies to sizes imaging ≥2-up — ignored for this size.`);
       grid = bestGridForCount(Math.round(priced), pieceLong, pieceShort, sheet, gutters, allowedRot);
       if (!grid) {
-        // Pricing promised more than physically fits — surface loudly, never
-        // silently under- or over-place (brief §2). Placement below the priced
-        // count happens only on explicit operator override, and is flagged in
-        // the UI, the warnings, and the sheet's slug line.
-        if (!(opts && opts.allowBestFit)) {
-          const fits = physicalFitOptions(pieceLong, pieceShort, [sheet], gutters, sheetMarginOf(sheet));
-          throw new Error(`The calculator priced this ${priced}-up, but ${priced} pieces of ${pieceLong}×${pieceShort}″ do not fit on ${sheetWords(sheet)}${gutters.length === 1 ? ` with a ${gutters[0]}″ gutter` : ""}${allowedRot.length === 1 ? " with the artwork rotation forced" : ""}.`
-            + (fits.length ? `\nThe most that fits: ${fits.map((t, i) => `(${i + 1}) ${t}`).join("; ")}.` : "")
-            + `\nTo run it: tick “Set columns × rows manually” and enter one of those (Sheet orientation and Artwork rotation are in Layout settings), or tick “Allow best physical fit” to place the most that fits as-is. Either way it is flagged MISMATCH against the ${priced}-up price — review pricing for this size.`);
-        }
+        // Pricing promised more than physically fits on THIS sheet in THIS
+        // orientation — place the most that does and say so loudly (badge,
+        // warning, slug, filename). Until 1.61 this refused unless "allow best
+        // physical fit" was ticked, which made the orientation control look
+        // dead on any sheet smaller than the product's own (owner, 2026-10-20:
+        // "8.5×11 sheet, 4.25×2.5 object — I should be able to control the
+        // object's orientation"). The 1.56 rule applies: refuse only what
+        // cannot be produced at all.
         grid = bestPhysicalGrid(pieceLong, pieceShort, sheet, gutters, allowedRot);
-        if (!grid) throw new Error(`${pieceLong}×${pieceShort}″ does not physically fit on ${sheet.label} at all.`);
+        if (!grid) {
+          const fits = physicalFitOptions(pieceLong, pieceShort, [sheet], gutters, sheetMarginOf(sheet));
+          throw new Error(`${pieceLong}×${pieceShort}″ does not fit on ${sheetWords(sheet)} at all${allowedRot.length === 1 ? " in the forced orientation" : ""}.` + (fits.length ? ` It would as: ${fits.map((t, i) => `(${i + 1}) ${t}`).join("; ")}.` : ""));
+        }
         mismatch = true;
-        warnings.push(`MISMATCH: placing ${grid.a * grid.d}-up but the customer was priced ${priced}-up — sheet count and margin will differ. Review pricing for this size.`);
+        const fits = physicalFitOptions(pieceLong, pieceShort, [sheet], gutters, sheetMarginOf(sheet));
+        warnings.push(`MISMATCH: the calculator priced this ${priced}-up, but ${priced} pieces of ${pieceLong}×${pieceShort}″ do not fit on ${sheetWords(sheet)}${gutters.length === 1 ? ` with a ${gutters[0]}″ gutter` : ""}${allowedRot.length === 1 ? " in the chosen orientation" : ""} — placing ${grid.a * grid.d}-up (${grid.a} × ${grid.d}, ${pieceWords(pieceLong, pieceShort, grid.rotated)}). Sheet count and cost per piece differ from the quote; review pricing for this size.`
+          + (fits.length ? ` The most that fits: ${fits.map((t, i) => `(${i + 1}) ${t}`).join("; ")}.` : ""));
       }
       if (grid.g < gutters[0] && gutters.length > 1) warnings.push(grid.g === 0
         ? `Butt-cut layout (no gutter) needed to honour the priced ${priced}-up — adjacent pieces share cut lines, no inter-piece bleed.`
@@ -927,13 +930,12 @@ function computeSaddleLayout(pw, ph, opts) {
   }
   if (!grid) grid = bestGridForCount(target, spL, spS, sheet, gutters, allowedRot);
   if (!grid) {
-    if (!(opts && opts.allowBestFit)) {
-      throw new Error(`${target} spread(s) of ${spreadW}×${spreadH}″ (pages ${pw}×${ph}″, priced ${imp}/side${source === "custom" ? ", custom size" : ""}) do not physically fit on ${sheet.label}${gutters.length === 1 ? ` with a ${gutters[0]}″ gutter` : ""}${forcedNote}. Pricing/production mismatch — ${forcedNote ? "set Spread orientation back to Auto, or " : ""}enable "allow best physical fit" to place fewer (flagged).`);
-    }
+    // Same rule as the flats (1.61): place the most that fits, flagged — the
+    // priced count is a pricing fact, not a reason to show nothing.
     grid = bestPhysicalGrid(spL, spS, sheet, gutters, allowedRot);
     if (!grid) throw new Error(`A ${spreadW}×${spreadH}″ spread does not fit on ${sheet.label}${forcedNote} at all.`);
     mismatch = true;
-    warnings.push(`MISMATCH: placing ${grid.a * grid.d} spread(s)/side but pricing assumed ${target}${forcedNote}. Review before printing.`);
+    warnings.push(`MISMATCH: ${target} spread(s) of ${spreadW}×${spreadH}″ (pages ${pw}×${ph}″, priced ${imp}/side${source === "custom" ? ", custom size" : ""}) do not fit on ${sheet.label}${gutters.length === 1 ? ` with a ${gutters[0]}″ gutter` : ""}${forcedNote} — placing ${grid.a * grid.d} spread(s)/side. Sheet count differs from the quote; review before printing.`);
   }
 
   const pieceLong = Math.max(spreadW, spreadH), pieceShort = Math.min(spreadW, spreadH);
@@ -5802,6 +5804,23 @@ function App() {
                 <input type="number" step="0.125" min="2" value={trimShort} onChange={e => setTrimShort(e.target.value)} />
               </Field>
             </div>
+            {!isSaddle && !isPB && (() => { const C = sheetCtx(); return (
+              <Field label="Orientation on the sheet">
+                <select value={artRotate} onChange={e => setArtRotate(e.target.value)} data-art-rotate
+                        title="How the piece lies on the press sheet as the sheet lies. The sheet's own dimensions never change — only the piece turns.">
+                  <option value="auto">Auto — whichever way fits more</option>
+                  <option value="0">{`Landscape on sheet — ${C.pL} wide × ${C.pS} tall`}</option>
+                  <option value="90">{`Portrait on sheet — ${C.pS} wide × ${C.pL} tall`}</option>
+                  <option value="180">{`Landscape on sheet, head-down — ${C.pL} wide × ${C.pS} tall`}</option>
+                  <option value="270">{`Portrait on sheet, head-down — ${C.pS} wide × ${C.pL} tall`}</option>
+                </select>
+                {C.tLay && (
+                  <div className="imp-hint">
+                    Piece as placed: <b style={{ color: "rgba(255,255,255,.8)" }}>{C.tLay.cellW} wide × {C.tLay.cellH} tall</b>{C.tLay.rotated ? " (turned 90°)" : ""}{artRotate === "180" || artRotate === "270" ? ", head-down" : ""} · {C.tLay.across} × {C.tLay.down} = {C.tLay.across * C.tLay.down}-up on the {C.tLay.sheet.long} wide × {C.tLay.sheet.short} tall sheet{C.tLay.mismatch ? <span style={{ color: "#fbbf24" }}> · priced {C.tLay.pricedImp}-up — MISMATCH flagged</span> : ""}
+                  </div>
+                )}
+              </Field>
+            ); })()}
             <div className="imp-row">
               <Field label="Sides" style={{ flex: "0 0 auto" }}>
                 {isBook
@@ -5830,18 +5849,6 @@ function App() {
                    options={[{ v: "crop", l: "Crop" }, { v: "fill", l: "Fill" }, { v: "fit", l: "Fit" }]} />
               <div className="imp-hint">{fitWords[artFit] || fitWords.crop}</div>
             </Field>
-            {!isSaddle && !isPB && (
-              <Field label="Rotation on the sheet">
-                <Seg value={artRotate} onChange={setArtRotate} dataAttr="data-art-rotate"
-                     options={[{ v: "auto", l: "Auto", title: `${C.pL} × ${C.pS} or ${C.pS} × ${C.pL}, whichever fits` },
-                               { v: "0", l: "0°", title: `${C.pL} wide × ${C.pS} tall` }, { v: "90", l: "90°", title: `${C.pS} wide × ${C.pL} tall` },
-                               { v: "180", l: "180°", title: `${C.pL} wide × ${C.pS} tall, upside down` }, { v: "270", l: "270°", title: `${C.pS} wide × ${C.pL} tall, upside down` }]} />
-                <div className="imp-hint">
-                  {artRotate === "auto" ? `Auto — ${C.pL} × ${C.pS} or ${C.pS} × ${C.pL}, whichever fits.` : artRotate === "0" ? `${C.pL} wide × ${C.pS} tall.` : artRotate === "90" ? `${C.pS} wide × ${C.pL} tall.` : artRotate === "180" ? `${C.pL} wide × ${C.pS} tall, head-down.` : `${C.pS} wide × ${C.pL} tall, head-down.`}
-                  {C.tLay ? <> Piece as placed: <b style={{ color: "rgba(255,255,255,.8)" }}>{C.tLay.cellW}×{C.tLay.cellH}″</b>{C.tLay.rotated ? " (rotated 90°)" : ""} · {C.tLay.across} × {C.tLay.down} · block {(C.tLay.across * C.tLay.cellW + (C.tLay.colGaps ? C.tLay.colGaps.reduce((a, b) => a + b, 0) : (C.tLay.across - 1) * C.tLay.gutter)).toFixed(2)}×{(C.tLay.down * C.tLay.cellH + (C.tLay.rowGaps ? C.tLay.rowGaps.reduce((a, b) => a + b, 0) : (C.tLay.down - 1) * C.tLay.gutter)).toFixed(2)}″ on the {C.tLay.sheet.long}×{C.tLay.sheet.short}″ sheet.</> : null}
-                </div>
-              </Field>
-            )}
             </>); })()}
             <Check checked={splitSpreads} onChange={setSplitSpreads} label="Split 2-page spreads into single pages"
                    hint="for a file exported as reader spreads (page 1 alone, then 2|3, 4|5 …) — each spread-sized page is cut at its centre line; bound products refuse a spreads file until this is ticked" />
@@ -6054,8 +6061,6 @@ function App() {
               </div>
             )}
 
-            <Check checked={allowBestFit} onChange={setAllowBestFit} label="Allow best physical fit if the priced imp cannot be placed"
-                   hint="the mismatch is flagged on the sheet and in the slug" />
             {(() => {
               // Perfect bound edits ONE HALF at a time. The cover and the book
               // block are different pieces on different stock, so they each
