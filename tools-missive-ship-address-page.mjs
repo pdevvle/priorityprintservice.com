@@ -37,7 +37,7 @@ const use = posts.filter(x => !x.body.check)[0];
 ok(dialogs.length === 1 && /to Shippo's address\?/.test(dialogs[0]) && /12 New Rd, Austin, TX 78701/.test(dialogs[0]) && /\n\n/.test(dialogs[0]), 'Use Shippo\'s address asks first, naming it', dialogs[0]);
 ok(use && use.body.from === 'shippo' && use.body.address.street1 === '12 New Rd' && use.body.address.zip === '78701' && use.body.order === 87551, 'and posts Shippo\'s address to the order, marked as from Shippo', use);
 t = await txt();
-ok(await p.inputValue('input[placeholder="Street"]') === '12 New Rd' && /Saved to the order/.test(t) && !/Shippo has a different address/.test(t) && /Shippo has the same address/.test(t), 'the fields now show it, the page says it was saved, and Shippo is checked again', t.slice(0, 300));
+ok(await p.inputValue('input[placeholder="Street"]') === '12 New Rd' && /Saved to the order/.test(t) && !/Shippo has a different address/.test(t) && /Shippo's order and this order both have: Angela Waggoner, 12 New Rd, Austin, TX 78701/.test(t), 'the fields now show it, the page says it was saved, and Shippo is checked again', t.slice(0, 300));
 // an edit on the page
 await p.fill('input[placeholder="Apt, suite"]', 'Suite 4');
 t = await txt();
