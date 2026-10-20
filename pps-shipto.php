@@ -141,7 +141,8 @@ function pps_st_shippo_status( $order, array $a ) {
                      'street2' => (string) ( $to['street2'] ?? '' ), 'city' => (string) ( $to['city'] ?? '' ), 'state' => (string) ( $to['state'] ?? '' ), 'zip' => (string) ( $to['zip'] ?? '' ) );
     // Same street, city, state and 5-digit ZIP is the same place, whatever Shippo did to the name.
     $place = function ( $x ) { $x['name'] = ''; $x['company'] = ''; return pps_st_hash( $x ); };
-    return array( 'status' => $place( $theirs ) === $place( $a ) ? 'match' : 'stale', 'shippo' => pps_st_line( $theirs ) );
+    $theirs['phone'] = (string) ( $to['phone'] ?? '' );
+    return array( 'status' => $place( $theirs ) === $place( $a ) ? 'match' : 'stale', 'shippo' => pps_st_line( $theirs ), 'addr' => $theirs );
 }
 
 function pps_st_shippo_words( array $s ) {

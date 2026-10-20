@@ -553,6 +553,25 @@ function pps_ms_buy( $order_id, $qid, $option, $again = false ) {
     return array( 'labels' => $made, 'error' => $err ? 'Bought ' . count( $made ) . ' of ' . $n . ', then: ' . $err->get_error_message() : '', 'attached' => $sorder !== '' );
 }
 
+/** The Ship page's address calls: compare with Shippo, or save to the order. */
+function pps_ms_address_call( $order_id, $check, $address, $who, $from ) {
+    $order = function_exists( 'wc_get_order' ) ? wc_get_order( (int) $order_id ) : null;
+    if ( ! $order ) return new WP_Error( 'order', 'No such order.' );
+    if ( ! function_exists( 'pps_st_change' ) || ! function_exists( 'pps_st_shippo_status' ) ) return new WP_Error( 'shipto', 'The ship-to file (pps-shipto.php) is not loaded.' );
+    if ( $check ) {
+        $s = pps_st_shippo_status( $order, pps_st_from_order( $order ) );
+        return array( 'shippo' => $s['status'], 'shippo_line' => $s['shippo'], 'shippo_addr' => $s['addr'] ?? null );
+    }
+    if ( ! get_option( defined( 'PPS_ST_ALLOW_OPTION' ) ? PPS_ST_ALLOW_OPTION : 'pps_missive_allow_address', 1 ) )
+        return new WP_Error( 'off', 'Changing the ship-to from the panel is switched off (PPS Calculators → Missive Panel). Change it on the order screen.' );
+    $who = mb_substr( sanitize_text_field( $who ), 0, 60 );
+    $r = pps_st_change( $order, (array) $address, ( $who !== '' ? $who : 'someone' ) . ( $from === 'shippo' ? ' (Ship page, from Shippo\'s address)' : ' (Ship page)' ) );
+    if ( is_wp_error( $r ) ) return $r;
+    delete_transient( 'pps_ms_q_' . (int) $order_id );
+    $v = pps_ms_view( $order );
+    return array( 'to' => $v['to'], 'last' => is_array( $r ) ? $r : null, 'shippo_words' => is_array( $r ) && isset( $r['shippo'] ) ? pps_st_shippo_words( $r['shippo'] ) : '' );
+}
+
 /* ── Endpoints ────────────────────────────────────────────────────────────── */
 
 add_action( 'rest_api_init', function () {
@@ -566,6 +585,17 @@ add_action( 'rest_api_init', function () {
         'methods' => 'POST', 'permission_callback' => $ok,
         'callback' => function ( $req ) use ( $out ) { return $out( pps_ms_rates( (int) $req->get_param( 'order' ), $req->get_param( 'to' ), $req->get_param( 'boxes' ), (string) $req->get_param( 'ship_date' ), $req->get_param( 'extra' ) ) ); },
     ) );
+    /* Owner, 2026-10-20: "if I go into shippo and change an order's shipping address, it doesn't
+     * transfer to the shipping panel. If I change the shipping address in the missive integration
+     * it doesn't preserve it past the screen." Shippo cannot tell the site (its sync only reads
+     * WooCommerce), and the Ship page's fields only shaped the quote. This lets the page compare
+     * the order with Shippo's copy (check), and save an address — its own edit, or Shippo's — to
+     * the WooCommerce order, which pps_st_change() carries to the tickets, subtasks and
+     * conversations as the order card's "Ship to → Change" does. */
+    register_rest_route( 'pps/v1', '/missive/ship/address', array(
+        'methods' => 'POST', 'permission_callback' => $ok,
+        'callback' => function ( $req ) use ( $out ) { return $out( pps_ms_address_call( (int) $req->get_param( 'order' ), $req->get_param( 'check' ), $req->get_param( 'address' ), (string) $req->get_param( 'who' ), (string) $req->get_param( 'from' ) ) ); },
+    ) );
     register_rest_route( 'pps/v1', '/missive/ship/buy', array(
         'methods' => 'POST', 'permission_callback' => $ok,
         'callback' => function ( $req ) use ( $out ) { return $out( pps_ms_buy( (int) $req->get_param( 'order' ), (string) $req->get_param( 'quote' ), (string) $req->get_param( 'option' ), (bool) $req->get_param( 'again' ) ) ); },
@@ -574,10 +604,11 @@ add_action( 'rest_api_init', function () {
 
 /* ── The page ─────────────────────────────────────────────────────────────── */
 
-function pps_ms_page_html( $order, $rates_api, $buy_api ) {
+function pps_ms_page_html( $order, $rates_api, $buy_api, $address_api = '' ) {
     $s = pps_ms_settings();
     $cfg = wp_json_encode( array(
         'order' => (int) $order->get_id(), 'token' => pps_ms_token( $order->get_id() ), 'rates' => $rates_api, 'buy' => $buy_api,
+        'address' => function_exists( 'pps_st_change' ) ? $address_api : '', 'canSave' => (bool) get_option( defined( 'PPS_ST_ALLOW_OPTION' ) ? PPS_ST_ALLOW_OPTION : 'pps_missive_allow_address', 1 ),
         'view' => pps_ms_view( $order ), 'from' => $s['from'], 'ret' => $s['return'], 'canBuy' => $s['allow_buy'], 'hasKey' => pps_ms_shippo_key() !== '',
         'signatures' => pps_ms_signatures(), 'maxBoxes' => PPS_MS_MAX_BOXES,
     ), JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES );
@@ -608,6 +639,28 @@ button{font:inherit;font-size:12px;padding:3px 9px;cursor:pointer} button.go{bac
 var CFG = {$cfg};
 var V = CFG.view, app = document.getElementById('app');
 var ST = { to: JSON.parse(JSON.stringify(V.to)), boxes: JSON.parse(JSON.stringify(V.suggest)), ship: V.today, extra: { signature: '', insure: '' }, quote: null, sel: '', sort: 'price', carrier: '', busy: false, err: '', done: null };
+var AD = { shippo: null, busy: false, msg: '', bad: false, who: '' };
+try { AD.who = localStorage.getItem('pps_ship_who') || ''; } catch(e) {}
+var KEYS = ['name','company','street1','street2','city','state','zip'];
+function norm(a){ return KEYS.map(function(k){ var v=String((a&&a[k])||'').toLowerCase().replace(/[^a-z0-9]/g,''); return k==='zip'?v.slice(0,5):v; }).join('|'); }
+function place(a){ return norm({street1:a.street1,street2:a.street2,city:a.city,state:a.state,zip:a.zip}); }
+function line(a){ return [a.name,a.company,a.street1,a.street2,(a.city||'')+', '+(a.state||'')+' '+(a.zip||'')].filter(Boolean).join(', '); }
+function dirty(){ return norm(ST.to)!==norm(V.to) || String(ST.to.phone||'')!==String(V.to.phone||''); }
+function checkShippo(){
+  if(!CFG.address) return;
+  post(CFG.address,{order:CFG.order,check:1}).then(function(d){ if(d.ok){ AD.shippo=d; render(); } }).catch(function(){});
+}
+function saveAddress(addr, from, then){
+  if(!CFG.canSave){ AD.msg='Changing the ship-to from the panel is switched off (PPS Calculators → Missive Panel).'; AD.bad=true; render(); return; }
+  AD.busy=true; AD.msg=''; render();
+  post(CFG.address,{order:CFG.order,address:addr,who:AD.who,from:from||''}).then(function(d){
+    AD.busy=false;
+    if(!d.ok){ AD.bad=true; AD.msg=d.error||'Could not save the address.'; render(); return; }
+    V.to = d.to; ST.to = JSON.parse(JSON.stringify(d.to)); stale(); AD.bad=false;
+    AD.msg='Saved to the order — Job Tickets, subtasks and the conversation follow.'+(d.shippo_words?' '+d.shippo_words:'');
+    AD.shippo=null; checkShippo(); render(); if(then) then();
+  }).catch(function(e){ AD.busy=false; AD.bad=true; AD.msg='Could not reach the site — the address was not saved. '+e.message; render(); });
+}
 function boxCount(){ return ST.boxes.reduce(function(n,b){ return n + Math.max(1, parseInt(b.count,10)||1); }, 0); }
 function stale(){ ST.quote=null; ST.sel=''; }
 
@@ -624,7 +677,7 @@ function post(url, body){
   return fetch(url,{method:'POST',headers:{'X-PPS-Ship-Token':CFG.token,'Content-Type':'application/json'},credentials:'omit',cache:'no-store',body:JSON.stringify(body)})
     .then(function(r){ if(!r.ok) throw new Error('The site answered '+r.status+'.'); return r.json(); });
 }
-function field(obj, k, ph, cls){ var i=el('input',{placeholder:ph,input:function(){ obj[k]=i.value; ST.quote=null; ST.sel=''; }}); i.value=obj[k]||''; var w=el('div',{cls:cls||''},[i]); i.style.width='100%'; return w; }
+function field(obj, k, ph, cls){ var i=el('input',{placeholder:ph,input:function(){ obj[k]=i.value; ST.quote=null; ST.sel=''; syncSave(); }}); i.value=obj[k]||''; var w=el('div',{cls:cls||''},[i]); i.style.width='100%'; return w; }
 
 function getRates(){
   ST.busy=true; ST.err=''; ST.quote=null; ST.sel=''; render();
@@ -634,6 +687,13 @@ function getRates(){
 }
 function buy(again){
   var o = ST.quote.options.filter(function(x){ return x.id===ST.sel; })[0]; if(!o) return;
+  if(!again && CFG.address && CFG.canSave && dirty() && !ST.askedSave){
+    ST.askedSave = true;
+    if(confirm('You changed the address on this page but it is not saved to the order.\\n\\nOK: save it to the order first (tickets, subtasks and the conversation follow), then get rates again\\nCancel: buy to this address without saving it')){
+      var x=ST.to; saveAddress({name:x.name,company:x.company,street1:x.street1,street2:x.street2,city:x.city,state:x.state,zip:x.zip,phone:x.phone}, '', function(){ ST.askedSave=false; getRates(); });
+      return;
+    }
+  }
   var t = ST.to, n = ST.quote.boxes;
   var x = ST.quote.extra || {};
   var msg = 'Buy '+n+' label'+(n===1?'':'s')+' for order #'+CFG.order+'?\\n\\n'+o.carrier+' '+o.service+' — '+money(o.amount)+(n>1?' ('+n+' labels)':'')+
@@ -671,12 +731,45 @@ function shipped(){
   return c;
 }
 
+var SAVEBAR = null;
+function syncSave(){ if(SAVEBAR) SAVEBAR.style.display = dirty() ? '' : 'none'; }
 function addressCard(){
   var c = el('div',{cls:'card'}), t = ST.to;
   c.appendChild(el('h3',{text:'Ship to'+(V.to.source==='billing'?' (from the billing address — the order has no shipping address)':''),style:'margin-top:0'}));
+  // Shippo's copy of the order disagrees with the order: show it, and offer to take it.
+  var sh = AD.shippo;
+  if(sh && sh.shippo==='stale' && sh.shippo_addr && place(sh.shippo_addr)!==place(V.to)){
+    var mm = el('div',{cls:'card warn small',style:'background:rgba(245,158,11,.10)'});
+    mm.appendChild(el('div',{},[el('b',{text:'Shippo has a different address for this order.'})]));
+    mm.appendChild(el('div',{text:'Shippo: '+line(sh.shippo_addr)}));
+    mm.appendChild(el('div',{text:'Order: '+line(V.to)}));
+    if(CFG.canSave){
+      var use = el('button',{cls:'go',text:'Use Shippo\'s address',title:'Save Shippo\'s address to the WooCommerce order; the Job Tickets, subtasks and the Missive conversation follow'});
+      if(AD.busy) use.disabled=true;
+      use.addEventListener('click',function(){
+        var a = sh.shippo_addr;
+        if(!confirm('Change the ship-to for order #'+CFG.order+' to Shippo\'s address?\\n\\n'+line(a)+'\\n\\nThe order, its Job Tickets and subtasks follow, and a note is posted in its conversation. The delivery date is not re-quoted.')) return;
+        saveAddress({name:a.name,company:a.company,street1:a.street1,street2:a.street2,city:a.city,state:a.state,zip:a.zip,phone:a.phone||V.to.phone||''}, 'shippo');
+      });
+      mm.appendChild(el('div',{style:'margin-top:4px'},[use, el('span',{cls:'muted',text:' or keep the order\'s and correct it in Shippo'})]));
+    }
+    c.appendChild(mm);
+  } else if(sh && sh.shippo==='match') c.appendChild(el('div',{cls:'ok small',text:'✓ Shippo has the same address.'}));
+  if(AD.msg) c.appendChild(el('div',{cls:(AD.bad?'err':'ok')+' small',text:AD.msg}));
   var g = el('div',{cls:'grid'});
   [['name','Name','w'],['company','Company','w'],['street1','Street','w'],['street2','Apt, suite','w'],['city','City'],['state','State'],['zip','ZIP'],['phone','Phone']].forEach(function(f){ g.appendChild(field(t,f[0],f[1],f[2])); });
   c.appendChild(g);
+  // An edit here only shapes the quote until it is saved to the order.
+  if(CFG.address){
+    var who = el('input',{placeholder:'Your name',input:function(){ AD.who=who.value; try{ localStorage.setItem('pps_ship_who', who.value); }catch(e){} }}); who.value=AD.who; who.style.width='110px';
+    var sv = el('button',{cls:'go',text:AD.busy?'Saving…':'Save to the order'}); if(AD.busy||!CFG.canSave) sv.disabled=true;
+    sv.addEventListener('click',function(){ var x=ST.to; saveAddress({name:x.name,company:x.company,street1:x.street1,street2:x.street2,city:x.city,state:x.state,zip:x.zip,phone:x.phone}, ''); });
+    SAVEBAR = el('div',{cls:'small',style:'margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap'},[
+      el('span',{cls:'warn',text:'Edited here only — not saved to the order.'}), who, sv,
+      el('a',{text:'undo',on:function(){ ST.to=JSON.parse(JSON.stringify(V.to)); stale(); render(); }}) ]);
+    if(!CFG.canSave) SAVEBAR.appendChild(el('span',{cls:'muted',text:'(saving is switched off on the Missive Panel screen)'}));
+    c.appendChild(SAVEBAR); syncSave();
+  }
   var f = CFG.from;
   c.appendChild(el('div',{cls:'muted small',style:'margin-top:6px',text:'From: '+[f.company||f.name, f.street1, f.city+', '+f.state+' '+f.zip].filter(Boolean).join(', ')+(f.phone?' · '+f.phone:'')}));
   var rt = CFG.ret;
@@ -776,6 +869,7 @@ function render(){
   [header(), shipped(), doneCard(), ST.err?el('div',{cls:'err',text:ST.err}):null, addressCard(), boxCard(), ratesCard()].forEach(function(x){ if(x) app.appendChild(x); });
 }
 render();
+checkShippo();
 })();
 </script></body></html>
 HTML;
@@ -792,7 +886,7 @@ add_action( 'wp_loaded', function () {
     if ( ! $order ) $deny( 'No such order.' );
     header( 'Content-Type: text/html; charset=UTF-8' );
     header( 'Referrer-Policy: no-referrer' );
-    echo pps_ms_page_html( $order, rest_url( 'pps/v1/missive/ship/rates' ), rest_url( 'pps/v1/missive/ship/buy' ) );
+    echo pps_ms_page_html( $order, rest_url( 'pps/v1/missive/ship/rates' ), rest_url( 'pps/v1/missive/ship/buy' ), rest_url( 'pps/v1/missive/ship/address' ) );
     exit;
 } );
 

@@ -307,5 +307,36 @@ $res = json_decode( (string) substr( (string) $out, (int) strpos( (string) $out,
 if ( ! is_array( $res ) ) { ok( false, 'the browser run reports', $out ); }
 else foreach ( $res['checks'] as $c ) ok( $c[0], 'page: ' . $c[1], $c[2] ?? null );
 
+
+// ── the Ship page's address tools (owner 2026-10-20) ──
+$r = pps_ms_address_call( 87551, 1, null, '', '' );
+ok( is_wp_error( $r ) && strpos( $r->get_error_message(), 'pps-shipto.php' ) !== false, 'without the ship-to file the address call says so' );
+$GLOBALS['stc'] = array();
+if ( ! function_exists( 'sanitize_text_field' ) ) { function sanitize_text_field( $s ) { return trim( strip_tags( (string) $s ) ); } }
+if ( true ) {
+    function pps_st_from_order( $o ) { return array( 'street1' => 'x' ); }
+    function pps_st_shippo_status( $o, $a ) { return array( 'status' => 'stale', 'shippo' => '12 New Rd, Austin TX 78701', 'addr' => array( 'street1' => '12 New Rd', 'city' => 'Austin', 'state' => 'TX', 'zip' => '78701' ) ); }
+    function pps_st_shippo_words( $s ) { return 'Shippo words.'; }
+    function pps_st_change( $o, $a, $who ) { $GLOBALS['stc'][] = array( $a, $who ); return array( 'at' => 'now', 'shippo' => array( 'status' => 'match' ) ); }
+}
+$r = pps_ms_address_call( 87551, 1, null, '', '' );
+ok( $r['shippo'] === 'stale' && $r['shippo_addr']['street1'] === '12 New Rd', 'a check answers with Shippo\'s own address when it differs', $r );
+$GLOBALS['tr']['pps_ms_q_87551'] = array( 'held' );
+$r = pps_ms_address_call( 87551, 0, array( 'street1' => '12 New Rd' ), 'Pat', 'shippo' );
+ok( ! is_wp_error( $r ) && $GLOBALS['stc'][0][1] === "Pat (Ship page, from Shippo's address)" && $r['shippo_words'] === 'Shippo words.' && isset( $r['to'] ), 'a save goes through the ship-to change (which the tickets, subtasks and conversations follow), naming who and from where', $GLOBALS['stc'] );
+ok( ! isset( $GLOBALS['tr']['pps_ms_q_87551'] ), 'and drops the held quote, so no label is bought to the old address' );
+$GLOBALS['opts']['pps_missive_allow_address'] = 0;
+$r = pps_ms_address_call( 87551, 0, array( 'street1' => 'y' ), '', '' );
+ok( is_wp_error( $r ) && strpos( $r->get_error_message(), 'switched off' ) !== false && count( $GLOBALS['stc'] ) === 1, 'with the panel\'s ship-to switch off, nothing is saved' );
+unset( $GLOBALS['opts']['pps_missive_allow_address'] );
+ok( strpos( $src_ms, "register_rest_route( 'pps/v1', '/missive/ship/address', array(\n        'methods' => 'POST', 'permission_callback' => \$ok," ) !== false, 'the address endpoint takes the same order-scoped token as rates and buy' );
+$tmp = sys_get_temp_dir() . '/pps-msa-' . getmypid() . '.html';
+file_put_contents( $tmp, pps_ms_page_html( $GLOBALS['orders'][87551], 'https://site.test/rates', 'https://site.test/buy', 'https://site.test/address' ) );
+$out = shell_exec( 'node ' . escapeshellarg( __DIR__ . '/tools-missive-ship-address-page.mjs' ) . ' ' . escapeshellarg( $tmp ) . ' 2>&1' );
+@unlink( $tmp );
+$res = json_decode( (string) substr( (string) $out, (int) strpos( (string) $out, '{' ) ), true );
+if ( ! is_array( $res ) ) { ok( false, 'the address browser run reports', $out ); }
+else foreach ( $res['checks'] as $c ) ok( $c[0], 'address page: ' . $c[1], $c[2] ?? null );
+
 echo $fail ? ">>> $fail of $n checks FAILED\n" : ">>> MISSIVE SHIP OK ($n checks)\n";
 exit( $fail ? 1 : 0 );
