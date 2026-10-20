@@ -439,8 +439,19 @@ function pps_an_labels( $refresh = false ) {
 }
 
 /** The labels section of the screen. $L is pps_an_labels(). */
+function pps_an_labels_title() {
+    return 'Shipping labels bought, per day <span class="description">(last ' . (int) PPS_AN_LABEL_DAYS . ' days, every label on the Shippo account)</span>';
+}
+
+/** The labels section, whole (folded like the others). $L is pps_an_labels(). */
 function pps_an_labels_output( array $L ) {
-    echo '<div class="card"><h2>Shipping labels bought, per day <span class="description">(last ' . (int) $L['days'] . ' days, every label on the Shippo account)</span></h2>';
+    echo '<details class="card" data-sec="labels"><summary><h2>' . pps_an_labels_title() . '</h2></summary>';
+    pps_an_labels_body( $L );
+    echo '</details>';
+}
+
+/** What is inside the labels fold — also what the fold fetches when it is opened. */
+function pps_an_labels_body( array $L ) {
     if ( $L['error'] !== '' ) echo '<p class="late">Shippo could not be read: ' . esc_html( $L['error'] ) . '</p>';
     $by = array();
     foreach ( $L['list'] as $l ) $by[ $l['day'] ][] = $l;
@@ -478,10 +489,18 @@ function pps_an_labels_output( array $L ) {
         $first = false;
     }
     if ( $L['pending'] ) echo '<p class="description">Carrier, service and postage are still being looked up for ' . (int) $L['pending'] . ' label' . ( $L['pending'] === 1 ? '' : 's' ) . ' — they fill in on the next refresh.</p>';
-    echo '<p class="description">Read from Shippo ' . esc_html( $L['built_at'] ) . ' (kept 10 minutes). Refunded labels are listed but not counted.</p></div>';
+    echo '<p class="description">Read from Shippo ' . esc_html( $L['built_at'] ) . ' (kept 10 minutes). Refunded labels are listed but not counted.</p>';
 }
 
 /* ── Screen ─────────────────────────────────────────────────── */
+
+add_action( 'wp_ajax_pps_an_labels', function () {
+    if ( ! current_user_can( 'manage_woocommerce' ) || ! check_ajax_referer( 'pps_an_labels', '_wpnonce', false ) ) { status_header( 403 ); echo 'Not allowed — reload the page.'; exit; }
+    nocache_headers(); header( 'Content-Type: text/html; charset=UTF-8' );
+    try { pps_an_labels_body( pps_an_labels( ! empty( $_GET['refresh'] ) ) ); }
+    catch ( \Throwable $e ) { echo '<p class="late">The labels could not be read: ' . esc_html( $e->getMessage() ) . '</p>'; }
+    exit;
+} );
 
 add_action( 'admin_menu', function () {
     add_submenu_page( 'pps-calculators', 'Production Analytics', '📊 Production Analytics', 'manage_woocommerce', 'pps-analytics', 'pps_an_render' );
@@ -494,7 +513,7 @@ function pps_an_render() {
     $days    = (int) ( $_GET['days'] ?? 90 );
     $refresh = ! empty( $_GET['refresh'] ) && check_admin_referer( 'pps_an_refresh' );
     $d   = pps_an_get( $days, $refresh );
-    $d['labels'] = pps_an_labels( $refresh );
+    $d['labels_url'] = add_query_arg( array( 'action' => 'pps_an_labels', '_wpnonce' => wp_create_nonce( 'pps_an_labels' ), 'refresh' => $refresh ? 1 : 0 ), admin_url( 'admin-ajax.php' ) );
     $url = admin_url( 'admin.php?page=pps-analytics' );
     echo '<div class="wrap pps-an"><h1>📊 Production Analytics</h1>';
     pps_an_output( $d, function ( $n ) use ( $url ) { return add_query_arg( 'days', $n, $url ); },
@@ -514,11 +533,11 @@ function pps_an_output( array $d, $days_url, $refresh_url ) {
     $n_weeks = max( 1, count( $wk ) );
     $cost = $t['paper'] + $t['color'];
     $done_with_date = $t['on_time'] + $t['late'];
-    echo '<style>.pps-an .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin:12px 0}.pps-an .tile{background:#fff;border:1px solid #dcdcde;border-radius:6px;padding:10px 12px}.pps-an .tile b{display:block;font-size:22px;line-height:1.3}.pps-an .tile span{color:#646970;font-size:12px}.pps-an .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:14px}.pps-an .card{background:#fff;border:1px solid #dcdcde;border-radius:6px;padding:12px 14px;margin-bottom:14px}.pps-an .card h2{margin:0 0 8px;font-size:15px}.pps-an table.widefat td,.pps-an table.widefat th{padding:5px 8px}.pps-an .late{color:#b32d2e}.pps-an .chips a{margin-right:6px}</style>';
+    echo '<style>.pps-an .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin:12px 0}.pps-an .tile{background:#fff;border:1px solid #dcdcde;border-radius:6px;padding:10px 12px}.pps-an .tile b{display:block;font-size:22px;line-height:1.3}.pps-an .tile span{color:#646970;font-size:12px}.pps-an .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:14px}.pps-an .card{background:#fff;border:1px solid #dcdcde;border-radius:6px;padding:12px 14px;margin-bottom:14px}.pps-an .card h2{margin:0 0 8px;font-size:15px}.pps-an table.widefat td,.pps-an table.widefat th{padding:5px 8px}.pps-an .late{color:#b32d2e}.pps-an .chips a{margin-right:6px}.pps-an details.card>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px}.pps-an details.card>summary::-webkit-details-marker{display:none}.pps-an details.card>summary:before{content:"\\25B8";color:#646970;font-size:12px}.pps-an details.card[open]>summary:before{content:"\\25BE"}.pps-an details.card>summary h2{margin:0;display:inline}.pps-an details.card[open]>summary{margin-bottom:8px}.pps-an details.card{align-self:start}</style>';
     echo '<p class="chips">Window: ';
     foreach ( array( 30, 90, 180, 365 ) as $n ) echo $n === (int) $d['days'] ? '<strong>' . $n . ' days</strong> ' : '<a href="' . esc_url( $days_url( $n ) ) . '">' . $n . ' days</a> ';
     echo ' · ' . esc_html( gmdate( 'M j, Y', strtotime( $d['from'] ) ) ) . ' – ' . esc_html( gmdate( 'M j, Y', strtotime( $d['today'] ) ) );
-    echo ' · built ' . esc_html( $d['built_at'] ) . ' <a class="button button-small" href="' . esc_url( $refresh_url ) . '">Refresh</a></p>';
+    echo ' · built ' . esc_html( $d['built_at'] ) . ' <a class="button button-small" href="' . esc_url( $refresh_url ) . '">Refresh</a> <button type="button" class="button button-small" data-pps-an-all="1">Open all</button> <button type="button" class="button button-small" data-pps-an-all="0">Close all</button></p>';
 
     $tile = function ( $v, $l, $cls = '' ) { return '<div class="tile"><b class="' . $cls . '">' . $v . '</b><span>' . $l . '</span></div>'; };
     $pl = function ( $n, $w ) { return number_format( $n ) . ' ' . $w . ( (int) $n === 1 ? '' : 's' ); };
@@ -537,24 +556,24 @@ function pps_an_output( array $d, $days_url, $refresh_url ) {
 
     $money = function ( $v ) { return '$' . number_format( $v ); };
     echo '<div class="grid2">';
-    echo '<div class="card"><h2>Orders received vs fulfilled, per week</h2>' . pps_an_svg_bars( $labels, array( array( 'Received', '#2271b1', $col( 'received' ) ), array( 'Fulfilled', '#00a32a', $col( 'done' ) ) ) ) . '</div>';
-    echo '<div class="card"><h2>Press sheets printed (est.), per week</h2>' . pps_an_svg_bars( $labels, array( array( 'Sheets', '#8c5fbf', $col( 'sheets' ) ) ) ) . '</div>';
-    echo '<div class="card"><h2>Paper + colour cost (est.), per week</h2>' . pps_an_svg_bars( $labels, array( array( 'Paper', '#dba617', $col( 'paper' ) ), array( 'Colour', '#d63638', $col( 'color' ) ) ), true, $money ) . '</div>';
-    echo '<div class="card"><h2>Revenue received, per week</h2>' . pps_an_svg_bars( $labels, array( array( 'Revenue', '#135e96', $col( 'revenue' ) ) ), false, $money ) . '</div>';
-    echo '<div class="card"><h2>Fulfilled on time vs late, per week</h2>' . pps_an_svg_bars( $labels, array( array( 'On time', '#00a32a', $col( 'on_time' ) ), array( 'Late', '#d63638', $col( 'late' ) ) ), true ) . '</div>';
+    echo '<details class="card" data-sec="received"><summary><h2>Orders received vs fulfilled, per week</h2></summary>' . pps_an_svg_bars( $labels, array( array( 'Received', '#2271b1', $col( 'received' ) ), array( 'Fulfilled', '#00a32a', $col( 'done' ) ) ) ) . '</details>';
+    echo '<details class="card" data-sec="sheets"><summary><h2>Press sheets printed (est.), per week</h2></summary>' . pps_an_svg_bars( $labels, array( array( 'Sheets', '#8c5fbf', $col( 'sheets' ) ) ) ) . '</details>';
+    echo '<details class="card" data-sec="cost"><summary><h2>Paper + colour cost (est.), per week</h2></summary>' . pps_an_svg_bars( $labels, array( array( 'Paper', '#dba617', $col( 'paper' ) ), array( 'Colour', '#d63638', $col( 'color' ) ) ), true, $money ) . '</details>';
+    echo '<details class="card" data-sec="revenue"><summary><h2>Revenue received, per week</h2></summary>' . pps_an_svg_bars( $labels, array( array( 'Revenue', '#135e96', $col( 'revenue' ) ) ), false, $money ) . '</details>';
+    echo '<details class="card" data-sec="ontime"><summary><h2>Fulfilled on time vs late, per week</h2></summary>' . pps_an_svg_bars( $labels, array( array( 'On time', '#00a32a', $col( 'on_time' ) ), array( 'Late', '#d63638', $col( 'late' ) ) ), true ) . '</details>';
     $hl = array(); $hv = array();
     for ( $i = 0; $i <= 15; $i++ ) { $hl[] = $i === 15 ? '15+' : (string) $i; $hv[] = (int) ( $d['turn']['hist'][ $i ] ?? 0 ); }
-    echo '<div class="card"><h2>Turnaround: business days from payment to fulfilment</h2>' . pps_an_svg_bars( $hl, array( array( 'Orders', '#2271b1', $hv ) ) ) . '</div>';
+    echo '<details class="card" data-sec="turnaround"><summary><h2>Turnaround: business days from payment to fulfilment</h2></summary>' . pps_an_svg_bars( $hl, array( array( 'Orders', '#2271b1', $hv ) ) ) . '</details>';
     echo '</div>';
 
-    echo '<div class="grid2"><div class="card"><h2>By product</h2><table class="widefat striped"><thead><tr><th>Product</th><th>Jobs received</th><th>Revenue</th><th>Sheets printed (est.)</th></tr></thead><tbody>';
+    echo '<div class="grid2"><details class="card" data-sec="products"><summary><h2>By product</h2></summary><table class="widefat striped"><thead><tr><th>Product</th><th>Jobs received</th><th>Revenue</th><th>Sheets printed (est.)</th></tr></thead><tbody>';
     if ( ! $d['products'] ) echo '<tr><td colspan="4">None in this window.</td></tr>';
     foreach ( $d['products'] as $k => $p ) echo '<tr><td>' . esc_html( ucwords( str_replace( array( '-', '_' ), ' ', $k ) ) ) . '</td><td>' . number_format( $p['jobs'] ) . '</td><td>' . pps_an_money( $p['revenue'] ) . '</td><td>' . number_format( $p['sheets'] ) . '</td></tr>';
     echo '</tbody></table>';
     if ( $d['sheet_sizes'] ) { echo '<p>Press sheets by size: '; $bits = array(); foreach ( $d['sheet_sizes'] as $sz => $n ) $bits[] = esc_html( str_replace( 'x', '×', $sz ) ) . ' ' . number_format( $n ); echo implode( ' · ', $bits ) . '</p>'; }
-    echo '</div>';
+    echo '</details>';
 
-    echo '<div class="card"><h2>Late shipments in this window</h2>';
+    echo '<details class="card" data-sec="late"><summary><h2>Late shipments in this window' . ( $d['late'] || $op['late'] ? ' <span class="late">(' . ( count( $d['late'] ) + count( $op['late'] ) ) . ')</span>' : '' ) . '</h2></summary>';
     if ( ! $d['late'] ) echo '<p>None — every fulfilled order with a must-ship date went out on time.</p>';
     else {
         echo '<table class="widefat striped"><thead><tr><th>Order</th><th>Customer</th><th>Must ship</th><th>Fulfilled</th><th>Late by</th></tr></thead><tbody>';
@@ -566,18 +585,37 @@ function pps_an_output( array $d, $days_url, $refresh_url ) {
         foreach ( array_slice( $op['late'], 0, 15 ) as $l ) echo '<tr><td><a href="' . esc_url( $l['url'] ) . '">#' . (int) $l['order'] . '</a></td><td>' . esc_html( $l['customer'] ) . '</td><td>must ship ' . esc_html( $l['must'] ) . '</td><td class="late">' . (int) $l['days'] . ' business day' . ( $l['days'] === 1 ? '' : 's' ) . ' late</td></tr>';
         echo '</tbody></table>';
     }
-    echo '</div></div>';
+    echo '</details></div>';
 
-    if ( isset( $d['labels'] ) && is_array( $d['labels'] ) ) pps_an_labels_output( $d['labels'] );
+    if ( ! empty( $d['labels_url'] ) ) {
+        echo '<details class="card" data-sec="labels" data-lazy="' . esc_attr( $d['labels_url'] ) . '"><summary><h2>' . pps_an_labels_title() . '</h2></summary><div class="pps-an-lazy description">Loading from Shippo…</div></details>';
+    } elseif ( isset( $d['labels'] ) && is_array( $d['labels'] ) ) pps_an_labels_output( $d['labels'] );
 
-    echo '<div class="card"><h2>How these are estimated</h2><ul style="list-style:disc;margin-left:20px">';
+    echo '<details class="card" data-sec="how"><summary><h2>How these are estimated</h2></summary><ul style="list-style:disc;margin-left:20px">';
     echo '<li><b>Fulfilled</b> = the order reached Completed in the window (Shippo completes an order when its label is bought), so the completed date stands in for the ship date. <b>On time</b> = completed on or before the job\'s must-ship date; ' . (int) $t['no_date'] . ' fulfilled order' . ( $t['no_date'] === 1 ? '' : 's' ) . ' had no must-ship date (custom orders) and ' . ( $t['no_date'] === 1 ? 'is' : 'are' ) . ' left out of that rate.</li>';
     echo '<li><b>Sheets</b> are press sheets as the Paper Order counts them (the yield each job was priced on, or the saved paper plan for a custom line), without overs.';
     if ( $t['uncounted'] ) echo ' <span class="late">' . count( $t['uncounted'] ) . ' fulfilled custom line' . ( count( $t['uncounted'] ) === 1 ? '' : 's' ) . ' had no paper plan and ' . ( count( $t['uncounted'] ) === 1 ? 'is' : 'are' ) . ' not counted</span> (orders ' . esc_html( implode( ', ', array_unique( array_map( function ( $u ) { return '#' . $u['order']; }, array_slice( $t['uncounted'], 0, 12 ) ) ) ) ) . ( count( $t['uncounted'] ) > 12 ? ', …' : '' ) . ').';
     echo '</li><li><b>Cost</b> is paper + colour only: each sheet\'s paper price plus clicks per printed side at the configured black (' . esc_html( '$' . rtrim( rtrim( number_format( $d['rates']['black'], 4 ), '0' ), '.' ) ) . ') and colour (' . esc_html( '$' . rtrim( rtrim( number_format( $d['rates']['color'], 4 ), '0' ), '.' ) ) . ') click rates — the calculators\' own material figures. No labour, finishing or shipping.';
     if ( $t['assumed'] ) echo ' ' . (int) $t['assumed'] . ' custom line' . ( $t['assumed'] === 1 ? '' : 's' ) . ' (colour not recorded) costed as full colour both sides.';
     if ( $t['unpriced'] ) echo ' <span class="late">' . (int) $t['unpriced'] . ' job' . ( $t['unpriced'] === 1 ? '' : 's' ) . ' used a paper with no price on file; their paper cost is missing.</span>';
-    echo '</li><li><b>Revenue</b> = order totals as paid, by the week paid. Received and fulfilled weeks are Monday–Sunday.</li></ul></div>';
+    echo '</li><li><b>Revenue</b> = order totals as paid, by the week paid. Received and fulfilled weeks are Monday–Sunday.</li></ul></details>';
+    echo '<script>' . pps_an_script() . '</script>';
+}
+
+/**
+ * Owner, 2026-10-20: "make all headers collapsable which is on by default" — every section is
+ * folded when the page opens; the tiles stay. The labels fold is the slow one (it reads
+ * Shippo), so it is fetched only when it is first opened (`data-lazy`). Nothing is remembered:
+ * every visit starts folded.
+ */
+function pps_an_script() {
+    return '(function(){var root=document.querySelector(".pps-an");if(!root)return;'
+         . 'function load(d){var u=d.getAttribute("data-lazy");if(!u||d.getAttribute("data-loaded"))return;d.setAttribute("data-loaded","1");var b=d.querySelector(".pps-an-lazy");'
+         . 'fetch(u,{credentials:"same-origin"}).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.text();}).then(function(h){b.className="";b.innerHTML=h;})'
+         . '.catch(function(e){d.removeAttribute("data-loaded");b.textContent="Could not load ("+e.message+"). Close and open again to retry.";});}'
+         . 'root.querySelectorAll("details[data-sec]").forEach(function(d){d.addEventListener("toggle",function(){if(d.open)load(d);});});'
+         . 'root.addEventListener("click",function(e){var b=e.target.closest&&e.target.closest("[data-pps-an-all]");if(!b)return;var on=b.getAttribute("data-pps-an-all")==="1";'
+         . 'root.querySelectorAll("details[data-sec]").forEach(function(d){d.open=on;});});})();';
 }
 
 /* ── The same screen inside the Missive panel ───────────────────
@@ -612,7 +650,13 @@ add_action( 'wp_loaded', function () {
     if ( ! function_exists( 'pps_mp_key_ok' ) || ! pps_mp_key_ok( $k ) ) { status_header( 403 ); header( 'Content-Type: text/plain; charset=UTF-8' ); echo 'This link is not valid. Open analytics from the Missive panel.'; exit; }
     $refresh = ! empty( $_GET['refresh'] ) && ! get_transient( 'pps_an_frame_refresh' );
     if ( $refresh ) set_transient( 'pps_an_frame_refresh', 1, 60 );
-    try { $d = pps_an_get( (int) ( $_GET['days'] ?? 90 ), $refresh ); $d['labels'] = pps_an_labels( $refresh ); }
+    if ( ( $_GET['part'] ?? '' ) === 'labels' ) {
+        header( 'Content-Type: text/html; charset=UTF-8' );
+        try { pps_an_labels_body( pps_an_labels( $refresh ) ); }
+        catch ( \Throwable $e ) { echo '<p class="late">The labels could not be read: ' . esc_html( $e->getMessage() ) . '</p>'; }
+        exit;
+    }
+    try { $d = pps_an_get( (int) ( $_GET['days'] ?? 90 ), $refresh ); $d['labels_url'] = add_query_arg( array( 'pps_missive_analytics' => 1, 'k' => $k, 'part' => 'labels' ), home_url( '/' ) ); }
     catch ( \Throwable $e ) {
         error_log( 'PPS analytics: ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine() );
         header( 'Content-Type: text/plain; charset=UTF-8' );

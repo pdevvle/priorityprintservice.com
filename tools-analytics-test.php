@@ -20,7 +20,7 @@ $warn = array(); $GLOBALS['tr'] = array();
 function add_action() {} function add_filter() {} function add_submenu_page() {}
 function esc_html( $s ) { return htmlspecialchars( (string) $s, ENT_QUOTES ); } function esc_attr( $s ) { return esc_html( $s ); } function esc_url( $s ) { return esc_html( $s ); }
 function admin_url( $p = '' ) { return 'https://x/wp-admin/' . $p; } function add_query_arg( $k, $v = null, $u = '' ) { return is_array( $k ) ? $v . '&' . http_build_query( $k ) : $u . '&' . $k . '=' . $v; }
-function wp_nonce_url( $u ) { return $u . '&_wpnonce=n'; } function home_url( $p = '' ) { return 'https://x' . $p; } function check_admin_referer() { return 1; } function current_user_can() { return true; } function wp_die( $m ) { throw new Exception( $m ); }
+function wp_create_nonce( $a ) { return 'NONCE'; } function wp_nonce_url( $u ) { return $u . '&_wpnonce=n'; } function home_url( $p = '' ) { return 'https://x' . $p; } function check_admin_referer() { return 1; } function current_user_can() { return true; } function wp_die( $m ) { throw new Exception( $m ); }
 define( 'MINUTE_IN_SECONDS', 60 );
 function get_option( $k, $d = false ) { return $GLOBALS['opt'][ $k ] ?? $d; } function update_option( $k, $v ) { $GLOBALS['opt'][ $k ] = $v; return true; }
 function pps_shop_timezone() { return 'America/Phoenix'; }
@@ -116,7 +116,17 @@ $_GET = array( 'days' => 30 );
 ob_start(); pps_an_render(); $html = ob_get_clean();
 foreach ( array( 'orders received', 'orders fulfilled', 'shipped by must-ship date (1 of 2)', 'median paid → fulfilled', 'press sheets printed (est.)', 'paper + colour (est.)', 'open orders past must-ship', 'Orders received vs fulfilled, per week', 'Press sheets printed (est.), per week', 'Paper + colour cost (est.), per week', 'Fulfilled on time vs late, per week', 'Turnaround: business days', 'By product', 'Late shipments in this window', 'How these are estimated', 'had no paper plan and is not counted', 'costed as full colour both sides', 'no price on file' ) as $w )
     ok( strpos( $html, $w ) !== false, "the screen shows: $w" );
-ok( substr_count( $html, '<svg class="pps-an-chart"' ) === 6 && strpos( $html, '<script' ) === false, 'six charts, drawn as inline SVG with no script' );
+ok( substr_count( $html, '<svg class="pps-an-chart"' ) === 6 && substr_count( $html, '<script' ) === 1, 'six charts, drawn as inline SVG; the one script only folds and opens sections' );
+// every section folded (owner 2026-10-20: "make all headers collapsable which is on by default")
+preg_match_all( '/<details class="card" data-sec="([a-z]+)"([^>]*)>/', $html, $secs );
+ok( $secs[1] === array( 'received', 'sheets', 'cost', 'revenue', 'ontime', 'turnaround', 'products', 'late', 'labels', 'how' ), 'every section is a fold', $secs[1] );
+ok( ! array_filter( $secs[2], function ( $a ) { return strpos( $a, ' open' ) !== false; } ) && strpos( $html, '<div class="card">' ) === false, 'and every fold starts closed' );
+ok( strpos( $html, '<div class="tiles">' ) < strpos( $html, '<details' ) && strpos( substr( $html, 0, strpos( $html, '<details' ) ), 'orders received' ) !== false, 'the tiles stay open above them' );
+ok( strpos( $html, 'data-pps-an-all="1">Open all</button>' ) !== false && strpos( $html, 'data-pps-an-all="0">Close all</button>' ) !== false, 'Open all / Close all' );
+ok( strpos( $html, 'data-lazy="https://x/wp-admin/admin-ajax.php&amp;action=pps_an_labels&amp;_wpnonce=NONCE&amp;refresh=0"' ) !== false && strpos( $html, 'Loading from Shippo' ) !== false, 'the labels fold is fetched from admin-ajax (nonce) only when opened', $html );
+ok( strpos( $html, 'TRK' ) === false && empty( $GLOBALS['calls'] ), 'opening the screen asks Shippo nothing' );
+$sc = pps_an_script();
+ok( strpos( $sc, 'addEventListener("toggle",function(){if(d.open)load(d);})' ) !== false && strpos( $sc, 'credentials:"same-origin"' ) !== false && strpos( $sc, 'localStorage' ) === false, 'the script loads a lazy fold on first open and remembers nothing' );
 ok( strpos( $html, '$560' ) !== false || strpos( $html, '560' ) !== false, 'the sheet count reaches the tiles' );
 ok( ! $warn, 'no PHP warnings', $warn );
 ok( isset( $GLOBALS['tr']['pps_analytics_30'] ), 'the build is cached per window' );
@@ -143,7 +153,8 @@ ok( strpos( $src, "minmax(min(100%,420px),1fr)" ) !== false, 'the chart grid fol
 
 
 // shipping labels bought, per day (Shippo's transaction list)
-ok( strpos( $html, 'Shipping labels bought, per day' ) !== false && strpos( $html, 'pps-missive-ship.php) is not loaded' ) !== false, 'without the shipping file the section says so instead of failing' );
+ob_start(); pps_an_labels_body( pps_an_labels( true ) ); $nolab = ob_get_clean();
+ok( strpos( $nolab, 'pps-missive-ship.php) is not loaded' ) !== false, 'without the shipping file the labels fold says so instead of failing' );
 $lab = function ( $id, $at, $rate, $meta, $order, $st = 'SUCCESS' ) {
     return array( 'object_id' => $id, 'object_created' => $at, 'status' => $st, 'rate' => $rate, 'metadata' => $meta, 'order' => $order,
                   'tracking_number' => 'TRK' . $id, 'tracking_url_provider' => 'https://track.example/' . $id, 'label_url' => 'https://deliver.goshippo.com/' . $id . '.pdf?Expires=1&Signature=s' );
@@ -184,11 +195,21 @@ ob_start(); pps_an_labels_output( $L ); $lh = ob_get_clean();
 ok( strpos( $lh, 'Mon Oct 19 — 2 labels · $25.00' ) !== false && strpos( $lh, 'Sun Oct 18 — 1 label · $9.10' ) !== false && strpos( $lh, 'Sat Oct 17 — 0 labels · $0.00 · 1 refunded' ) !== false, 'each day: labels and postage, refunded ones listed but not counted', $lh );
 ok( substr_count( $lh, '>Label PDF</a>' ) === 4 && strpos( $lh, 'href="https://deliver.goshippo.com/a.pdf?Expires=1&amp;Signature=s"' ) !== false, 'every label links to its Shippo PDF', $lh );
 ok( strpos( $lh, 'href="https://track.example/a">TRKa</a>' ) !== false && strpos( $lh, 'page=wc-orders&amp;action=edit&amp;id=87485">#87485</a>' ) !== false, 'tracking and the order link', $lh );
-ok( substr_count( $lh, '<details' ) === 3 && substr_count( $lh, '<details open' ) === 1 && strpos( $lh, '<details open style="margin:6px 0"><summary style="cursor:pointer;font-weight:600">Mon Oct 19' ) !== false, 'one fold per day, the newest open' );
+ok( strpos( $lh, '<details class="card" data-sec="labels"><summary><h2>Shipping labels bought, per day' ) === 0 && substr_count( $lh, '<details' ) === 4 && substr_count( $lh, '<details open' ) === 1 && strpos( $lh, '<details open style="margin:6px 0"><summary style="cursor:pointer;font-weight:600">Mon Oct 19' ) !== false, 'one fold per day, the newest open' );
 ok( substr_count( $lh, '<svg class="pps-an-chart"' ) === 2 && strpos( $lh, '<script' ) === false, 'labels and postage per day as two charts, no script' );
 $GLOBALS['tr'] = array();
 $fr2 = pps_an_frame_html( pps_an_get( 30 ) + array( 'labels' => $L ), 'KEY9' );
+ok( strpos( $src, "if ( ( \$_GET['part'] ?? '' ) === 'labels' ) {" ) !== false && strpos( $src, "'labels_url'] = add_query_arg( array( 'pps_missive_analytics' => 1, 'k' => \$k, 'part' => 'labels' ), home_url( '/' ) );" ) !== false, 'in the Missive frame the labels fold is fetched from the key-scoped page, part=labels' );
+ok( strpos( $src, "check_ajax_referer( 'pps_an_labels', '_wpnonce', false )" ) !== false && strpos( $src, "current_user_can( 'manage_woocommerce' )" ) !== false, 'the admin fetch needs the screen\'s nonce and a shop manager' );
 ok( strpos( $fr2, '>Label PDF</a>' ) !== false && strpos( $fr2, 'if(!/^https:\/\//.test(u))return;if(window.parent!==window)window.parent.postMessage({ppsOpen:u}' ) !== false, 'in the Missive frame, a label link is handed to the panel to open (https only)' );
 ok( ! $warn, 'no PHP warnings in the labels section', $warn );
+// the folds in a real browser
+$fr3 = pps_an_frame_html( array_merge( pps_an_get( 30 ), array( 'labels_url' => 'https://site.test/?pps_missive_analytics=1&k=KEY9&part=labels' ) ), 'KEY9' );
+ob_start(); pps_an_labels_body( $L ); $lb = ob_get_clean();
+$t1 = tempnam( sys_get_temp_dir(), 'an' ); file_put_contents( $t1, $fr3 ); $t2 = tempnam( sys_get_temp_dir(), 'an' ); file_put_contents( $t2, $lb );
+$out = shell_exec( 'node ' . escapeshellarg( __DIR__ . '/tools-analytics-page.mjs' ) . ' ' . escapeshellarg( $t1 ) . ' ' . escapeshellarg( $t2 ) . ' 2>&1' );
+$res = json_decode( trim( (string) substr( (string) $out, (int) strrpos( (string) $out, "\n[" ) ) ), true ) ?: json_decode( trim( (string) $out ), true );
+ok( is_array( $res ) && $res, 'the browser run reports', $out );
+foreach ( (array) $res as $c ) ok( $c[0], 'browser: ' . $c[1], $c[2] );
 echo $fail ? ">>> $fail of $n checks FAILED\n" : ">>> ANALYTICS OK ($n checks)\n";
 exit( $fail ? 1 : 0 );
