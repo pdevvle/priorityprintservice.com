@@ -754,7 +754,7 @@ function addressCard(){
       mm.appendChild(el('div',{style:'margin-top:4px'},[use, el('span',{cls:'muted',text:' or keep the order\'s and correct it in Shippo'})]));
     }
     c.appendChild(mm);
-  } else if(sh && sh.shippo==='match') c.appendChild(el('div',{cls:'muted small',text:'Shippo\'s order and this order both have: '+line(V.to)+'. If that is not where it should go, change the fields below and Save to the order.'}));
+  } else if(sh && sh.shippo==='match') c.appendChild(el('div',{cls:'muted small',text:'Shippo\'s order record and this order both have: '+line(V.to)+'. An address edited on Shippo\'s dashboard does not show here — Shippo keeps those edits where its API cannot read them. If it should go elsewhere, change the fields below and Save to the order.'}));
   if(AD.msg) c.appendChild(el('div',{cls:(AD.bad?'err':'ok')+' small',text:AD.msg}));
   var g = el('div',{cls:'grid'});
   [['name','Name','w'],['company','Company','w'],['street1','Street','w'],['street2','Apt, suite','w'],['city','City'],['state','State'],['zip','ZIP'],['phone','Phone']].forEach(function(f){ g.appendChild(field(t,f[0],f[1],f[2])); });
