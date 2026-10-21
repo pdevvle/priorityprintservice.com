@@ -4404,10 +4404,39 @@ add_filter( 'woocommerce_order_item_get_formatted_meta_data', function( $formatt
     foreach ( $formatted as $id => $meta ) {
         if ( isset( $meta->key ) && in_array( $meta->key, $internal, true ) ) {
             unset( $formatted[ $id ] );
+        } elseif ( isset( $meta->key ) && $meta->key === 'Job Ticket' ) {
+            $meta->value         = pps_customer_ticket( (string) $meta->value );
+            $meta->display_value = pps_customer_ticket( (string) $meta->display_value );
         }
     }
     return $formatted;
 }, 10, 2 );
+
+/**
+ * The Job Ticket as the customer reads it (owner 2026-10-21: "That shouldn't be shown to the
+ * customer. Only the eta; the others are just on our copy of the receipt"): the shop's own
+ * schedule — "Production start" and "Must ship by" — comes out; the Delivery line stays. The
+ * stored ticket is untouched, so the order screen, the admin email and Missive keep both.
+ * Works on the plain value and on the rendered one (lines split by newlines or <br>).
+ */
+function pps_customer_ticket_labels() { return array( 'Production start', 'Must ship by' ); }
+function pps_customer_ticket( $text ) {
+    $labels = implode( '|', array_map( function ( $l ) { return preg_quote( $l, '/' ); }, pps_customer_ticket_labels() ) );
+    $lines  = explode( "\n", (string) $text );            // the rendered value keeps a newline after each <br />
+    $out = array();
+    foreach ( $lines as $line ) {
+        if ( preg_match( '/^(\s*(?:<(?!br)[^>]+>\s*)*)(?:' . $labels . '):.*?((?:<\/[^>]+>\s*)*)\s*$/i', $line, $m ) ) {
+            if ( $m[1] !== '' || $m[2] !== '' ) {                                 // keep a <p> or </p> the line carried
+                $keep = $m[1] . $m[2];
+                if ( $m[2] !== '' && $out ) { $out[ count( $out ) - 1 ] = preg_replace( '/<br\s*\/?>\s*$/i', '', $out[ count( $out ) - 1 ] ) . $keep; }
+                else $out[] = $keep;
+            }
+            continue;
+        }
+        $out[] = $line;
+    }
+    return implode( "\n", $out );
+}
 
 // ═══════════════════════════════════════════════════════════════
 // ORDER: LIFT THE CALCULATOR'S SHIP-TO ONTO THE ORDER ITSELF
