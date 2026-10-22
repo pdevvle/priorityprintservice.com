@@ -86,7 +86,14 @@ await p.click('.tools a:has-text("reset")'); await p.waitForTimeout(150);
 ok(await p.evaluate(() => document.querySelectorAll('.row').length === 4), 'reset shows every row again');
 // ship-to: the order card's box, change it, what is posted
 const html2 = html.replace('"shipTo":""', '"shipTo":"https:\\/\\/site.test\\/wp-json\\/pps\\/v1\\/missive\\/ship-to"');
-const answer2 = Object.assign({}, answer, { orders: [{ order: 87001, status: 'processing', admin_url: 'https://site.test/wp-admin/x', jobs: [], conv_ok: false, needs: 0, order_task: null, drive: null, ship: null,
+const job2 = (o) => Object.assign({ order: 87001, item: 11, job: 'Menu', product: 'Brochure', qty: '500', size: '8.5×11', print: 'Color 2-sided', pages: '', start: '2026-10-21', must_ship: '2026-10-23', delivery: '2026-10-28',
+  window: ['2026-10-21', '2026-10-23'], rush: false, printed: false, source: 'calculator', addons: 'Coating: UV Gloss (both sides); Fold: Tri-fold', ticket: [], batch: { mates: [], combined: [] },
+  papers: [{ label: '100lb Gloss Text', sheet: '13×19', sheets: 250, role: 'stock', in_stock: true, key: 'g' }], task: null, own_task: false }, o);
+const answer2 = Object.assign({}, answer, { missive: { connected: true, can_change: false, can_create: false }, orders: [{ order: 87001, status: 'processing', admin_url: 'https://site.test/wp-admin/x',
+  jobs: [ job2({ task: { id: 't1', title: '#87001 · Menu · 500 × 8.5×11 · start Wed Oct 21 · ship Fri Oct 23 · deliver Wed Oct 28', state: 'in_progress', due: '2026-10-21', started: '', conversation: 'c1' }, own_task: true }),
+          job2({ item: 12, job: 'Booklet', qty: '200', size: '5.5×8.5', print: 'Inside Color · Cover Color', pages: '16 pp', rush: true, addons: '', start: '2026-10-15',
+                 papers: [{ label: '80lb Matte Cardstock', sheet: '13×19', sheets: 90, role: 'cover', in_stock: false, key: 'm' }] }) ],
+  conv_ok: false, needs: 1, order_task: null, drive: null, ship: null,
   ship_to: { addr: { name: 'Ann Lee', company: '', street1: '1 Old Rd', street2: '', city: 'Mesa', state: 'AZ', zip: '85201', phone: '' }, line: 'Ann Lee, 1 Old Rd, Mesa AZ 85201',
     last: { at: '2026-10-18 10:00', who: 'Pat (order screen)', from: 'Ann Lee, 9 Elm, Mesa AZ 85201', shippo: 'stale', shippo_words: 'Shippo still shows the OLD address (x).' }, can_edit: true } }] });
 const t2 = await b.newPage({ viewport: { width: 380, height: 900 } }); const posted = []; const dialogs = [];
@@ -103,6 +110,16 @@ await t2.route('https://site.test/**', async r => {
 });
 await t2.goto('https://site.test/wrap'); await t2.waitForTimeout(500);
 const q = t2.frames().find(f => f.url().includes('/panel-page'));
+const strip = await q.evaluate(() => { const oc = document.querySelector('details.oc'); const s = oc && oc.querySelector('.subs');
+  const firstCard = oc && oc.querySelector('.card');
+  return s ? { first: firstCard === s, text: s.innerText, rows: [...s.querySelectorAll('.row')].map(r => [...r.querySelectorAll('.pill')].map(x => { const c = getComputedStyle(x); return { t: x.textContent, cls: x.className, bg: c.backgroundColor, fg: c.color }; })) } : null; });
+ok(strip && strip.first && /Subtasks in this conversation/.test(strip.text), 'the open conversation\'s subtasks are the first thing in its order card', strip && strip.text);
+ok(strip && /#87001 · Menu · 500 × 8\.5×11 · start Wed Oct 21 · ship Fri Oct 23 · deliver Wed Oct 28/.test(strip.text) && /In progress/.test(strip.text) && /No subtask/.test(strip.text), 'each job shows its subtask (title and state), or that it has none', strip && strip.text);
+const pr1 = strip ? strip.rows[0] : [], pr2 = strip ? strip.rows[1] : [];
+ok(pr1.some(x => /k-paper/.test(x.cls) && x.t === '100lb Gloss Text · 13×19 · 250') && pr1.some(x => /k-print/.test(x.cls)) && pr1.some(x => /k-qty/.test(x.cls)) && pr1.some(x => /k-size/.test(x.cls))
+  && pr1.filter(x => /pill-flag/.test(x.cls) && x.bg === RED && x.fg === WHITE).map(x => x.t).join('|') === 'Coating: UV Gloss (both sides)|Fold: Tri-fold', 'with the board\'s colour-coded pills: kinds in their colours, each add-on dark red', pr1);
+ok(pr2.some(x => /NOT STOCKED/.test(x.t) && /\(cover\)/.test(x.t) && x.bg === RED) && pr2.some(x => x.t === '16 pp' && /k-pages/.test(x.cls)) && pr2.some(x => x.t === 'RUSH' && x.bg === RED) && pr2.some(x => x.t === 'LATE START' && x.bg === LATE), 'a cover paper not in stock, the page count, rush and a late start on the second job', pr2);
+if (shot) await t2.screenshot({ path: shot.replace(/\.png$/, '-order.png') });
 const card = await q.evaluate(() => { const c = [...document.querySelectorAll('.card')].find(x => /^Ship to/.test(x.textContent)); return c ? c.innerText : ''; });
 ok(/Ship to · Ann Lee, 1 Old Rd, Mesa AZ 85201/.test(card) && /Changed 2026-10-18 10:00 by Pat \(order screen\) — was Ann Lee, 9 Elm/.test(card) && /Shippo still shows the OLD address/.test(card) && /Check Shippo again/.test(card), 'the order card shows the ship-to, its last change and that Shippo is behind', card);
 await q.click('a:has-text("Check Shippo again")'); await t2.waitForTimeout(200);

@@ -744,6 +744,7 @@ a{color:#2563eb;cursor:pointer;text-decoration:none}
 .pill.k-paper{background:#e3effb;color:#123e6b;border-color:#a9c8ea} .pill.k-print{background:#efe7fb;color:#4a2a7a;border-color:#c9b4ea}
 .pill.k-pages{background:#e2f5f1;color:#0f5348;border-color:#9fd6cb} .pill.k-qty{background:#e8f5e2;color:#24521a;border-color:#b0d8a2}
 .pill.k-size{background:#fbf0dc;color:#6b4610;border-color:#e6c88f}
+.subs .row:last-child{border-bottom:0} .subs b{font-weight:600}
 .pill.pill-flag{background:#7f1d1d;color:#fff;border-color:#5f1414;font-weight:600}
 .pill.pill-plain{background:rgba(128,128,128,.12);color:inherit;border-color:rgba(128,128,128,.35)} .pill.pill-late{background:#c62828;color:#fff;border-color:#a51f1f;font-weight:600}
 .tag{display:inline-block;border:1px solid rgba(128,128,128,.4);border-radius:3px;padding:0 4px;margin:1px 2px 1px 0;font-size:11px}
@@ -849,6 +850,39 @@ function analytics(){ AN = true; render(); window.scrollTo(0,0); }
 // DARK red with white text (pill-flag) is kept for what is unusual — a paper not in stock, an
 // add-on, rush (owner 2026-10-22); a late start keeps the brighter red (pill-late).
 function pill(text, kind, title){ return el('span',{cls:'pill '+kind,text:text,title:title||''}); }
+// One job's pills — a board row or a job of the open order (whose addons are one '; ' string).
+function specPills(r){
+  var specs = el('div',{cls:'specs'});
+  (r.papers||[]).forEach(function(p){ var t = p.label+' · '+String(p.sheet).replace('x','×')+' · '+p.sheets+(p.role && p.role!=='stock' ? ' ('+p.role+')' : '');
+    specs.appendChild(p.in_stock ? pill(t, 'k-paper', 'Paper: '+p.sheets+' press sheets of '+p.label+' on '+p.sheet)
+      : pill(t+' · NOT STOCKED', 'pill-flag', 'Paper not inventoried — '+p.sheets+' press sheets of '+p.label+' on '+p.sheet+' to order')); });
+  if(!(r.papers||[]).length && r.source==='custom') specs.appendChild(el('span',{cls:'pill pill-plain',text:'custom order'}));
+  if(r.print) specs.appendChild(pill(r.print, 'k-print', 'Print'));
+  if(r.pages) specs.appendChild(pill(r.pages, 'k-pages', 'Pages per book'));
+  if(r.qty) specs.appendChild(pill(Number(r.qty).toLocaleString()+' qty', 'k-qty', 'Quantity'));
+  if(r.size) specs.appendChild(pill(r.size, 'k-size', 'Finished size'));
+  var adds = typeof r.addons === 'string' ? r.addons.split(/;\s*/).filter(function(a){ return a.trim(); }) : (r.addons && r.addons.length ? r.addons : (r.finishing||[]));
+  adds.forEach(function(a){ specs.appendChild(pill(a.trim(), 'pill-flag', 'Add-on')); });
+  if(r.rush) specs.appendChild(pill('RUSH', 'pill-flag', 'Rush shipping'));
+  if(r.start) specs.appendChild(el('span',{cls:'pill pill-plain',text:'start '+md(r.start)}));
+  if(lateStart(r)) specs.appendChild(el('span',{cls:'pill pill-late',text:'LATE START'}));
+  return specs;
+}
+// The open conversation's subtasks, first thing in its order card (owner 2026-10-22): each job's
+// subtask state with the same colour-coded pills as the board.
+function subtaskStrip(o){
+  var box = el('div',{cls:'card subs'});
+  box.appendChild(el('div',{cls:'small muted',text:'Subtasks in this conversation'}));
+  o.jobs.forEach(function(j){
+    var r = el('div',{cls:'row'});
+    r.appendChild(el('div',{},[ el('b',{text:j.task && j.own_task ? j.task.title : (j.job||j.product)}), j.printed?el('span',{cls:'muted',text:' · printed'}):null ]));
+    var tl = taskLine(j.own_task ? j.task : null, j.start, j.own_task && j.task && j.task.due && j.start && j.task.due!==j.start); if(tl) r.appendChild(tl);
+    r.appendChild(specPills(j));
+    box.appendChild(r);
+  });
+  if(o.order_task) box.appendChild(el('div',{cls:'small'},[ el('span',{cls:'muted',text:'Order subtask: '}), o.order_task.title, ' ', el('span',{cls:'st st-'+o.order_task.state,text:STATE_WORD[o.order_task.state]||o.order_task.state}) ]));
+  return box;
+}
 window.addEventListener('message', function(e){ if(e.origin===location.origin && e.data && typeof e.data.ppsOpen==='string' && /^https:\/\//.test(e.data.ppsOpen)) open(e.data.ppsOpen); });
 
 /* Order numbers in what the conversation says: "#87347", "Order 87347", "order #87347". */
@@ -978,20 +1012,7 @@ function boardRow(r, here){
     r.drive&&CFG.impose?el('a',{cls:'small',text:' [Impose]',title:'Open the imposition tool for this order',on:function(){ impose(r.order); }}):null,
     CFG.ship?el('a',{cls:'small',text:' [Ship]',title:'Shipping rates and labels for this order',on:function(){ ship(r.order); }}):null,
     ' '+r.customer+' — '+r.what, r.printed?el('span',{cls:'muted',text:' · printed'}):null ]));
-  var specs = el('div',{cls:'specs'});
-  r.papers.forEach(function(p){ var t = p.label+' · '+String(p.sheet).replace('x','×')+' · '+p.sheets;
-    specs.appendChild(p.in_stock ? pill(t, 'k-paper', 'Paper: '+p.sheets+' press sheets of '+p.label+' on '+p.sheet)
-      : pill(t+' · NOT STOCKED', 'pill-flag', 'Paper not inventoried — '+p.sheets+' press sheets of '+p.label+' on '+p.sheet+' to order')); });
-  if(!r.papers.length && r.source==='custom') specs.appendChild(el('span',{cls:'pill pill-plain',text:'custom order'}));
-  if(r.print) specs.appendChild(pill(r.print, 'k-print', 'Print'));
-  if(r.pages) specs.appendChild(pill(r.pages, 'k-pages', 'Pages per book'));
-  if(r.qty) specs.appendChild(pill(Number(r.qty).toLocaleString()+' qty', 'k-qty', 'Quantity'));
-  if(r.size) specs.appendChild(pill(r.size, 'k-size', 'Finished size'));
-  (r.addons && r.addons.length ? r.addons : r.finishing).forEach(function(a){ specs.appendChild(pill(a, 'pill-flag', 'Add-on')); });
-  if(r.rush) specs.appendChild(pill('RUSH', 'pill-flag', 'Rush shipping'));
-  specs.appendChild(el('span',{cls:'pill pill-plain',text:'start '+md(r.start)}));
-  if(lateStart(r)) specs.appendChild(el('span',{cls:'pill pill-late',text:'LATE START'}));
-  d.appendChild(specs);
+  d.appendChild(specPills(r));
   var tl = taskLine(r.task, r.start, r.due_mismatch); if(tl) d.appendChild(tl);
   return d;
 }
@@ -1149,6 +1170,7 @@ function render(){
     oc.addEventListener('toggle',function(){ PREF.cardOpen = oc.open; savePref(); });
     oc.appendChild(el('summary',{},['Order #'+o.order+' · '+o.status+' · '+o.jobs.length+' job'+(o.jobs.length===1?'':'s')]));
     oc.appendChild(el('div',{style:'margin:0 0 6px'},[ el('a',{text:'Open in WooCommerce',on:function(){open(o.admin_url);}}) ]));
+    if(o.jobs.length) oc.appendChild(subtaskStrip(o));
     if(CFG.ship){
       var sh = o.ship || { labels: 0 }, sb = el('div',{cls:'card small',style:'display:flex;justify-content:space-between;align-items:center;gap:6px'});
       sb.appendChild(el('div',{},[ el('b',{text:'Shipping'}), sh.labels ? el('span',{},[' · '+sh.labels+' label'+(sh.labels===1?'':'s')+' bought · '+sh.last+' ',
