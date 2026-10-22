@@ -744,7 +744,7 @@ a{color:#2563eb;cursor:pointer;text-decoration:none}
 .pill.k-paper{background:#e3effb;color:#123e6b;border-color:#a9c8ea} .pill.k-print{background:#efe7fb;color:#4a2a7a;border-color:#c9b4ea}
 .pill.k-pages{background:#e2f5f1;color:#0f5348;border-color:#9fd6cb} .pill.k-qty{background:#e8f5e2;color:#24521a;border-color:#b0d8a2}
 .pill.k-size{background:#fbf0dc;color:#6b4610;border-color:#e6c88f}
-.pill.pill-flag{background:#c62828;color:#fff;border-color:#a51f1f;font-weight:600}
+.pill.pill-flag{background:#7f1d1d;color:#fff;border-color:#5f1414;font-weight:600}
 .pill.pill-plain{background:rgba(128,128,128,.12);color:inherit;border-color:rgba(128,128,128,.35)} .pill.pill-late{background:#c62828;color:#fff;border-color:#a51f1f;font-weight:600}
 .tag{display:inline-block;border:1px solid rgba(128,128,128,.4);border-radius:3px;padding:0 4px;margin:1px 2px 1px 0;font-size:11px}
 .st{display:inline-block;border-radius:3px;padding:0 5px;font-size:11px;font-weight:600}
@@ -846,7 +846,8 @@ var AN = false;
 function analytics(){ AN = true; render(); window.scrollTo(0,0); }
 // Job specs as pills, one fixed colour per KIND (owner 2026-10-22): paper, print, pages, qty and
 // size each always look the same, so the eye reads a row by colour. RED with white text
-// (pill-flag) is kept for what is unusual — a paper not in stock, an add-on, rush, a late start.
+// DARK red with white text (pill-flag) is kept for what is unusual — a paper not in stock, an
+// add-on, rush (owner 2026-10-22); a late start keeps the brighter red (pill-late).
 function pill(text, kind, title){ return el('span',{cls:'pill '+kind,text:text,title:title||''}); }
 window.addEventListener('message', function(e){ if(e.origin===location.origin && e.data && typeof e.data.ppsOpen==='string' && /^https:\/\//.test(e.data.ppsOpen)) open(e.data.ppsOpen); });
 
