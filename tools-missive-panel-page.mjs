@@ -1,7 +1,8 @@
 // The Missive panel page in a real browser, for tools-missive-panel-test.php (which writes the
 // page with pps_mp_page_html() and reads the JSON this prints). The panel API answers with a
-// small board; checks the job specs render as coloured pills (one colour per value, the same
-// paper the same colour on every row), the late-start pill, and the Analytics button opening
+// small board; checks the job specs render as pills with one fixed colour per kind (paper,
+// print, pages, qty, size), red with white text only for what is unusual (paper not in stock,
+// add-ons, rush, late start), the late-start pill, and the Analytics button opening
 // the analytics page in the panel's frame without a data refresh closing it.
 import { readFileSync } from 'fs'; import { execSync } from 'child_process'; import path from 'path';
 const pw = await import(path.join(execSync('npm root -g').toString().trim(), 'playwright/index.mjs'));
@@ -10,10 +11,10 @@ const checks = []; const ok = (c, w, g) => checks.push([!!c, w, g === undefined 
 const errs = [];
 const row = (o) => Object.assign({ order: 87001, item: 1, customer: 'Ann Lee', what: 'Menu', qty: '500', size: '8.5×11', start: '2026-10-21', must_ship: '2026-10-23', delivery: '2026-10-28',
   rush: false, printed: false, source: 'calculator', finishing: [], addons: [], paper: '100lb Gloss Text', sheet: '13x19', paper_key: 'g', sheets: 250,
-  papers: [{ label: '100lb Gloss Text', sheet: '13x19', sheets: 250, key: 'g' }], task: null, due_mismatch: false, drive: '' }, o);
+  print: 'Color 2-sided', pages: '', papers: [{ label: '100lb Gloss Text', sheet: '13x19', sheets: 250, key: 'g', in_stock: true }], task: null, due_mismatch: false, drive: '' }, o);
 const answer = { today: '2026-10-19', orders: [], missing: [], missive: { connected: false }, board: [
   row({ order: 87001, finishing: ['Coating', 'Fold'], addons: ['Coating: UV Gloss (both sides)', 'Fold: Tri-fold'] }),
-  row({ order: 87002, item: 2, customer: 'Bo Ray', start: '2026-10-15', qty: '1000', size: '6×9', papers: [{ label: '80lb Matte Cardstock', sheet: '13x19', sheets: 90, key: 'm' }] }),
+  row({ order: 87002, item: 2, customer: 'Bo Ray', start: '2026-10-15', qty: '1000', size: '6×9', print: 'Inside Color · Cover Color', pages: '16 pp', rush: true, papers: [{ label: '80lb Matte Cardstock', sheet: '13x19', sheets: 90, key: 'm', in_stock: false }] }),
   row({ order: 87003, item: 3, customer: 'Cy Doe', addons: ['Coating: Aqueous'], finishing: ['Coating'] }),
   row({ order: 87400, item: 0, customer: 'Dee Fox', what: 'Reprint flyers', qty: 0, size: '', start: '2026-10-30', must_ship: '2026-10-30', delivery: '', paper: '', sheet: '', sheets: 0, papers: [], source: 'missive',
         task: { id: 'tx', title: 'Reprint flyers', state: 'todo', due: '2026-10-30', started: '', conversation: 'c1' }, missive_only: true, reason: 'Order #87400 is completed', order_status: 'completed' }) ] };
@@ -41,13 +42,23 @@ p.on = () => {};
 const pills = await p.evaluate(() => [...document.querySelectorAll('.row .pill')].map(e => ({ t: e.textContent, bg: e.style.background, cls: e.className })));
 const byText = (t) => pills.filter(x => x.t === t);
 ok(pills.length >= 12, 'every job\'s specs render as pills', pills.length);
-ok(byText('100lb Gloss Text · 13×19 · 250').length === 2 && byText('100lb Gloss Text · 13×19 · 250')[0].bg === byText('100lb Gloss Text · 13×19 · 250')[1].bg, 'the same paper is the same colour on every row', byText('100lb Gloss Text · 13×19 · 250'));
-const gloss = byText('100lb Gloss Text · 13×19 · 250')[0], matte = pills.find(x => x.t.startsWith('80lb Matte Cardstock'));
-ok(gloss && matte && gloss.bg !== matte.bg, 'different papers get different colours', [gloss, matte]);
+const styles = await p.evaluate(() => [...document.querySelectorAll('.row .pill')].map(e => { const c = getComputedStyle(e); return { t: e.textContent, cls: e.className, bg: c.backgroundColor, fg: c.color }; }));
+const st = (t) => styles.filter(x => x.t === t), RED = 'rgb(198, 40, 40)', WHITE = 'rgb(255, 255, 255)';
+const gl = st('100lb Gloss Text · 13×19 · 250');
+ok(gl.length === 2 && gl.every(x => /k-paper/.test(x.cls) && x.bg === gl[0].bg && x.bg !== RED), 'an inventoried paper is the paper colour on every row', gl);
+const mt = styles.find(x => x.t.startsWith('80lb Matte Cardstock'));
+ok(mt && /NOT STOCKED/.test(mt.t) && mt.bg === RED && mt.fg === WHITE, 'a paper not in stock is red with white text and says so', mt);
+const pr = styles.filter(x => /k-print/.test(x.cls));
+ok(pr.length === 3 && new Set(pr.map(x => x.bg)).size === 1 && st('Inside Color · Cover Color').length === 1, 'print specs are one colour whatever they say', pr);
+ok(st('16 pp').length === 1 && /k-pages/.test(st('16 pp')[0].cls) && styles.filter(x => /k-pages/.test(x.cls)).length === 1, 'a booklet shows its page count as its own pill; flats have none');
+const kinds = ['k-paper', 'k-print', 'k-pages', 'k-qty', 'k-size'].map(k => (styles.find(x => x.cls.split(' ').includes(k)) || {}).bg);
+ok(kinds.every(Boolean) && new Set(kinds).size === 5 && !kinds.includes(RED), 'each kind has its own colour, none of them red', kinds);
 ok(byText('Coating: UV Gloss (both sides)').length === 1 && byText('Fold: Tri-fold').length === 1, 'each add-on is its own pill, in the words the customer chose');
-ok(byText('Coating: UV Gloss (both sides)')[0].bg === byText('Coating: Aqueous')[0].bg && byText('Coating: UV Gloss (both sides)')[0].bg !== byText('Fold: Tri-fold')[0].bg, 'add-ons are coloured by kind: every coating one colour, folds another');
+ok(['Coating: UV Gloss (both sides)', 'Fold: Tri-fold', 'Coating: Aqueous'].every(t => st(t)[0] && st(t)[0].bg === RED && st(t)[0].fg === WHITE), 'add-ons are red with white text');
+ok(st('RUSH').length === 1 && st('RUSH')[0].bg === RED && st('RUSH')[0].fg === WHITE, 'rush is a red pill, on the rush job only', st('RUSH'));
+ok(styles.filter(x => x.bg === RED).every(x => /NOT STOCKED|Coating|Fold|RUSH|LATE START/.test(x.t)), 'red is used for nothing else', styles.filter(x => x.bg === RED).map(x => x.t));
 ok(byText('500 qty').length === 2 && byText('8.5×11').length === 2 && byText('1,000 qty').length === 1, 'quantity and size are pills too');
-ok(pills.filter(x => x.t === 'LATE START' && /pill-late/.test(x.cls)).length === 1 && pills.some(x => x.t === 'start Wed, Oct 21' && /pill-plain/.test(x.cls)), 'the start date is a plain pill; a late start is a red one, on that job only', pills.filter(x => /start|START/.test(x.t)));
+ok(pills.filter(x => x.t === 'LATE START' && /pill-late/.test(x.cls)).length === 1 && st('LATE START')[0].bg === RED && pills.some(x => x.t === 'start Wed, Oct 21' && /pill-plain/.test(x.cls)), 'the start date is a plain pill; a late start is a red one, on that job only', pills.filter(x => /start|START/.test(x.t)));
 if (shot) await top.screenshot({ path: shot });
 // analytics
 const btn = await p.$('button:has-text("Analytics")');

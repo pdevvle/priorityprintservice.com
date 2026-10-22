@@ -142,6 +142,7 @@ function pps_mp_jobs( array $orders, array $paper = array() ) {
                 'papers' => array(),
                 'drive' => pps_mp_drive_folder_url( method_exists( $order, 'get_meta' ) ? $order->get_meta( '_pps_gdrive_folder_id' ) : '' ),
             );
+            $j += pps_mp_print_spec( $meta );
             if ( $j['delivery'] === '' && ! $meta ) $j['delivery'] = pps_mp_ymd( $item->get_meta( 'Requested delivery' ) );
             if ( ! $j['ticket'] && ! $meta ) {
                 // A custom line has no ticket: show what a person can read on it.
@@ -164,6 +165,29 @@ function pps_mp_jobs( array $orders, array $paper = array() ) {
         }
     }
     return $jobs;
+}
+
+/**
+ * How a job prints and how many pages, in a few words for the board's pills, from the
+ * same metadata keys PPS-Spec reads (pps_build_spec). Flats: colour per side ("Color 2-sided",
+ * "Color / B&W", "B&W 1-sided"), no page count. Booklets: inside and cover colour, pages
+ * per book (each distinct count when the sets differ). Custom lines: nothing.
+ */
+function pps_mp_print_spec( array $meta ) {
+    $c = function ( $v ) { return $v === 'bw' ? 'B&W' : ( $v === 'mixed' ? 'Mixed' : 'Color' ); };
+    $sets = is_array( $meta['sets'] ?? null ) ? $meta['sets'] : array();
+    if ( ! $sets && isset( $meta['qty'] ) ) {
+        $fc = $c( (string) ( $meta['frontColor'] ?? '' ) );
+        if ( intval( $meta['sides'] ?? 2 ) === 1 ) return array( 'print' => $fc . ' 1-sided', 'pages' => '' );
+        $bc = $c( (string) ( $meta['backColor'] ?? '' ) );
+        return array( 'print' => $fc === $bc ? $fc . ' 2-sided' : $fc . ' / ' . $bc, 'pages' => '' );
+    }
+    if ( ! $sets && ! isset( $meta['pages'] ) ) return array( 'print' => '', 'pages' => '' );
+    $pg = array_values( array_unique( array_filter( array_map( 'intval', $sets ? array_column( $sets, 'pages' ) : array( $meta['pages'] ) ) ) ) );
+    $in = $c( (string) ( $meta['insideColor'] ?? '' ) );
+    $self = ( $meta['coverMode'] ?? '' ) === 'same' || ! is_array( $meta['coverPaper'] ?? null ) || (string) ( $meta['coverPaper']['label'] ?? '' ) === '';
+    return array( 'print' => $self ? $in . ', self-cover' : 'Inside ' . $in . ' · Cover ' . $c( (string) ( $meta['coverColor'] ?? '' ) ),
+                  'pages' => $pg ? implode( ' / ', $pg ) . ' pp' : '' );
 }
 
 /** A job's window as [from, to] Y-m-d; from falls back to today, to to delivery. */
@@ -215,7 +239,8 @@ function pps_mp_preview( array $j ) {
     $md = function ( $ymd ) { return $ymd !== '' ? gmdate( 'M j', strtotime( $ymd . ' 12:00 UTC' ) ) : ''; };
     $what  = $j['job'] !== '' ? $j['job'] : $j['product'];
     $title = '#' . $j['order'] . ' ' . $what . ( $j['start'] !== '' ? ' · start ' . $md( $j['start'] ) : '' )
-           . ( $j['must_ship'] !== '' ? ' · ship ' . $md( $j['must_ship'] ) : '' );
+           . ( $j['must_ship'] !== '' ? ' · ship ' . $md( $j['must_ship'] ) : '' )
+           . ( $j['delivery'] !== '' ? ' · deliver ' . $md( $j['delivery'] ) : '' );
     $labels = array();
     foreach ( $j['papers'] as $p ) { $labels[] = $p['label']; $labels[] = $p['sheet']; }
     if ( $j['rush'] ) $labels[] = 'RUSH';
@@ -358,11 +383,11 @@ function pps_mp_board_rows( array $open, array $tasks_by_order, $today, array $t
         $p0 = $j['papers'][0] ?? null;
         $rows[] = array(
             'order' => $j['order'], 'item' => $j['item'], 'customer' => $j['customer'], 'what' => $j['job'] !== '' ? $j['job'] : $j['product'],
-            'qty' => $j['qty'], 'size' => $j['size'], 'start' => $f, 'must_ship' => $t, 'delivery' => $j['delivery'],
+            'qty' => $j['qty'], 'size' => $j['size'], 'print' => $j['print'] ?? '', 'pages' => $j['pages'] ?? '', 'start' => $f, 'must_ship' => $t, 'delivery' => $j['delivery'],
             'rush' => $j['rush'], 'printed' => $j['printed'], 'source' => $j['source'], 'finishing' => array_values( array_unique( $fin ) ), 'addons' => array_values( array_unique( $add ) ),
             'paper' => $p0 ? $p0['label'] : '', 'sheet' => $p0 ? $p0['sheet'] : '', 'paper_key' => $p0 ? $p0['key'] : '',
             'sheets' => array_sum( array_column( $j['papers'], 'sheets' ) ),
-            'papers' => array_map( function ( $p ) { return array( 'label' => $p['label'], 'sheet' => $p['sheet'], 'sheets' => $p['sheets'], 'role' => $p['role'], 'key' => $p['key'] ); }, $j['papers'] ),
+            'papers' => array_map( function ( $p ) { return array( 'label' => $p['label'], 'sheet' => $p['sheet'], 'sheets' => $p['sheets'], 'role' => $p['role'], 'key' => $p['key'], 'in_stock' => ! empty( $p['in_stock'] ) ); }, $j['papers'] ),
             'task' => $task, 'drive' => $j['drive'] ?? '',
             // The team sets a task's due date to the job's START date (12 of 16 live on 2026-10-18), so that is what it is checked against.
             'due_mismatch' => $task && $task['due'] !== '' && $j['start'] !== '' && $task['due'] !== $j['start'],
@@ -600,6 +625,7 @@ function pps_mp_subtask_for( array $j, $n, $of, $admin_url ) {
     if ( $size !== '' && $size !== '×' ) $parts[] = rtrim( $size, ' ×' );
     if ( $j['start'] !== '' ) $parts[] = 'start ' . $md( $j['start'] );
     if ( $j['must_ship'] !== '' ) $parts[] = 'ship ' . $md( $j['must_ship'] );
+    if ( $j['delivery'] !== '' ) $parts[] = 'deliver ' . $md( $j['delivery'] );
     if ( $j['rush'] ) $parts[] = 'RUSH';
     $title = implode( ' · ', $parts ) . ( $of > 1 ? ' (job ' . $n . ' of ' . $of . ')' : '' );
     $desc = array();
@@ -715,7 +741,11 @@ table{border-collapse:collapse;width:100%} td{padding:2px 4px;vertical-align:top
 td:first-child{color:#888;white-space:nowrap}
 a{color:#2563eb;cursor:pointer;text-decoration:none}
 .pill{display:inline-block;border:1px solid;border-radius:10px;padding:0 7px;margin:2px 3px 0 0;font-size:11px;line-height:17px;white-space:nowrap}
-.pill.pill-plain{background:rgba(128,128,128,.12);color:inherit;border-color:rgba(128,128,128,.35)} .pill.pill-late{background:#fdecea;color:#b42318;border-color:#f3b4ae;font-weight:600}
+.pill.k-paper{background:#e3effb;color:#123e6b;border-color:#a9c8ea} .pill.k-print{background:#efe7fb;color:#4a2a7a;border-color:#c9b4ea}
+.pill.k-pages{background:#e2f5f1;color:#0f5348;border-color:#9fd6cb} .pill.k-qty{background:#e8f5e2;color:#24521a;border-color:#b0d8a2}
+.pill.k-size{background:#fbf0dc;color:#6b4610;border-color:#e6c88f}
+.pill.pill-flag{background:#c62828;color:#fff;border-color:#a51f1f;font-weight:600}
+.pill.pill-plain{background:rgba(128,128,128,.12);color:inherit;border-color:rgba(128,128,128,.35)} .pill.pill-late{background:#c62828;color:#fff;border-color:#a51f1f;font-weight:600}
 .tag{display:inline-block;border:1px solid rgba(128,128,128,.4);border-radius:3px;padding:0 4px;margin:1px 2px 1px 0;font-size:11px}
 .st{display:inline-block;border-radius:3px;padding:0 5px;font-size:11px;font-weight:600}
 .st-todo{background:rgba(128,128,128,.18)} .st-in_progress{background:#dbeafe;color:#1e40af} .st-closed{background:#dcfce7;color:#166534} .st-none{background:#fef3c7;color:#92400e}
@@ -814,11 +844,10 @@ function checkShippo(order, msg){
 // Production Analytics (pps-analytics.php) in the same frame, opened with the panel key.
 var AN = false;
 function analytics(){ AN = true; render(); window.scrollTo(0,0); }
-// Job specs as pills, each value its own colour: the same paper, size or add-on is always the
-// same colour, so matching jobs can be spotted down the board.
-function hue(s){ var h = 2166136261; s = String(s); for(var i=0;i<s.length;i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return Math.round(((h >>> 0) % 1000) * 137.508) % 360; }
-function pill(text, key, title){ var h = hue(key || text);
-  return el('span',{cls:'pill',text:text,title:title||'',style:'background:hsl('+h+',75%,91%);color:hsl('+h+',60%,25%);border-color:hsl('+h+',45%,72%)'}); }
+// Job specs as pills, one fixed colour per KIND (owner 2026-10-22): paper, print, pages, qty and
+// size each always look the same, so the eye reads a row by colour. RED with white text
+// (pill-flag) is kept for what is unusual — a paper not in stock, an add-on, rush, a late start.
+function pill(text, kind, title){ return el('span',{cls:'pill '+kind,text:text,title:title||''}); }
 window.addEventListener('message', function(e){ if(e.origin===location.origin && e.data && typeof e.data.ppsOpen==='string' && /^https:\/\//.test(e.data.ppsOpen)) open(e.data.ppsOpen); });
 
 /* Order numbers in what the conversation says: "#87347", "Order 87347", "order #87347". */
@@ -947,13 +976,18 @@ function boardRow(r, here){
     r.drive?el('a',{cls:'small',text:' [Drive]',title:'Open the order\'s Google Drive folder',on:function(){ open(r.drive); }}):null,
     r.drive&&CFG.impose?el('a',{cls:'small',text:' [Impose]',title:'Open the imposition tool for this order',on:function(){ impose(r.order); }}):null,
     CFG.ship?el('a',{cls:'small',text:' [Ship]',title:'Shipping rates and labels for this order',on:function(){ ship(r.order); }}):null,
-    ' '+r.customer+' — '+r.what, r.rush?el('span',{cls:'rush',text:' RUSH'}):null, r.printed?el('span',{cls:'muted',text:' · printed'}):null ]));
+    ' '+r.customer+' — '+r.what, r.printed?el('span',{cls:'muted',text:' · printed'}):null ]));
   var specs = el('div',{cls:'specs'});
-  r.papers.forEach(function(p){ specs.appendChild(pill(p.label+' · '+String(p.sheet).replace('x','×')+' · '+p.sheets, 'paper:'+p.label, p.sheets+' press sheets of '+p.label+' on '+p.sheet)); });
+  r.papers.forEach(function(p){ var t = p.label+' · '+String(p.sheet).replace('x','×')+' · '+p.sheets;
+    specs.appendChild(p.in_stock ? pill(t, 'k-paper', 'Paper: '+p.sheets+' press sheets of '+p.label+' on '+p.sheet)
+      : pill(t+' · NOT STOCKED', 'pill-flag', 'Paper not inventoried — '+p.sheets+' press sheets of '+p.label+' on '+p.sheet+' to order')); });
   if(!r.papers.length && r.source==='custom') specs.appendChild(el('span',{cls:'pill pill-plain',text:'custom order'}));
-  if(r.qty) specs.appendChild(pill(Number(r.qty).toLocaleString()+' qty', 'qty:'+r.qty));
-  if(r.size) specs.appendChild(pill(r.size, 'size:'+r.size));
-  (r.addons && r.addons.length ? r.addons : r.finishing).forEach(function(a){ var kind = String(a).split(':')[0].trim(); specs.appendChild(pill(a, 'addon:'+kind)); });
+  if(r.print) specs.appendChild(pill(r.print, 'k-print', 'Print'));
+  if(r.pages) specs.appendChild(pill(r.pages, 'k-pages', 'Pages per book'));
+  if(r.qty) specs.appendChild(pill(Number(r.qty).toLocaleString()+' qty', 'k-qty', 'Quantity'));
+  if(r.size) specs.appendChild(pill(r.size, 'k-size', 'Finished size'));
+  (r.addons && r.addons.length ? r.addons : r.finishing).forEach(function(a){ specs.appendChild(pill(a, 'pill-flag', 'Add-on')); });
+  if(r.rush) specs.appendChild(pill('RUSH', 'pill-flag', 'Rush shipping'));
   specs.appendChild(el('span',{cls:'pill pill-plain',text:'start '+md(r.start)}));
   if(lateStart(r)) specs.appendChild(el('span',{cls:'pill pill-late',text:'LATE START'}));
   d.appendChild(specs);

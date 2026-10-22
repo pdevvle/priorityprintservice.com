@@ -95,8 +95,14 @@ ok( pps_mp_batch( $open[2], $open, '2026-10-17' )['mates'] === array(), 'a job a
 $custom = $open[5];
 ok( $custom['source'] === 'custom' && $custom['delivery'] === '2026-10-30' && $custom['ticket'][0] === array( 'Specs', '500 postcards 4x6 14pt' ), 'a custom line shows its own text and requested delivery', $custom );
 
+ok( pps_mp_print_spec( array( 'qty' => 500, 'sides' => 2, 'frontColor' => 'color', 'backColor' => 'color' ) ) === array( 'print' => 'Color 2-sided', 'pages' => '' )
+    && pps_mp_print_spec( array( 'qty' => 500, 'sides' => 2, 'frontColor' => 'color', 'backColor' => 'bw' ) )['print'] === 'Color / B&W'
+    && pps_mp_print_spec( array( 'qty' => 500, 'sides' => 1, 'frontColor' => 'bw' ) )['print'] === 'B&W 1-sided', 'a flat\'s print pill: colour per side, no page count' );
+ok( pps_mp_print_spec( array( 'sets' => array( array( 'qty' => 100, 'pages' => 16 ) ), 'insideColor' => 'color', 'coverMode' => 'separate', 'coverPaper' => array( 'label' => '100lb Gloss Cover' ), 'coverColor' => 'color' ) ) === array( 'print' => 'Inside Color · Cover Color', 'pages' => '16 pp' )
+    && pps_mp_print_spec( array( 'sets' => array( array( 'pages' => 8 ), array( 'pages' => 12 ) ), 'insideColor' => 'bw', 'coverMode' => 'same' ) ) === array( 'print' => 'B&W, self-cover', 'pages' => '8 / 12 pp' )
+    && pps_mp_print_spec( array() ) === array( 'print' => '', 'pages' => '' ), 'a booklet\'s print and pages pills; a custom line has neither' );
 $p = pps_mp_preview( $a );
-ok( $p['due'] === '2026-10-19' && $p['title'] === '#87501 Job 1000 · start Oct 19 · ship Oct 22', 'the preview task is due on the start date (the team convention) with the window in its title', $p );
+ok( $p['due'] === '2026-10-19' && $p['title'] === '#87501 Job 1000 · start Oct 19 · ship Oct 22 · deliver Oct 22', 'the preview task is due on the start date (the team convention) with the window in its title', $p );
 ok( $p['labels'] === array( '100lb Gloss Text', '13×19', 'RUSH', 'Coating', 'Fold' ), 'the preview labels: paper, sheet, rush, finishing', $p['labels'] );
 
 $ans = pps_mp_answer( array( 87501, 99999 ) );
@@ -178,7 +184,7 @@ $GLOBALS['opts'][ PPS_MP_TOKEN_OPTION ] = 'missive_pat-TEST'; $GLOBALS['opts'][ 
 $two = new O( 87600, 'Gus', array( 21 => new I( 'Flyer', flat( $gloss, 200, 2, '2026-10-20', '2026-10-23' ) ), 22 => new I( 'Flyer', flat( $matte, 300, 2, '2026-10-21', '2026-10-23', array( 'jobName' => 'Menu' ) ) ) ) );
 $GLOBALS['extra'][ 87600 ] = $two;
 $st = pps_mp_subtask_for( pps_mp_jobs( array( $two ) )[0], 1, 2, 'https://x/order' );
-ok( $st['title'] === '#87600 · Job 200 · 200 × 8.5×11 · start Tue Oct 20 · ship Fri Oct 23 (job 1 of 2)', 'a subtask title names the order, job, quantity, size and window', $st['title'] );
+ok( $st['title'] === '#87600 · Job 200 · 200 × 8.5×11 · start Tue Oct 20 · ship Fri Oct 23 · deliver Fri Oct 23 (job 1 of 2)', 'a subtask title names the order, job, quantity, size and window: start, ship and delivery', $st['title'] );
 ok( strpos( $st['description'], "Paper: 100lb Gloss Text" ) !== false && substr( $st['description'], -22 ) === 'Order: https://x/order', 'its description is the Job Ticket and a link to the order', $st['description'] );
 ok( gmdate( 'Y-m-d H:i', $st['due_at'] ) === '2026-10-21 00:00', 'it is due on the start date at 17:00 shop time (00:00 UTC next day in Phoenix)', gmdate( 'c', $st['due_at'] ) );
 $GLOBALS['http'] = array();
