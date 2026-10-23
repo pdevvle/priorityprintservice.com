@@ -96,6 +96,7 @@ a real origin).
 | `tools-proof-transforms-test.mjs` | Head/foot-to-spine against the calculator's `rotateAll` angles and a red-band fixture (an anchored crop stays put); scale 10–300 %; a sideways file opens turned, by the calculator's own orientation rule | same |
 | `tools-proof-screen-res-test.mjs` | The surface settles to the 300 DPI print render, and its pixels are page 1 of the approved PRINT_READY; blank pages are never swapped and browsing them cannot break approval; a job arriving after the demo is never shown it | + `PPS_DEPS_DIR` (pdf-lib) |
 | `tools-proof-handoff-test.mjs` | What `PROOFER_SINCE_HANDOFF.md` asks of the saddle: staples from the calculator only, page counts no calculator sends are refused, a mixed book is refused not simulated, unreadable files are refused by name, an untyped JPEG still loads | `PPS_PLAYWRIGHT`, `PPS_PROOF_BASE` |
+| `tools-proof-thumbs-test.mjs` | **The page thumbnails, both layouts** (2026-10-23). Under the stage: one row at 64 pages, one cell tall, scrolls sideways; the stage is as tall at 64 pages as at 8; a mouse wheel scrolls it and lets go at the ends; the selected page is kept in view, and an unrelated re-render does not move it. The draft (`?thumbs=rail`): no bottom strip and a taller stage; each page heading carries its own cell (chip, drop target, dashing); the cell selects and opens, the chip picks for its page, a drop lands on its page; a page chosen in 3D is in view back in Proof; a hosted job keeps the layout; a phone does not scroll sideways. The pre-change proofer fails 20 of 29 | + `PPS_PROOF_PATH` |
 | `tools-proof-package-test.mjs` | **DEAD.** Pre-harness prototype: imports `./node_modules/playwright`, reads `ui/vendor/`, opens the file over `file://`, needs an uncommitted `test-art.pdf`. Superseded by the draft + progress suites. Delete or revive; do not count it as green. |
 | `tools-proof-serve.mjs` | Static server on `127.0.0.1:8137` + `/vendor/`. Its second log line names `node_modules` regardless of where it found the libraries — trust `curl -sI http://127.0.0.1:8137/vendor/pdf.min.js`. Its header still says "three suites"; stale. |
 | `tools-proof-vendor.mjs` | Installs the proofer's pinned pdf.js 3.11.174 / pdf-lib 1.17.1 into `proof-vendor/`. `--check` reports without installing. |
@@ -128,16 +129,20 @@ BABEL_DIR=$S/node_modules node tools-compile-calcs.mjs
 # 2. Port 8137 holds one server at a time.
 fuser -k 8137/tcp; node tools-proof-serve.mjs &
 
-# 3. The seventeen live suites.
+# 3. The eighteen live suites.
 for t in ui-draft ui-preflight ui-mobile ui-style embed integration slots progress blank-pages \
-         size-check print-fidelity reconcile paid spine transforms screen-res handoff; do
+         size-check print-fidelity reconcile paid spine transforms screen-res handoff thumbs; do
   node tools-proof-$t-test.mjs | tail -1
 done
 ```
 
 To look at the proofer standalone: `http://127.0.0.1:8137/proof-ui-draft.html` once the
-server is up (demo booklet). It is **not** on GitHub Pages — `pages-public` does not
-carry it. On a server it is `/wp-content/uploads/pps-calculators/proof-ui-draft.html`.
+server is up (demo booklet). On GitHub Pages (`pps-pricing-config`, not `pages-public`) it
+is `https://pdevvle.github.io/priorityprintservice.com/proof-ui-draft.html`, and
+`new-proof-preview.html` beside it is the saddle calculator with the proofer switched on
+(add `?thumbs=rail` to either for the draft thumbnail layout). On a server it is
+`/wp-content/uploads/pps-calculators/proof-ui-draft.html`; a New Proof URL ending in
+`?thumbs=rail` opens the draft layout there too, because the calculator frames the URL as given.
 
 **The two pdf.js majors cannot share one `node_modules`.** The proofer pins 3.11.174;
 the calculators run 4.10.38. Installing either evicts the other, which is why
@@ -513,7 +518,7 @@ Every cell below was checked against the code on 2026-09-20.
 | Per-page transforms | ✅ Crop/Fill/Fit/Stretch/Scale 10–300 %/Rotate; rotate-all 90/180/270, head/foot to spine | ✅ 2026-09-28 | Proofer adds a 9-point anchor. Rotate-all by angle = "Apply to all pages"; head/foot to spine match the modal's angles; scale 10–300 %. (The modal has no free `posX/posY` — an earlier version of this row said it did.) |
 | Undo | ✅ | ✅ | |
 | Per-page slot uploads | ✅ | ✅ | |
-| All-pages view | ✅ grid mode | ✅ filmstrip | Every page always visible as a thumbnail with its flag dot; click to inspect, drop to replace. Covers what the grid is for; not a switchable grid |
+| All-pages view | ✅ grid mode | ✅ filmstrip | Every page as a thumbnail with its flag dot, in one row under the stage that scrolls sideways and keeps the selected page in view (since 2026-10-23; it used to wrap, up to 228px, into the view). Click to inspect, drop to replace. Draft alternative, `?thumbs=rail`: the cell sits in each page's rail heading instead. Covers what the grid is for; not a switchable grid |
 | Page-count reconciliation | ✅ `blankPlacement` covers/end; over-length keeps front + N−2 + **back cover** | ✅ 2026-09-28 | Same code path in effect — the suite runs the calculator's memo against `reconcilePlan()` |
 | 3D closed-book + open-spread preview | ✅ saddle/PB/coupon | ✅ | Ported 2026-08-30 (`:760, 1530-1662`); approval disabled while in 3D mode |
 | Approval package: raw file | ✅ | ✅ pipeline / ❌ proofer | Added by the **host**, not the proofer — §3 |
@@ -957,7 +962,7 @@ self-approval path was the only one anyone had exercised.
 ## 11. First moves for a new session
 
 1. Read this file, then `CLAUDE.md` §"Proofing — two surfaces, one of them dark".
-2. Run §1.3 exactly. Seventeen suites green; `tools-proof-package-test.mjs` is dead by design.
+2. Run §1.3 exactly. Eighteen suites green; `tools-proof-package-test.mjs` is dead by design.
 3. §7.0, §7.4 and §7.6 were closed 2026-09-28. Enable `proof_url` on staging first, with
    a real booklet through it, before production. On staging the knob already exists; that
    makes it easier to enable by accident.

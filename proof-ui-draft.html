@@ -361,11 +361,16 @@
   .issue.info .bang{background:var(--bp-faint)}
 
   /* ── filmstrip — every cell identical, whatever its label ── */
-  /* A 64-page booklet is 33 spread groups. Left to wrap freely that is seven
-     rows and roughly 500px — the page index would take more of the screen than
-     the page being proofed. Cap it and let it scroll instead. */
-  .strip{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;
-         max-height:228px;overflow-y:auto;flex-shrink:0}
+  .strip{display:flex;gap:10px;align-items:flex-start;flex-shrink:0}
+  .grp,.arrow{flex-shrink:0}
+  /* Under the page it is ONE row that scrolls sideways, at every width. It used
+     to wrap, capped at 228px: on a long booklet that was two and a half rows of
+     index between the customer and the page they are proofing, in a modal that
+     is short of height to begin with. A row costs one cell's height whatever the
+     page count; a mouse wheel scrolls it (stripWheel) and the selected page is
+     kept in view (keepInView). */
+  #stripBottom{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;padding-bottom:6px;
+               scrollbar-width:thin;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
   .grp{display:flex;border:1px solid var(--bp-line);border-radius:8px;overflow:hidden;background:var(--bp-surface)}
   .pg{width:84px;height:96px;padding:6px;font-size:9.5px;line-height:1.2;cursor:pointer;
       background:var(--bp-surface);border-right:1px solid var(--bp-line);position:relative;
@@ -513,11 +518,24 @@
   .keptline{color:var(--green);font-size:10.5px}
 
   .railstrip{padding:14px 16px 20px;overflow-y:auto;flex:1;min-height:0}
-  /* In the rail the panel itself scrolls, so the strip must not also cap
-     itself — that clipped a 64-page index to two and a half rows. It keeps
-     wrapping though: a tall narrow panel wants rows, and overflow:visible here
-     would cancel the sideways scrolling the bottom strip relies on. */
-  .railstrip .strip{max-height:none;overflow:visible;flex-wrap:wrap}
+  /* In the rail (3D mode) the panel itself scrolls, and a tall narrow panel
+     wants rows, so this strip wraps where the bottom one does not. */
+  .railstrip .strip{overflow:visible;flex-wrap:wrap}
+
+  /* ── DRAFT layout: thumbnails in the page headings (?thumbs=rail) ──
+     The alternative to the strip: each page's heading in the Artwork Edit rail
+     carries that page's thumbnail, so "Page: 1" and page 1's picture are one
+     thing, and the stage gets the strip's height back. Same cell, same
+     affordances (upload chip, drop target, dashed when it has no file); the
+     caption and the issue dot are dropped because the heading already says
+     both. Switched from the yellow strip, or with ?thumbs=rail on the URL. */
+  [data-thumbs="rail"] #stripBottom{display:none}
+  .pagehead{display:flex;align-items:center;gap:10px}
+  .pagehead .acchead{flex:1;min-width:0}
+  .pagehead.dropping{background:var(--cyan-tint);border-radius:8px}
+  .pg.mini{width:auto;height:auto;padding:3px;border:1px solid var(--bp-line);border-radius:8px;flex-shrink:0;margin:7px 0}
+  .pg.mini .thumb{margin-bottom:0;border-radius:4px}
+  .pg.mini .pgup{width:17px;height:17px;font-size:11px;bottom:1px;right:1px}
   .railstriphead{font-family:var(--pps-display);font-size:10px;font-weight:700;letter-spacing:.08em;
                  text-transform:uppercase;color:var(--bp-faint);margin-bottom:10px}
 
@@ -642,11 +660,7 @@
     .issues{width:100%;padding-top:0}
     .issue{font-size:11px}
 
-    /* one row that scrolls sideways, rather than a block that eats the screen */
-    #stripBottom{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;max-height:none;
-                 padding-bottom:6px;-webkit-overflow-scrolling:touch}
-    #stripRail{flex-wrap:wrap;overflow:visible;max-height:none}
-    .grp,.arrow{flex-shrink:0}
+    #stripRail{flex-wrap:wrap;overflow:visible}
 
     .rail{width:auto;border-left:none;border-top:1px solid var(--bp-line);min-height:0}
     .railhead{padding:11px 0 9px;margin:0 11px}
@@ -744,6 +758,14 @@
       <option value="32">32 pages</option>
       <option value="48">48 pages</option>
       <option value="64">64 pages</option>
+    </select>
+    <!-- Two layouts under comparison (owner, 2026-10-23). Prototype chrome, like
+         the skin toggle: it lives in the yellow strip, not in the product. No
+         separate label — a second one wraps this strip onto two lines on a
+         phone held sideways, and pushes close out of the top corner. -->
+    <select id="thumbsLayout" aria-label="Where the page thumbnails go">
+      <option value="strip" selected>Thumbnails: row under page</option>
+      <option value="rail">Thumbnails: in page headings (draft)</option>
     </select>
     <button class="themebtn" id="themeBtn">Dark skin</button>
   </div>
@@ -1865,52 +1887,129 @@ function renderIssues(){
     .join('');
 }
 
+/* ── page thumbnails: two layouts under comparison ─────────────
+   'strip' — one row under the stage (the default).
+   'rail'  — DRAFT: in each page's heading in the Artwork Edit rail.
+   3D mode is the same in both: the rail holds a wrapping strip. */
+let thumbLayout = 'strip';
+try { if (new URLSearchParams(location.search).get('thumbs') === 'rail') thumbLayout = 'rail'; } catch (e) {}
+function thumbsInRail(){ return thumbLayout === 'rail' && state.mode !== 'book'; }
+function setThumbLayout(v){
+  thumbLayout = v === 'rail' ? 'rail' : 'strip';
+  document.documentElement.setAttribute('data-thumbs', thumbLayout);
+  const sel = document.getElementById('thumbsLayout');
+  if (sel) sel.value = thumbLayout;
+}
+
+/* One page cell, the same in every place a page is shown as a thumbnail —
+   so the upload chip, the drop target and the "no file yet" dashing cannot
+   behave differently depending on which layout you are looking at.
+   mini: the rail-heading version, which drops the caption and the issue dot
+   because the heading beside it already carries both. */
+function pageCell(n, mini){
+  const p = MODEL.pages.find(q => q.n === n);
+  // Same size as the strip's, so both layouts share one cached composition;
+  // CSS draws the mini one smaller.
+  const thumb = composePage(n, 132, Math.round(132 * BLEED_H / BLEED_W)).canvas.toDataURL('image/png');
+  const up = uploads.get(n);
+  const d = document.createElement('div');
+  d.className = 'pg' + (mini ? ' mini' : '') + (isSel(n) ? ' sel' : '') + (up ? ' hasart' : '');
+  d.title = up ? up.label : 'No file on this page yet — drop one here';
+  let thumbStyle = 'background-image:url('+thumb+');filter:'+greyFilterFor(n);
+  let badge = '';
+  if (mini){
+    const tw = 48, th = Math.max(28, Math.min(80, Math.round(tw * BLEED_H / BLEED_W)));
+    thumbStyle += ';width:'+tw+'px;height:'+th+'px';
+  } else {
+    const issues = analyze(n);
+    const worst = issues.some(i => i.level === 'error') ? 'error' : issues.length ? 'warn' : '';
+    badge = (worst ? '<span class="dot'+(worst === 'warn' ? ' warn' : '')+'">!</span>' : '');
+  }
+  d.innerHTML = '<div class="thumb" style="'+thumbStyle+'"></div>' +
+                (mini ? '' : '<div class="cap"><span class="n">P'+n+'</span>' + (p.name ? '<br>'+p.name : '') + '</div>') +
+                badge +
+                '<button class="pgup" title="' + (up ? 'Replace the file on page ' : 'Add a file to page ') + n +
+                '">' + (up ? '↻' : '+') + '</button>' +
+                (mini ? '' : '<span class="dropcue">Drop here</span>');
+  d.onclick = () => {
+    state.selected = n; state.openPage = n;
+    // in the rail it opens that page's section, which puts the file-level
+    // review away — the same rule its heading follows
+    if (mini) state.wholeOpen = false;
+    if (state.mode === 'book') bookGoToPage(n);
+    renderAll();
+  };
+  // The upload chip must not also select the page underneath it.
+  d.querySelector('.pgup').onclick = e => { e.stopPropagation(); pickFileFor(n); };
+  // Dropping onto a tile says which page the file belongs to — the thing
+  // that goes wrong when a whole document is handed over in one lump.
+  dropTarget(d, n, d);
+  return d;
+}
+function dropTarget(el, n, lit){
+  el.ondragover  = e => { e.preventDefault(); e.stopPropagation(); lit.classList.add('dropping'); };
+  el.ondragleave = () => lit.classList.remove('dropping');
+  el.ondrop = e => {
+    e.preventDefault(); e.stopPropagation(); lit.classList.remove('dropping');
+    loadArtSequence(n, e.dataTransfer.files);
+  };
+}
+
+/* Every render rebuilds the cells, so the scroll position is carried across
+   by hand, and the selected page is brought into view only when the selection
+   has actually moved — re-rendering for a magnifier toggle must not yank a
+   strip the customer has just scrolled. A change of mode or layout counts as
+   a move: the container was emptied while it was out of sight, and has lost
+   its place. */
+const lastInView = {};
+function keepInView(box, el, axis, key){
+  const sig = state.mode + '|' + thumbLayout + '|' + state.selected;
+  if (!box || !el || lastInView[key] === sig) return;
+  lastInView[key] = sig;
+  const b = box.getBoundingClientRect(), r = el.getBoundingClientRect();
+  if (axis === 'x'){
+    if (r.left < b.left) box.scrollLeft -= (b.left - r.left) + 12;
+    else if (r.right > b.right) box.scrollLeft += (r.right - b.right) + 12;
+  } else {
+    if (r.top < b.top) box.scrollTop -= (b.top - r.top) + 8;
+    else if (r.bottom > b.bottom) box.scrollTop += (r.bottom - b.bottom) + 8;
+  }
+}
+
+/* A mouse has a vertical wheel and the strip scrolls sideways. At either end
+   the wheel is left to the page, so it cannot trap scrolling on a narrow
+   screen where the page itself scrolls. */
+function stripWheel(e){
+  const s = e.currentTarget;
+  if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;   // a sideways gesture already works
+  const max = s.scrollWidth - s.clientWidth;
+  if (max <= 0) return;
+  if ((e.deltaY < 0 && s.scrollLeft <= 0) || (e.deltaY > 0 && s.scrollLeft >= max - 1)) return;
+  s.scrollLeft += e.deltaY * (e.deltaMode === 1 ? 16 : 1);
+  e.preventDefault();
+}
+
 /* ── filmstrip: identical cells, rendered into whichever container is
-   active — bottom of the stage in Proof, the right panel in 3D ───── */
+   active — bottom of the stage in Proof, the right panel in 3D, and
+   nowhere in the draft rail layout, whose cells live in the page headings ── */
 function renderStrip(){
   const book = state.mode === 'book';
   const target = document.getElementById(book ? 'stripRail' : 'stripBottom');
   const other  = document.getElementById(book ? 'stripBottom' : 'stripRail');
   other.innerHTML = '';
+  if (thumbsInRail()){ target.innerHTML = ''; return; }
+  const scroller = book ? document.getElementById('railStripWrap') : target;
+  const keepX = scroller.scrollLeft, keepY = scroller.scrollTop;
   target.innerHTML = '';
 
   MODEL.groups.forEach((g, gi) => {
     if (gi > 0 && !book){ const a = document.createElement('div'); a.className='arrow'; a.textContent='›'; target.appendChild(a); }
     const grp = document.createElement('div'); grp.className = 'grp';
-    g.pages.forEach(n => {
-      const p = MODEL.pages.find(q => q.n === n);
-      const issues = analyze(n);
-      const worst = issues.some(i => i.level === 'error') ? 'error' : issues.length ? 'warn' : '';
-      const thumb = composePage(n, 132, Math.round(132 * BLEED_H / BLEED_W)).canvas.toDataURL('image/png');
-      const up = uploads.get(n);
-      const d = document.createElement('div');
-      d.className = 'pg' + (isSel(n) ? ' sel' : '') + (up ? ' hasart' : '');
-      d.title = up ? up.label : 'No file on this page yet — drop one here';
-      d.innerHTML = '<div class="thumb" style="background-image:url('+thumb+');filter:'+greyFilterFor(n)+'"></div>' +
-                    '<div class="cap"><span class="n">P'+n+'</span>' + (p.name ? '<br>'+p.name : '') + '</div>' +
-                    (worst ? '<span class="dot'+(worst === 'warn' ? ' warn' : '')+'">!</span>' : '') +
-                    '<button class="pgup" title="' + (up ? 'Replace the file on page ' : 'Add a file to page ') + n +
-                    '">' + (up ? '↻' : '+') + '</button>' +
-                    '<span class="dropcue">Drop here</span>';
-      d.onclick = () => {
-        state.selected = n; state.openPage = n;
-        if (state.mode === 'book') bookGoToPage(n);
-        renderAll();
-      };
-      // The upload chip must not also select the page underneath it.
-      d.querySelector('.pgup').onclick = e => { e.stopPropagation(); pickFileFor(n); };
-      // Dropping onto a tile says which page the file belongs to — the thing
-      // that goes wrong when a whole document is handed over in one lump.
-      d.ondragover  = e => { e.preventDefault(); e.stopPropagation(); d.classList.add('dropping'); };
-      d.ondragleave = () => d.classList.remove('dropping');
-      d.ondrop = e => {
-        e.preventDefault(); e.stopPropagation(); d.classList.remove('dropping');
-        loadArtSequence(n, e.dataTransfer.files);
-      };
-      grp.appendChild(d);
-    });
+    g.pages.forEach(n => grp.appendChild(pageCell(n, false)));
     target.appendChild(grp);
   });
+  scroller.scrollLeft = keepX; scroller.scrollTop = keepY;
+  keepInView(scroller, target.querySelector('.pg.sel'), book ? 'y' : 'x', book ? 'rail3d' : 'strip');
 }
 function isSel(n){
   if (state.mode !== 'book') return n === state.selected;
@@ -1921,7 +2020,9 @@ function isSel(n){
 /* ── right rail ─────────────────────────────────────────────── */
 function renderRail(){
   const rail = document.getElementById('rail');
+  const keepY = rail.scrollTop;
   rail.innerHTML = '';
+  const withThumbs = thumbsInRail();
 
   const checks = runFileChecks();
   const worstFile = checks.some(c => c.state === 'fail') ? 'fail'
@@ -1958,6 +2059,16 @@ function renderRail(){
     const bang = issues.length ? '<span class="bang"'+(issues.every(i=>i.level==='warn') ? ' style="background:var(--bp-warn)"' : '')+'>!</span>' : '';
     acc.innerHTML = '<button class="acchead"><span>'+title+'</span>'+bang+'<span class="caret">⌄</span></button>' +
                     '<div class="accbody"></div>';
+    // Draft layout: the heading carries the page's own cell. A wrapper rather
+    // than a child of the button, because the cell has a button of its own.
+    if (withThumbs){
+      const head = document.createElement('div');
+      head.className = 'pagehead';
+      const cell = pageCell(p.n, true);
+      acc.insertBefore(head, acc.firstChild);
+      head.append(cell, acc.querySelector('.acchead'));
+      dropTarget(head, p.n, head);
+    }
     acc.querySelector('.acchead').onclick = () => {
       state.openPage = open ? null : p.n;
       // one section at a time: opening a page puts the file-level review away,
@@ -2003,6 +2114,8 @@ function renderRail(){
     }
     rail.appendChild(acc);
   });
+  rail.scrollTop = keepY;
+  if (withThumbs) keepInView(rail, rail.querySelector('.pg.mini.sel'), 'y', 'railhead');
 }
 
 /* One control, every behaviour. While it is ticked, this page IS the document:
@@ -3859,6 +3972,11 @@ themeBtn.onclick = () => {
 // Attribute only at boot: the first render happens below, once the model
 // exists. Calling renderAll here would run the rail against an empty page map.
 applyTheme(!!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches));
+
+// The thumbnail layout follows the same rule: attribute now, render later.
+setThumbLayout(thumbLayout);
+document.getElementById('thumbsLayout').onchange = e => { setThumbLayout(e.target.value); renderAll(); };
+document.getElementById('stripBottom').addEventListener('wheel', stripWheel, { passive: false });
 
 /* ── boot ──────────────────────────────────────────────────────
    Two ways in, one code path after.
