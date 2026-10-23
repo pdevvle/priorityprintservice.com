@@ -39,7 +39,7 @@ const JOB = { artwork: 0.04, proof: 0.01, canvaLink: 'https://www.canva.com/desi
 // month, so the picker opens on the month that holds the earliest date.
 const T0 = new Date('2026-10-01T16:00:00Z');
 
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'] });
+const browser = await chromium.launch({ executablePath: process.env.PPS_CHROME || '/opt/pw-browsers/chromium', args: ['--no-sandbox'] });
 
 async function open(file, reorder) {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 1100 }, timezoneId: 'America/Phoenix' });

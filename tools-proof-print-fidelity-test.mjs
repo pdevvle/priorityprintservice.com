@@ -64,7 +64,7 @@ function buildFixture(W = 6, H = 9) {
 }
 
 const browser = await chromium.launch({
-  executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+  executablePath: process.env.PPS_CHROME || '/opt/pw-browsers/chromium',
   args: ['--no-sandbox'],
 });
 const errors = [];

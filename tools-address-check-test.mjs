@@ -41,7 +41,7 @@ const JOB = { artwork: 0.04, proof: 0.01, canvaLink: 'https://www.canva.com/desi
 const AZ = { name: 'Test', street1: '100 N 1st Ave', city: 'Phoenix', zip: '85003' };
 const T0 = new Date('2026-10-01T16:00:00Z');
 
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'] });
+const browser = await chromium.launch({ executablePath: process.env.PPS_CHROME || '/opt/pw-browsers/chromium', args: ['--no-sandbox'] });
 
 // answers: what each dialog gets, in order — true = OK, false = Cancel; OK when exhausted.
 // verify: the endpoint's reply (object), 'fail' for HTTP 500, 'hang' for no reply; null = verification off.
