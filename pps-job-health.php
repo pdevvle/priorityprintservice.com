@@ -243,6 +243,7 @@ function pps_job_health_collect( array $orders, array $refusals, $since_ts = 0, 
         'refused'  => array( 'title' => 'Checkout refused (customer could not pay)', 'items' => array() ),
         'drive'    => array( 'title' => 'Customer artwork that did not reach Google Drive', 'items' => array() ),
         'oneside'  => array( 'title' => 'Two-sided job with artwork for one side only', 'items' => array() ),
+        'address'  => array( 'title' => 'Address the postal check could not confirm (customer kept it)', 'items' => array() ),
     );
     $zone = new DateTimeZone( $tz );
     $now  = time();
@@ -296,6 +297,10 @@ function pps_job_health_collect( array $orders, array $refusals, $since_ts = 0, 
             if ( function_exists( 'pps_one_side_missing' ) ) {
                 $one = pps_one_side_missing( $meta, (string) $item->get_meta( '_pps_artwork_files' ) );
                 if ( $one !== '' ) $sec['oneside']['items'][] = $ref . ' — ' . $one;
+            }
+
+            if ( function_exists( 'pps_addr_check_problems' ) ) {
+                foreach ( pps_addr_check_problems( $meta ) as $p ) $sec['address']['items'][] = $ref . ' — ' . $p;
             }
 
             $lw = (string) $item->get_meta( '_pps_print_check_warn' );
@@ -403,9 +408,13 @@ function pps_job_health_digest( $send = true ) {
     }
 }
 
+// The daily email is RETIRED (owner, 2026-10-15: "stop the daily exception briefs"; the
+// Paper Order screen in pps-paper-order.php is what replaced it). The event is unscheduled
+// on every site that still carries it and nothing listens for it, so a leftover event
+// fires into nothing. pps_job_health_digest( false ) still builds the text on demand, and
+// the per-order checks above (Print File Check, the order notes) are unchanged.
 add_action( 'init', function () {
-    if ( ! wp_next_scheduled( 'pps_job_health_digest' ) ) {
-        wp_schedule_event( time() + 300, 'daily', 'pps_job_health_digest' );
+    if ( wp_next_scheduled( 'pps_job_health_digest' ) && function_exists( 'wp_clear_scheduled_hook' ) ) {
+        wp_clear_scheduled_hook( 'pps_job_health_digest' );
     }
 } );
-add_action( 'pps_job_health_digest', function () { pps_job_health_digest( true ); } );

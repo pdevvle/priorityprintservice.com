@@ -1359,3 +1359,29 @@ message naming every change and the new order total; the change is saved first, 
 transient allows one stop per customer per day, so the next press always goes through.
 Gates: `tools-server-junctures-test.php` (the rule) and `tools-requote-storeapi-test.php`
 (the request sequence; the 2026-09-27 code fails 17 of its 28 checks).
+
+## PO Box delivery adds transit (2026-10-04)
+
+UPS cannot deliver to a PO Box, so a PO Box ship-to goes Ground Advantage, which takes
+longer (owner 2026-10-04: "adds another day"). Knob: **`po_box_extra_days`** (PCF scalar,
+default `1`, PPS Config → Production → Shippo Integration → "PO Box Extra Transit").
+
+In `calculate()`, all eight calculators:
+
+```js
+const _poBoxDays = c.shipPoBox ? PO_BOX_EXTRA_DAYS : 0;
+const transitDays = getTransitDays(c.shipState, c.shipZip) + _poBoxDays;
+```
+
+It is added to `transitDays` itself, not shown beside it, because everything downstream
+keys on that number: the free-delivery date (`production × buffer + transit`), the earliest
+date, production start and must-ship, and therefore the rush multiplier
+(`freeDeliveryBizDays ÷ bizDaysToDate`). A rush to a PO Box is priced against a free date
+one day later, which is correct — that is when it would arrive for free. `transitDays` goes
+into the order metadata the same way, so the server's late-cart re-quote recomputes from the
+same number. `shipPoBox` is `ppsIsPoBox(shipAddr)`: "PO Box", "P.O. Box", "POB", "Post
+Office Box", or a bare "Box 12" as the whole line, in either address line ("PMB" — a
+private mailbox at a UPS Store — is a street address and is not matched). The customer sees
+it under the address fields; the Job Ticket and the order note say "PO Box — ship Ground
+Advantage". Gates: `tools-address-check-test.mjs` (a PO Box quotes exactly one more transit
+day on all eight), `tools-address-verify-test.php`.

@@ -674,10 +674,13 @@ function pps_intake_take_uploads() {
  */
 function pps_intake_record( $key, array $form, array $values, array $file_urls, array $extra_meta = array() ) {
     $title = sprintf( '%s — %s', $values['name'] ?? 'Website visitor', $form['title'] );
+    $spam  = pps_intake_spam_reason( $values );
 
     $post_id = wp_insert_post( array(
         'post_type'    => 'pps_question',
-        'post_status'  => 'publish',
+        // Spam is kept as a draft, not thrown away: a rule that misfires on a real customer
+        // leaves the request findable in Calc Questions instead of gone.
+        'post_status'  => $spam === '' ? 'publish' : 'draft',
         'post_title'   => wp_strip_all_tags( $title ),
         'post_content' => (string) ( $values['message'] ?? '' ),
     ), true );
@@ -685,6 +688,7 @@ function pps_intake_record( $key, array $form, array $values, array $file_urls, 
     if ( is_wp_error( $post_id ) || ! $post_id ) return 0;
 
     update_post_meta( $post_id, '_pps_q_source',     $form['source'] );
+    if ( $spam !== '' ) update_post_meta( $post_id, '_pps_q_spam', $spam );
     update_post_meta( $post_id, '_pps_q_name',       (string) ( $values['name'] ?? '' ) );
     update_post_meta( $post_id, '_pps_q_email',      (string) ( $values['email'] ?? '' ) );
     update_post_meta( $post_id, '_pps_q_phone',      (string) ( $values['phone'] ?? '' ) );
@@ -707,8 +711,52 @@ function pps_intake_record( $key, array $form, array $values, array $file_urls, 
     return (int) $post_id;
 }
 
+/**
+ * Why a submission is spam, or '' when it is not.
+ *
+ * Written for the October 2026 run (order 87353 onwards): bots put a Russian "you have
+ * a transfer of N rubles, collect it here https://…" line in the NAME field and a
+ * victim's address in EMAIL, because the confirmation greeted the submitter by name —
+ * so this server mailed the phishing link to the victim under the shop's name. They
+ * skipped the honeypot and rotated IPs past the rate limit.
+ *
+ * Only fields where a real customer never needs these things are judged. A link in the
+ * MESSAGE is normal (Canva, Drive), so it does not count; a link in a name does.
+ */
+function pps_intake_spam_reason( array $values ) {
+    $name = (string) ( $values['name'] ?? '' );
+    $link = '~https?://|www\.|\b[a-z0-9-]+\.(?:buzz|ru|xyz|top|io|site|online|click|link|shop|com|net)\b~i';
+    foreach ( array( 'name', 'phone', 'order_ref' ) as $f ) {
+        if ( isset( $values[ $f ] ) && preg_match( $link, (string) $values[ $f ] ) ) return 'link in ' . $f;
+    }
+    if ( preg_match( '/\d{5,}/', $name ) ) return 'run of digits in name';
+    if ( function_exists( 'mb_strlen' ) ? mb_strlen( $name ) > 80 : strlen( $name ) > 160 ) return 'name too long';
+    // A US print shop's customers do not write to it in Cyrillic; every Cyrillic
+    // submission on record is this phishing run. Kept as a draft, so not lost if wrong.
+    foreach ( $values as $v ) {
+        if ( is_string( $v ) && preg_match( '/\p{Cyrillic}/u', $v ) ) return 'Cyrillic text';
+    }
+    return '';
+}
+
+/**
+ * At most this many confirmation emails an hour, site-wide. The per-IP limit cannot
+ * hold a bot that rotates addresses; this bounds what the form can ever be made to send
+ * to strangers. Staff notifications are not counted — those only reach the office.
+ */
+function pps_intake_confirm_allowed() {
+    $k = 'pps_intake_confirms_' . gmdate( 'YmdH' );
+    $n = (int) get_transient( $k );
+    if ( $n >= 30 ) return false;
+    set_transient( $k, $n + 1, HOUR_IN_SECONDS );
+    return true;
+}
+
 /** Staff notification + customer confirmation. */
 function pps_intake_notify( $key, array $form, array $values, array $file_urls, $post_id, array $extra_lines = array() ) {
+    // Spam is recorded as a draft by pps_intake_record() and mailed to nobody.
+    if ( pps_intake_spam_reason( $values ) !== '' ) return;
+
     $to   = pps_intake_recipient();
     $name = (string) ( $values['name'] ?? 'Website visitor' );
     $mail = (string) ( $values['email'] ?? '' );
@@ -757,13 +805,15 @@ function pps_intake_notify( $key, array $form, array $values, array $file_urls, 
     if ( ! $sent )  error_log( '[pps-intake] staff notification FAILED to ' . $to );
 
     if ( ! is_email( $mail ) ) return;
+    if ( ! pps_intake_confirm_allowed() ) return;
 
     $site = wp_specialchars_decode( get_bloginfo( 'name' ), ENT_QUOTES );
-    // The confirmation deliberately does NOT echo the message back. Doing so turns the
-    // form into a relay: enter a victim's email, write anything, and this mail server
-    // delivers the attacker's words to the victim under the shop's name. The submitter
-    // knows what they wrote; the confirmation only needs to say it arrived.
-    $c   = array( sprintf( 'Hi %s,', $name ), '', $form['confirm'], '', sprintf( '— The %s team', $site ) );
+    // The confirmation carries NOTHING the submitter typed — not the message, and not the
+    // name either. Anything echoed makes the form a relay: enter a victim's email, type the
+    // payload, and this server delivers it to the victim under the shop's name. Leaving the
+    // message out was not enough; the 2026-10 phishing run put its link in the name, which
+    // the greeting repeated.
+    $c   = array( 'Hello,', '', $form['confirm'], '', sprintf( '— The %s team', $site ) );
 
     wp_mail(
         $mail,
