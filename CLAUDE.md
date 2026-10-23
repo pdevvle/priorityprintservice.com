@@ -260,7 +260,8 @@ staging (3 PHP files + seven calculators). Staging's saddle was left as the proo
 build (`claude/proofer-parity-staging`, PR #56), which predated this. **Caught up 2026-10-23:**
 staging's saddle is now the publish mirror's `1d2a912` (the `5fa8c85` source with the
 2026-10-18 contract patch) plus PR #56's proofer job fields, and nothing else (diffed
-compiled-to-compiled). Verify Addresses is OFF on both sites.
+compiled-to-compiled). Deployed from `claude/proofer-parity-staging` at `b5a6f75`: 544,416
+bytes, with `page-cache-purged` in the deploy log. Verify Addresses is OFF on both sites.
 
 ## Shop closures — the calculators are copies, not modules
 
