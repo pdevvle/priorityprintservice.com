@@ -197,6 +197,23 @@ it has sent `approved`.
 
 ---
 
+## 6b. Address checks reach Add to Order (2026-10-04, `482509f`)
+
+All eight calculators, the saddle included, gained a shared "Address checks" block
+(ZIP vs state, PO Box, optional Shippo check) and an `await ppsConfirmAddress(...)` step
+just before `setSubmitting(true)` in `handleAddToOrder`. For the proofer this means:
+
+- **Add to Order can now ask questions after `approved`** — ZIP/state, "Did you mean …?",
+  and a stop to re-quote when a correction moves the ZIP. The approval is not touched by
+  any of them; the proofer must not assume the next step after `approved` is the cart.
+- **A PO Box adds a transit day** (`result.shipping.poBox`, `poBoxDays`). Dates only — no
+  artwork impact.
+- **The hardcopy proof address** goes through the same questions; a correction rewrites
+  `proofAddr` before the order is built.
+- **The staging saddle from `claude/proofer-parity-staging` predates this.** Merge
+  `482509f`'s `calc-preview-test.html` changes before redeploying it, or staging's saddle
+  will lose the address checks that production has.
+
 ## 7. Gates to re-run after wiring any of the above
 
 | Test | Covers |
@@ -208,5 +225,6 @@ it has sent `approved`.
 | `tools-server-junctures-test.php` | art status by option, PPS-Spec, add-to-cart guards |
 | `tools-job-health-test.php` | one-side-missing digest section (order 87285) |
 | `tools-gdrive-missing-test.php` | Drive uploads under the listed names |
+| `tools-address-check-test.mjs` | address questions at Add to Order, incl. the proof address |
 
 Also run the ten live proofer suites listed in `docs/PROOFER_BRIEF.md` §1.2.

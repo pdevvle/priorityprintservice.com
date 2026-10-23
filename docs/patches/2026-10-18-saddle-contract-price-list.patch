@@ -1,0 +1,538 @@
+diff --git a/calc-preview-test.html b/calc-preview-test.html
+index be409a8..6246921 100644
+--- a/calc-preview-test.html
++++ b/calc-preview-test.html
+@@ -465,6 +465,54 @@ const _cfgList = v => (Array.isArray(v) && v.length ? v : null);
+ // Per-calc add-on visibility flags injected by PHP. Shape: { vivid: bool, coating: bool, ... }.
+ // Only keys for this calc-type's supported add-ons appear. Absent key = treated as visible.
+ const _AD = (typeof window !== 'undefined' && window.PPS_CONFIG && window.PPS_CONFIG.addons) ? window.PPS_CONFIG.addons : {};
++// ── Contract price list (owner 2026-10-18, first for Armadillo Home Warranty) ──
++// A product can carry a customer's agreed prices (`_pps_contract` product meta, injected
++// as PPS_CONFIG.contract): { name, lock, prices: { qty: price } }. The book is then
++// priced from that list — quantity only, at exactly the listed price — with proofing,
++// artwork services and rush added on top as usual. `lock` (default on) fixes the spec
++// to the product's defaults: no size, page, paper, colour or finishing controls, and
++// nothing in a link, reorder or cart edit can change it. The server checks the price
++// against the same list at add to cart (pps_contract_check()).
++const _CONTRACT = (function () {
++  try {
++    const k = typeof window !== 'undefined' && window.PPS_CONFIG && window.PPS_CONFIG.contract;
++    if (!k || typeof k !== 'object' || !k.prices || typeof k.prices !== 'object') return null;
++    const prices = {};
++    Object.keys(k.prices).forEach(q => { const n = parseInt(q, 10), v = Number(k.prices[q]); if (n > 0 && v > 0) prices[n] = Math.round(v * 100) / 100; });
++    const qtys = Object.keys(prices).map(Number).sort((a, b) => a - b);
++    if (!qtys.length) return null;
++    // What the customer is told the papers are ("House-provided cardstock") when that is not
++    // the stock's own name; the order and the Job Ticket still carry the real paper.
++    const show = {};
++    ['inside', 'cover'].forEach(f => { const v = k.show && typeof k.show[f] === 'string' ? k.show[f].trim().slice(0, 80) : ''; if (v) show[f] = v; });
++    // simpleArt (owner 2026-10-18, Armadillo: "this customer doesn't have varying artwork"):
++    // artwork is uploaded as supplied, emailed, or already discussed — no online proof, no
++    // approval step and no approval package; the proof options are not offered.
++    return { name: String(k.name || 'Contract').slice(0, 80), lock: k.lock !== false, prices, qtys, show, simpleArt: k.simpleArt === true };
++  } catch (e) { return null; }
++})();
++const _LOCK = !!(_CONTRACT && _CONTRACT.lock);
++const _NOPROOF = !!(_CONTRACT && _CONTRACT.simpleArt);
++// The artwork choices a simple-art contract offers: upload, email after, already discussed.
++const ppsSimpleArt = o => [0.01, 0.02, 0.03].some(v => Math.abs(Number(o.val) - v) < 0.005);
++function ppsArtFor(v) { v = Number(v) || 0.01; return _NOPROOF && !ppsSimpleArt({ val: v }) ? 0.01 : v; }
++// The nearest listed quantity — a link or an old cart line asking for 600 lands on 500.
++// A paper as anything the CUSTOMER reads names it (Job Ticket, cart summary, the copied
++// price table): the contract's wording when it has one, never the stock — owner 2026-10-18,
++// "paper should not mention on the front end to the customer what type of paper it is". The
++// real stock still travels in the metadata (insidePaper / coverPaper), which is what the
++// Paper Order, PPS-Spec and the staff-only "Production Paper" line read.
++function ppsPaperWords(field, label) {
++  const shown = _CONTRACT && _CONTRACT.show && _CONTRACT.show[field];
++  return shown || label;
++}
++function ppsContractQty(q) {
++  if (!_CONTRACT) return q;
++  if (_CONTRACT.prices[q]) return q;
++  let best = _CONTRACT.qtys[0];
++  _CONTRACT.qtys.forEach(x => { if (Math.abs(x - q) < Math.abs(best - q)) best = x; });
++  return best;
++}
+ 
+ const PCF = Object.assign({
+   printing_fullcolor_cost:0.05, printing_black_cost:0.01,
+@@ -1373,7 +1421,19 @@ function calculate(c) {
+   const subBeforeSale=Object.values(P).reduce((s,v)=>s+v,0);
+   P.discSale=(PCF.sale_discount_pct>0)?-Math.round(subBeforeSale*PCF.sale_discount_pct*100)/100:0;
+ 
+-  const total=Object.values(P).reduce((s,v)=>s+v,0);
++  let total=Object.values(P).reduce((s,v)=>s+v,0);
++  // A contract product charges its listed price for the book itself, whatever the formula
++  // says. What the customer CHOOSES on top — a proof, artwork edits or a new design — is
++  // added as usual, and rush is worked out on the result below. The automatic "add bleeds"
++  // charge is not: there is no control for it (it switches on until uploaded art shows a
++  // bleed), so every contract quote would open above the agreed price.
++  let contract=null;
++  if(_CONTRACT){
++    const cp=_CONTRACT.prices[tQ];
++    if(!(cp>0)) return {error:[`Choose one of these quantities: ${_CONTRACT.qtys.map(q=>q.toLocaleString()).join(", ")}.`],sz};
++    contract={name:_CONTRACT.name,qty:tQ,price:cp};
++    total=cp+P.artwork+P.proof;
++  }
+ 
+   // Turnaround
+   // Material lead times STACK (run concurrently) rather than accumulating: the inside
+@@ -1515,7 +1575,10 @@ function calculate(c) {
+   const mustShipBiz = Math.max(0, effectiveDeliveryBiz - effectiveTransit);
+   const mustShipDate = addBusinessDays(shopToday, mustShipBiz);
+ 
+-  const bd=[
++  const bd=(contract?[
++    {l:`${contract.name} price · ${contract.qty.toLocaleString()} booklets`,v:contract.price,g:"con"},
++    {l:"Artwork",v:P.artwork,g:"art"},{l:"Proofing",v:P.proof,g:"art"},
++  ]:[
+     {l:"Inside Paper",v:P.insidePaper,g:"mat"},{l:"Cover Paper",v:P.coverPaper,g:"mat"},
+     {l:"Inside Print",v:P.insidePrint,g:"mat"},{l:"Cover Print",v:P.coverPrint,g:"mat"},
+     {l:"Press",v:P.press,g:"lab"},{l:"Cutting",v:P.cutting,g:"lab"},
+@@ -1528,11 +1591,11 @@ function calculate(c) {
+     {l:"Difficult Size",v:P.diffSize,g:"fee"},{l:"Non-Inventory",v:P.nonInv,g:"fee"},{l:"Pricing Surcharge",v:P.surcharge,g:"fee"},
+     {l:"BW Discount",v:P.discBW,g:"disc"},{l:"Easy Size",v:P.discEasy,g:"disc"},{l:"Competitive",v:P.discCommon,g:"disc"},{l:"Size Adj.",v:P.discSize,g:"disc"},
+     {l:(PCF.sale_label||"Sale"),v:P.discSale,g:"disc"},
+-  ].filter(r=>Math.abs(r.v)>0.005);
++  ]).filter(r=>Math.abs(r.v)>0.005);
+ 
+   // CMYK-derived group colors
+-  const gC={mat:CK.cyan,lab:CK.key,add:CK.yellow,art:CK.magenta,fee:"#c25050",disc:CK.cyan};
+-  const gL={mat:"Materials & Ink",lab:"Production Labor",add:"Addons",art:"Artwork & Proofing",fee:"Fees",disc:"Discounts"};
++  const gC={con:CK.key,mat:CK.cyan,lab:CK.key,add:CK.yellow,art:CK.magenta,fee:"#c25050",disc:CK.cyan};
++  const gL={con:"Contract price",mat:"Materials & Ink",lab:"Production Labor",add:"Addons",art:"Artwork & Proofing",fee:"Fees",disc:"Discounts"};
+   const grouped=Object.entries(gL).map(([k,label])=>{
+     const val=bd.filter(r=>r.g===k).reduce((s,r)=>s+r.v,0);
+     return {label,val,c:gC[k]};
+@@ -1625,10 +1688,10 @@ function calculate(c) {
+     minDaysConfig:PCF.minimum_turnaround_days,
+   };
+ 
+-  const saleActive=P.discSale<-0.005;
++  const saleActive=!contract&&P.discSale<-0.005;
+   const saleAmount=saleActive?Math.round(-P.discSale*100)/100:0;
+   const totalWithoutSale=Math.round((grandTotal-P.discSale)*100)/100;
+-  return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,twoAuto,oneStapleOnly,q100,coatOK,vividOK:c.insidePaper.coatable,rcAll4OK,hcOK,sz,debug,ti,saleActive,saleAmount,saleLabel:(PCF.sale_label||"Sale"),totalWithoutSale,
++  return {total:Math.round(grandTotal*100)/100,baseTotal:Math.round(total*100)/100,perUnit:Math.round((grandTotal/tQ)*100)/100,days,tQ,bd,grouped,twoAuto,oneStapleOnly,q100,coatOK,vividOK:c.insidePaper.coatable,rcAll4OK,hcOK,sz,debug,ti,saleActive,saleAmount,saleLabel:(PCF.sale_label||"Sale"),totalWithoutSale:contract?Math.round(grandTotal*100)/100:totalWithoutSale,contract,
+     shipping:{hasDest:_hasDest, poBox: !!c.shipPoBox, poBoxDays: _poBoxDays,estWeightLb,estCartons,transitDays,effectiveTransit,freeDeliveryBizDays,freeDeliveryDate:fmtDate(freeDeliveryDate),freeDeliveryYMD:toYMD(freeDeliveryDate),earliestBizDays,earliestDate:fmtDate(earliestDate),earliestYMD:toYMD(earliestDate),shopToday:fmtDate(shopToday), shopTodayYMD: toYMD(shopToday),bizDaysToDate,rushMultiplier,rushCost:Math.round(rushCost*100)/100,needByValid,tooSoon,bufferedProdDays,productionBizDays,productionStartDate:fmtDate(productionStartDate),productionStartYMD:toYMD(productionStartDate),mustShipDate:fmtDate(mustShipDate),mustShipYMD:toYMD(mustShipDate),needByFmt:(needByValid&&!tooSoon&&c.needByDate)?fmtDate(new Date(c.needByDate+"T00:00:00")):null,prodStartBiz,mustShipBiz,pastCutoff:new Date().toLocaleString("en-US",{timeZone:PCF.shop_timezone,hour:"numeric",minute:"numeric",hour12:true})}};
+ }
+ 
+@@ -3237,6 +3300,8 @@ if (typeof window !== "undefined") {
+ }
+ 
+ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, roundCorner, insideColor, coverColor, staffUnlocked, proof, setProof, onPagesDetected, onCoverArt, onBackCoverArt, onArtwork, onBleedDetected, onSizeOverride, openPreviewModalRef, debug, pageTransforms, setPageTransforms, artDims, setArtDims, twoStaplesApplied }) {
++  // A simple-art contract has no online proof: nothing here asks for, or shows, an approval.
++  const _APPROVE = proof === 0 && !_NOPROOF;
+   const mob = useIsMobile();
+   const [rawPages, setRawPages] = useState([]);
+   const [loading, setLoading] = useState(false);
+@@ -5052,7 +5117,7 @@ update();
+             background: "#fafafa", color: CC.mid, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+           }}>📐 Download Artwork Template ({dims.w}×{dims.h}″ · {pageCount}pg)</button>
+         </>
+-      ) : (artApproved && proof === 0) ? (
++      ) : (artApproved && _APPROVE) ? (
+         /* ── Approved state — green compact view ── */
+         <div style={{ padding:"12px 14px", borderRadius:10, background:"#f0fdf4", border:"1px solid #86efac" }}>
+           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+@@ -5224,7 +5289,7 @@ update();
+ 
+           {/* ── Pill Selector: Proof | Preview ── (wrapped brochure-style) */}
+           {(() => {
+-            const needsApproval = proof === 0 && !artApproved;
++            const needsApproval = _APPROVE && !artApproved;
+             return (
+               <div style={{
+                 display:"flex", flexDirection:"column", gap:6, marginBottom:8,
+@@ -5234,16 +5299,16 @@ update();
+                 borderRadius: 10,
+               }}>
+                 <div style={{ display:"flex", borderRadius:10, overflow:"hidden", border:`1px solid ${CC.border}`, boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
+-                  <button type="button" onClick={async () => { if (ppsProofUrl() && await openStandaloneProof()) return; setActiveModal("proof"); setProofIdx(0); setProofView("single"); }} style={{
++                  <button type="button" onClick={async () => { if (!_NOPROOF && ppsProofUrl() && await openStandaloneProof()) return; setActiveModal("proof"); setProofIdx(0); setProofView("single"); }} style={{
+                     flex:1, padding:"11px 10px", fontSize:13, fontWeight:700, border:"none", cursor:"pointer", fontFamily:"inherit",
+                     display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+-                    background: artApproved && proof===0
++                    background: artApproved && _APPROVE
+                       ? "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)"
+                       : CC.white,
+-                    color: artApproved && proof===0 ? "#fff" : CC.mid,
++                    color: artApproved && _APPROVE ? "#fff" : CC.mid,
+                     borderRight:`1px solid ${CC.border}`,
+                   }}>
+-                    {artApproved && proof===0 ? "✓ Proof Approved" : "🔍 Proof"} {needsApproval && <span style={{ fontSize: 9, fontWeight: 700, background: "#fee2e2", color: "#dc2626", padding: "1px 6px", borderRadius: 8 }}>required</span>}
++                    {artApproved && _APPROVE ? "✓ Proof Approved" : _NOPROOF ? "🔍 View pages" : "🔍 Proof"} {needsApproval && <span style={{ fontSize: 9, fontWeight: 700, background: "#fee2e2", color: "#dc2626", padding: "1px 6px", borderRadius: 8 }}>required</span>}
+                     {debug && <span title="Proof debug mode is on (?debug=1)." style={{ marginLeft:8, fontSize:9, fontWeight:700, background:"rgba(251,191,36,.18)", color:"#fbbf24", padding:"2px 8px", borderRadius:8, letterSpacing:".06em", textTransform:"uppercase", border:"1px solid rgba(251,191,36,.4)" }}>🔧 Debug</span>}
+                   </button>
+                   <button type="button" onClick={() => { setActiveModal("preview"); setPreviewMode("closed"); setRot({x:-15,y:-25}); }} style={{
+@@ -5264,7 +5329,12 @@ update();
+           })()}
+ 
+           {/* Proof messages for non-online-proof modes */}
+-          {proof === 0.01 && (
++          {_NOPROOF && (
++            <div style={{ padding:"10px 12px", borderRadius:10, background:"#f0f9ff", border:"1px solid #bae6fd", marginBottom:6, fontSize:11, color:CC.mid, lineHeight:1.5 }}>
++              <strong style={{color:CC.dark}}>Printed as supplied</strong> — your file goes to production as you uploaded it. There is no proof to approve.
++            </div>
++          )}
++          {proof === 0.01 && !_NOPROOF && (
+             <div style={{ padding:"10px 12px", borderRadius:10, background:"#f0f9ff", border:"1px solid #bae6fd", marginBottom:6, fontSize:11, color:CC.mid, lineHeight:1.5 }}>
+               <strong style={{color:CC.dark}}>Manual Digital Proof selected</strong> — We'll review your art and endeavor to ensure compatibility with our processes. A proof will be emailed for your approval before printing.
+             </div>
+@@ -5278,7 +5348,7 @@ update();
+       )}
+ 
+       {/* ── Page Slots Grid — collapsible (hidden when approved) ── */}
+-      {hasFile && !(artApproved && proof === 0) && <div style={{ marginTop: 8 }}>
++      {hasFile && !(artApproved && _APPROVE) && <div style={{ marginTop: 8 }}>
+         <div onClick={() => setSlotsOpen(o => !o)} style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer", padding:"6px 0", userSelect:"none" }}>
+           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={CC.mid} strokeWidth="2.5" style={{ transform:slotsOpen?"rotate(90deg)":"rotate(0deg)", transition:"transform .2s" }}><polyline points="9 6 15 12 9 18"/></svg>
+           <span style={{ fontSize:12.5, fontWeight:600, color:CC.mid }}>Upload pages individually</span>
+@@ -5341,7 +5411,7 @@ update();
+                     {window.ppsPdfRisks().length > 0 && <div style={{ color:"#fbbf24", fontWeight:600, marginTop:3, maxWidth:520 }}>⚠ Uses {window.ppsPdfRisks().join(", ")} — effects a browser preview can render imperfectly. If anything differs from the file you exported, contact us before approving.</div>}
+                   </div>
+                 </div>
+-                    {proof === 0 && (artApproved ? (
++                    {_APPROVE && (artApproved ? (
+                       <span className="bp-approved">&#10003; Approved</span>
+                     ) : (
+                       <button type="button" disabled={generatingPdf || (preflightFlags.length > 0 && !ackIssues)}
+@@ -5429,7 +5499,7 @@ update();
+                       welded control, which is why the approve button never looked right —
+                       a primary CTA butted against two radio buttons. Split into the form's
+                       segmented picker plus a real CTA, both still on this line. */}
+-                  <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", rowGap:8,
++                  <div style={{ display: _NOPROOF ? "none" : "flex", alignItems:"center", gap:8, flexWrap:"wrap", rowGap:8,
+                     flexShrink:0, order: mob?3:0, flexBasis: mob?"100%":"auto" }}>
+                     <span className="bp-prooflabel">Proof:</span>
+                     <div className="bp-seg">
+@@ -5448,12 +5518,12 @@ update();
+                   discovered underneath them. */}
+               <div style={{ width:"100%", borderTop:"1px solid var(--bp-line)", paddingTop:10 }}>
+                 <div style={{ fontSize:10.5, color:"var(--bp-faint)", lineHeight:1.45 }}>
+-                  {proof === 0 && !artApproved && "Review each page, then press Approve artwork to confirm it is print-ready. Your approval means we print exactly what you see."}
+-                  {proof === 0 && artApproved && "\u2713 Artwork approved \u2014 we'll print exactly what you see. You can change your proof option or close this modal."}
++                  {_APPROVE && !artApproved && "Review each page, then press Approve artwork to confirm it is print-ready. Your approval means we print exactly what you see."}
++                  {_APPROVE && artApproved && "\u2713 Artwork approved \u2014 we'll print exactly what you see. You can change your proof option or close this modal."}
+                   {proof === 0.01 && "One of our trained prepress technicians will manually review your upload for issues and bring your art up to standards before sending you a digital proof for approval (emailed)."}
+                   {proof >= 3 && "A hardcopy proof will be dispatched for your approval prior to going to print. You'll have an opportunity to review and alter your order after receiving the proof. (Adds days to turnaround time)."}
+                 </div>
+-                {!artApproved && proof === 0 && (
++                {!artApproved && _APPROVE && (
+                   <div style={{ fontSize:10.5, color:"#dc2626", marginTop:4, fontWeight:600 }}>
+                     * Proof approval is required before your order can be placed.
+                   </div>
+@@ -5461,7 +5531,7 @@ update();
+                 {/* Approve-through-warnings gate: flagged preflight checks must be
+                     explicitly acknowledged before the Approve button unlocks, and the
+                     acknowledgment is recorded in the manipulation manifest. */}
+-                {!artApproved && proof === 0 && preflightFlags.length > 0 && (
++                {!artApproved && _APPROVE && preflightFlags.length > 0 && (
+                   <label style={{ display:"flex", gap:8, alignItems:"flex-start", marginTop:8, padding:"8px 10px", borderRadius:10, border:"1px solid rgba(251,191,36,.45)", background:"rgba(251,191,36,.10)", cursor:"pointer" }}>
+                     <input type="checkbox" checked={ackIssues} onChange={e => setAckIssues(e.target.checked)} style={{ marginTop:2, flexShrink:0 }} />
+                     <span style={{ fontSize:10.5, lineHeight:1.45, color:"var(--bp-warn)", fontWeight:600 }}>
+@@ -5469,7 +5539,7 @@ update();
+                     </span>
+                   </label>
+                 )}
+-                {!artApproved && proof === 0 && (
++                {!artApproved && _APPROVE && (
+                   <div style={{ fontSize:9.5, color:"var(--bp-faint)", marginTop:6, lineHeight:1.5 }}>
+                     By approving, you accept this proof as final. We print exactly the approved file — errors in approved artwork (spelling, layout, images, color choices) are the customer's responsibility.
+                   </div>
+@@ -5965,6 +6035,7 @@ function buildTicket(config, result) {
+   const push = (k, v) => { v = v == null ? "" : String(v).trim(); if (v) t.push([k, v]); };
+   const colorName = v => v === "color" ? "Full Color" : "Black & White";
+   push("Product", "Saddle Stitch Booklet");
++  if (result && result.contract) push("Pricing", `${result.contract.name} price list · ${result.contract.qty.toLocaleString()} @ $${result.contract.price.toFixed(2)}`);
+   const _first = (config.sets && config.sets[0]) || {};
+   push("Job name", _first.name);
+   push("Size", (function () {
+@@ -5977,12 +6048,12 @@ function buildTicket(config, result) {
+   })());
+   push("Sets", (config.sets || []).map(s => `${Number(s.qty || 0).toLocaleString()} × ${s.pages} pages` + (s.name ? ` "${s.name}"` : "")).join("; "));
+   push("Binding", (result && result.twoAuto) || (config.twoStaple && !(result && result.oneStapleOnly)) ? "Saddle stitch · two staples" : "Saddle stitch · single staple");
+-  push("Inside", config.insidePaper && config.insidePaper.label ? `${config.insidePaper.label} · ${colorName(config.insideColor)}` : "unknown");
++  push("Inside", config.insidePaper && config.insidePaper.label ? `${ppsPaperWords("inside", config.insidePaper.label)} · ${colorName(config.insideColor)}` : "unknown");
+   push("Cover", config.coverMode !== "same" && config.coverPaper && config.coverPaper.label
+-    ? `${config.coverPaper.label} · ${colorName(config.coverColor)}`
++    ? `${ppsPaperWords("cover", config.coverPaper.label)} · ${colorName(config.coverColor)}`
+     : "Self-cover (same stock as inside)");
+   const _ad = buildAddons(config); push("Finishing", _ad.length ? _ad.join("; ") : "None");
+-  push("Proof", config.proof >= 3 ? "Hardcopy proof, mailed before printing" : config.proof > 0 ? "Digital proof by staff before printing" : "Self-approved online (no staff proof)");
++  push("Proof", _NOPROOF ? "None — print as supplied (contract)" : config.proof >= 3 ? "Hardcopy proof, mailed before printing" : config.proof > 0 ? "Digital proof by staff before printing" : "Self-approved online (no staff proof)");
+   if (config.proof >= 3) push("Proof ship-to", config.proofAddrSame === false ? ppsFmtAddr(config.proofAddr) : "Same as the order ship-to");
+   const _art = ART_OPTS.find(x => x.val === config.artwork); push("Artwork", _art ? _art.label : "unknown");
+   if (config.artwork >= 2 && config.artwork < 4 && Number(config.artEditPages) > 0) push("Pages needing edits", String(Number(config.artEditPages)));
+@@ -6032,9 +6103,9 @@ function buildSummary(config, result) {
+ 
+   // Paper
+   const colorName = v => v === "color" ? "Full Color" : "Black & White";
+-  lines.push(`Inside: ${config.insidePaper.label} · ${colorName(config.insideColor)}`);
++  lines.push(`Inside: ${ppsPaperWords("inside", config.insidePaper.label)} · ${colorName(config.insideColor)}`);
+   if (config.coverMode !== "same") {
+-    lines.push(`Cover: ${config.coverPaper.label} · ${colorName(config.coverColor)}`);
++    lines.push(`Cover: ${ppsPaperWords("cover", config.coverPaper.label)} · ${colorName(config.coverColor)}`);
+   } else {
+     lines.push(`Cover: Self-cover (same as inside)`);
+   }
+@@ -6075,6 +6146,10 @@ function buildMetadata(config, result) {
+   return JSON.stringify({
+     addons: buildAddons(config),
+     ticket: buildTicket(config, result),
++    // The listed price this line was charged, for the server's check against the same list.
++    contract: result.contract || undefined,
++    // No online proof on this contract: an upload is printed as supplied, never "approved".
++    noProof: _NOPROOF || undefined,
+     // Customer selections
+     sizeLabel: config.sizeLabel,
+     customLong: config.customLong,
+@@ -6574,6 +6649,7 @@ function App(){
+       const _int = (v) => { const n = parseInt(v, 10); return isNaN(n) ? undefined : n; };
+       const _float = (v) => { const n = parseFloat(v); return isNaN(n) ? undefined : n; };
+       if (p.has("qty") && _int(p.get("qty"))) base.qty = _int(p.get("qty"));
++      if (!_LOCK) {
+       if (p.has("pages") && _int(p.get("pages"))) base.pages = _int(p.get("pages"));
+       if (p.has("size")) base.sizeLabel = p.get("size");
+       if (p.has("long") && _float(p.get("long"))) base.customLong = _float(p.get("long"));
+@@ -6591,6 +6667,7 @@ function App(){
+       if (p.has("coating") && _float(p.get("coating")) != null) base.coating = _float(p.get("coating"));
+       if (p.has("bundling") && _float(p.get("bundling")) != null) base.bundling = _float(p.get("bundling"));
+       if (p.has("corner") && _float(p.get("corner")) != null) base.roundCorner = _float(p.get("corner"));
++      }
+       if (p.has("state")) base.shipState = p.get("state");
+       if (p.has("artwork") && _float(p.get("artwork")) != null) base.artwork = _float(p.get("artwork"));
+       if (p.has("artedit") && _int(p.get("artedit")) != null) base.artEditPages = _int(p.get("artedit"));
+@@ -6602,7 +6679,7 @@ function App(){
+   })();
+   const _findPaper = (list, val) => { const f = list.find(p => String(p.val) === String(val)); return f || list[2] || list[0]; };
+ 
+-  const[sets,setSets]=useState([{qty:ppsSafeQty(D.qty), pages:ppsSnapPages(D.pages||8), name:""}]);
++  const[sets,setSets]=useState([{qty:ppsContractQty(ppsSafeQty(D.qty)), pages:ppsSnapPages(D.pages||8), name:""}]);
+   const debugUnlocked = sets.some(s => s.name === "%3414");
+   if (typeof window !== "undefined") window.__ppsTipEdit = debugUnlocked;
+   const[sizeLabel,setSizeLabel]=useState(D.sizeLabel || "5.5×8.5 (Opens to 8.5×11)");
+@@ -6622,10 +6699,10 @@ function App(){
+   const[coating,setCoating]=useState(Number(D.coating)||0);
+   const[bundling,setBundling]=useState(Number(D.bundling)||0);
+   const[roundCorner,setRoundCorner]=useState(Number(D.roundCorner)||0);
+-  const[artwork,setArtwork]=useState(Number(D.artwork)||0.01);
++  const[artwork,setArtwork]=useState(ppsArtFor(Number(D.artwork)||0.01));
+   const[artEditPages,setArtEditPages]=useState(Number(D.artEditPages)||0);
+   const[bleed,setBleed]=useState(Number(D.bleed)||0);
+-  const[proof,setProof]=useState(Number(D.proof)||0);
++  const[proof,setProof]=useState(_NOPROOF ? 0 : (Number(D.proof)||0));
+   const[proofAddrSame,setProofAddrSame]=useState(true);
+   const[proofAddr,setProofAddr]=useState({name:"",street:"",city:"",state:"",zip:""});
+   // Shipping & Rush
+@@ -6715,12 +6792,14 @@ function App(){
+       // React render to throw silently and leave an empty calc root.
+       if (rc.sets && Array.isArray(rc.sets)) {
+         setSets(rc.sets.map(s => ({
+-          qty: ppsSafeQty(s.qty),
+-          pages: ppsSnapPages(Number(s.pages) || 8),
++          qty: ppsContractQty(ppsSafeQty(s.qty)),
++          pages: _LOCK ? ppsSnapPages(D.pages || 8) : ppsSnapPages(Number(s.pages) || 8),
+           name: s.name || "",
+         })));
+       }
+ 
++      // A locked contract spec comes from the product alone, never from the link.
++      if (!_LOCK) {
+       // Color
+       if (rc.insideColor) setInsideColor(rc.insideColor);
+       if (rc.coverColor) setCoverColor(rc.coverColor);
+@@ -6746,9 +6825,10 @@ function App(){
+       if (rc.coating != null) setCoating(rc.coating);
+       if (rc.bundling != null) setBundling(rc.bundling);
+       if (rc.roundCorner != null) setRoundCorner(rc.roundCorner);
++      }
+ 
+       // Artwork & proofing
+-      if (rc.artwork != null) setArtwork(rc.artwork);
++      if (rc.artwork != null) setArtwork(ppsArtFor(rc.artwork));
+       // A reorder link names the order it came from, so the new order can say so and
+       // production can pull the old files. Digits only — it rides in a URL.
+       if (rc.reorderOf != null) window.__ppsReorderOf = parseInt(String(rc.reorderOf).replace(/\D/g, ""), 10) || 0;
+@@ -6758,7 +6838,7 @@ function App(){
+       if (rc.canvaInstructions != null) setCanvaInstructions(String(rc.canvaInstructions));
+       if (rc.artEditPages != null) setArtEditPages(rc.artEditPages);
+       if (rc.bleed != null) setBleed(rc.bleed);
+-      if (rc.proof != null) setProof(rc.proof);
++      if (rc.proof != null && !_NOPROOF) setProof(rc.proof);
+ 
+       // Shipping (no date — recalculated fresh)
+       if (rc.shipState) setShipState(rc.shipState);
+@@ -6859,7 +6939,7 @@ function App(){
+     };
+     const currentQty = sets[0]?.qty || 100;
+     const currentPages = sets[0]?.pages || 8;
+-    const breakpoints = [25,50,100,250,500,1000,2500,5000].filter(q => q !== currentQty);
++    const breakpoints = (_CONTRACT ? _CONTRACT.qtys : [25,50,100,250,500,1000,2500,5000]).filter(q => q !== currentQty);
+     // Add current qty and sort
+     const qtys = [...breakpoints, currentQty].sort((a,b) => a - b);
+     const rows = qtys.map(q => {
+@@ -6923,7 +7003,7 @@ function App(){
+       vividPrint&&"Enhanced Vivid Print",
+     ].filter(Boolean);
+     const sh=result?.shipping;
+-    const proofLbl=proof>=3?"Hardcopy Proof":proof>0?"Manual Digital Proof":"Proof & Approve Online";
++    const proofLbl=_NOPROOF?"No proof":proof>=3?"Hardcopy Proof":proof>0?"Manual Digital Proof":"Proof & Approve Online";
+     return {
+       // Job name leads the chips — it is what identifies the job at a glance, and on
+       // mobile only the first chip survives the cap. The unlock code is deliberately
+@@ -7092,8 +7172,8 @@ function App(){
+       "Saddle Stitch Booklets",
+       `Size: ${sz}`,
+       `Pages: ${sets[0].pages}`,
+-      `Cover: ${coverColor === "color" ? "Full Color" : "B&W"} · ${cvr.label}`,
+-      `Inside: ${insideColor === "color" ? "Full Color" : "B&W"} · ${insidePaper.label}`,
++      `Cover: ${coverColor === "color" ? "Full Color" : "B&W"} · ${coverMode === "same" ? ppsPaperWords("inside", cvr.label) : ppsPaperWords("cover", cvr.label)}`,
++      `Inside: ${insideColor === "color" ? "Full Color" : "B&W"} · ${ppsPaperWords("inside", insidePaper.label)}`,
+     ];
+     // The copied table has to say what the on-screen one says, or a quote pasted into
+     // an email quietly drops the discount and gets sent at list price.
+@@ -7367,7 +7447,7 @@ function App(){
+       alert("Please add your artwork file before ordering.\n\nIf you'd rather send it later, choose \"Email Art After Order\" under the artwork options.");
+       return;
+     }
+-    if (artFiles && artFiles.type === "files" && !artFiles.approved && proof === 0) {
++    if (artFiles && artFiles.type === "files" && !artFiles.approved && proof === 0 && !_NOPROOF) {
+       alert("Please approve your artwork proof before ordering.\n\n"
+         + "Open the proof in Artwork & Proofing, check your artwork against the bleed, "
+         + "trim and safety guides, then click APPROVE NOW.\n\n"
+@@ -7536,7 +7616,7 @@ function App(){
+                   /* background + border live in .pps-jobtitle, not here: an inline
+                      background would outrank the :hover and :focus rules. */
+             }>
+-            <div style={r2}>
++            {!_LOCK && <><div style={r2}>
+               <Pil label={<Tip k="size">Booklet Size</Tip>} value={sizeMode} onChange={handleSizeMode} options={[{t:"Preset Sizes",v:"preset"},{t:"Custom Size",v:"custom"}]}/>
+               {isCustom
+                 ? <div style={ST.f}><label style={ST.lbl}>Custom Size</label><div style={{position:"relative"}}><select disabled style={{...ST.sel,fontSize:mob?16:15,padding:mob?"20px 32px 20px 13px":"20px 34px 20px 14px",opacity:.6,pointerEvents:"none",fontWeight:600}}><option>{(customLong&&customShort)?(()=>{const lo=Math.max(customLong,customShort),sh=Math.min(customLong,customShort),spine=bindDir==="short"?sh:lo,nonSpine=bindDir==="short"?lo:sh;
+@@ -7564,17 +7644,36 @@ function App(){
+               </div>
+             )}
+             </>}
++            </>}
++            {/* A locked contract spec is shown, not offered. */}
++            {_LOCK && (()=>{
++              const col=v=>v==="color"?"Full Color":"Greyscale";
++              const lbl=(arr,v)=>{const o=arr.find(x=>x.val===v);return o?o.label:null;};
++              const fin=[coating>0&&lbl(COATINGS,coating),bundling>0&&lbl(BUNDLING,bundling),roundCorner>0&&lbl(CORNERS,roundCorner),vividPrint&&"Enhanced Vivid Print"].filter(Boolean);
++              const rows=[
++                ["Size",isCustom?`${customLong}×${customShort}″`:sizeLabel],
++                ["Pages",`${sets[0].pages} pages · saddle stitched`+(r.twoAuto||twoStaple?" · two staples":"")],
++                ["Inside",`${_CONTRACT.show.inside||insidePaper.label} · ${col(insideColor)}`],
++                ["Cover",_CONTRACT.show.cover?`${_CONTRACT.show.cover} · ${col(coverColor)}`:coverMode==="same"?`Same paper as inside · ${col(coverColor)}`:`${coverPaper.label} · ${col(coverColor)}`],
++              ].concat(fin.length?[["Finishing",fin.join(", ")]]:[]);
++              return <div data-pps-contract-spec="1" style={{border:`1px solid ${CC.border}`,borderRadius:6,padding:"10px 12px",background:CC.tint,marginTop:4}}>
++                <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".5px",color:CC.mid,marginBottom:6}}>{_CONTRACT.name} booklet · set specification</div>
++                {rows.map(([k,v])=><div key={k} style={{display:"flex",gap:10,fontSize:13,lineHeight:1.6}}><span style={{minWidth:72,color:CC.light}}>{k}</span><span style={{color:CC.dark,fontWeight:600}}>{v}</span></div>)}
++              </div>;
++            })()}
+             {r.error?.map((e,i)=><p key={i} style={ST.err}>{e}</p>)}
+ 
+             {/* Set 1 — always in the size section */}
+             <div style={ST.hr}/>
+             <div style={r2}>
+-              <TxtNum label={<Tip k="quantity">Quantity</Tip>} value={sets[0].qty} onChange={v=>upSet(0,{qty:Math.max(1,Math.round(v))})} min={1}/>
+-              <Sel label={<Tip k="page_count">Pages</Tip>} value={sets[0].pages} onChange={v=>upSet(0,{pages:parseInt(v)})}>{PAGE_COUNTS.map(p=><option key={p} value={p}>{p} Pages</option>)}</Sel>
++              {_CONTRACT
++                ? <Sel label={<Tip k="quantity">Quantity</Tip>} value={ppsContractQty(sets[0].qty)} onChange={v=>upSet(0,{qty:parseInt(v,10)})}>{_CONTRACT.qtys.map(q=><option key={q} value={q}>{q.toLocaleString()} booklets · ${_CONTRACT.prices[q].toFixed(2)}</option>)}</Sel>
++                : <TxtNum label={<Tip k="quantity">Quantity</Tip>} value={sets[0].qty} onChange={v=>upSet(0,{qty:Math.max(1,Math.round(v))})} min={1}/>}
++              {!_LOCK && <Sel label={<Tip k="page_count">Pages</Tip>} value={sets[0].pages} onChange={v=>upSet(0,{pages:parseInt(v)})}>{PAGE_COUNTS.map(p=><option key={p} value={p}>{p} Pages</option>)}</Sel>}
+             </div>
+ 
+             {/* Staple Binding — hidden when two_staple add-on is disabled and not pre-filled */}
+-            {(_AD.two_staple!==false || twoStaple===true) && (r.oneStapleOnly
++            {!_LOCK && (_AD.two_staple!==false || twoStaple===true) && (r.oneStapleOnly
+               ? <div style={ST.f}><label style={ST.lbl}><RichTip tipKey="saddle_stitch">Staple Binding</RichTip></label><div style={{fontSize:12.5,color:CC.dark,fontWeight:600,background:CC.tint,padding:"7px 12px",borderRadius:4,alignSelf:"flex-start"}}>Single Staple</div><div style={{fontSize:11,color:CC.mid,marginTop:4}}>Only one staple can be used on a binding edge under {ONE_STAPLE_MAX}″.</div></div>
+               : r.twoAuto
+               ? <div style={ST.f}><label style={ST.lbl}><RichTip tipKey="saddle_stitch">Staple Binding</RichTip><TurnBadge days={r.ti?.twoStaple}/></label><div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}><div style={{fontSize:12.5,color:"#0060cc",fontWeight:600,background:CC.tint,padding:"7px 12px",borderRadius:4}}>Two Staples — standard for this size</div>{switchTargets.map(t=><a key={t.type} href={buildSwitchUrl(t.url)} style={{fontSize:11,color:"#4f46e5",fontWeight:600,textDecoration:"none",whiteSpace:"nowrap"}} onMouseOver={e=>e.currentTarget.style.textDecoration="underline"} onMouseOut={e=>e.currentTarget.style.textDecoration="none"}>Try as {t.label} &rarr;</a>)}</div></div>
+@@ -7583,7 +7682,7 @@ function App(){
+           </Sec>
+ 
+           {/* SECTION 2: Printing & Paper */}
+-          <Sec step={2} summary={secSummary.s2} title="Printing & Paper" open={op.s2} onToggle={()=>tog("s2")}>
++          {!_LOCK && <Sec step={2} summary={secSummary.s2} title="Printing & Paper" open={op.s2} onToggle={()=>tog("s2")}>
+             <div style={r2}>
+               <Pil label={<Tip k="inside_print">Inside Printing</Tip>} value={insideColor} onChange={setInsideColor} options={[{t:"Full Color",v:"color",onStyle:{background:"linear-gradient(135deg, #00aeef 0%, #ec008c 55%, #fff200 100%)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
+               <Pil label={<Tip k="cover_print">Cover Printing</Tip>} value={coverColor} onChange={setCoverColor} options={[{t:"Full Color",v:"color",onStyle:{background:"linear-gradient(135deg, #00aeef 0%, #ec008c 55%, #fff200 100%)",color:"#fff",fontWeight:600,textShadow:"0 1px 4px rgba(0,0,0,.5)"}},{t:"Greyscale",v:"bw",onStyle:{background:"linear-gradient(135deg, #888 0%, #444 50%, #999 100%)",color:"#fff",fontWeight:600}}]}/>
+@@ -7604,10 +7703,10 @@ function App(){
+               }
+             </div>
+             {coverMode==="separate"&&<PaperNote p={coverPaper} pool={coverPaperType==="cardstock"?"cs":"nc"}/>}
+-          </Sec>
++          </Sec>}
+ 
+           {/* SECTION 3: Finishing & Addons */}
+-          <Sec step={3} summary={secSummary.s3} title="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")}>
++          {!_LOCK && <Sec step={3} summary={secSummary.s3} title="Finishing & Addons" open={op.s3} onToggle={()=>tog("s3")}>
+             {/* Print Quality only exists on coated stock, so it is hidden rather than shown
+                 disabled next to a line explaining why it cannot be used. The effect on
+                 r.vividOK already clears vividPrint when the paper changes under it, so a
+@@ -7636,13 +7735,13 @@ function App(){
+                 );
+               })()}
+             </div>}
+-          </Sec>
++          </Sec>}
+ 
+           {/* SECTION 4: Artwork & Proofing */}
+-          <Sec step={4} summary={secSummary.s4} title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")} keepMounted>
++          <Sec step={_LOCK?2:4} summary={secSummary.s4} title="Artwork & Proofing" open={op.s4} onToggle={()=>tog("s4")} keepMounted>
+ 
+             {/* Art options dropdown */}
+-            <Sel label={<Tip k="artwork_design">Artwork & Design</Tip>} badge={<TurnBadge days={(r.ti?.artDesign||0)+(r.ti?.artEdits||0)}/>} value={artwork} onChange={v=>{setArtwork(Number(v)); if(Number(v)===0.04) setProof(proof===0?0.01:proof); }}>{ART_OPTS.map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
++            <Sel label={<Tip k="artwork_design">Artwork & Design</Tip>} badge={<TurnBadge days={(r.ti?.artDesign||0)+(r.ti?.artEdits||0)}/>} value={artwork} onChange={v=>{setArtwork(Number(v)); if(Number(v)===0.04) setProof(proof===0?0.01:proof); }}>{(_NOPROOF ? ART_OPTS.filter(ppsSimpleArt) : ART_OPTS).map(o=><option key={o.val} value={o.val}>{o.label}</option>)}</Sel>
+ 
+             {/* Pages needing edits — for artwork edits option */}
+             {artwork>=2&&artwork<4&&<TxtNum label={<Tip k="pages_edits">Pages Needing Edits</Tip>} value={artEditPages} onChange={setArtEditPages} min={0}/>}
+@@ -7703,14 +7802,17 @@ function App(){
+                 proof={proof} setProof={setProof}
+                 pageTransforms={pageTransforms} setPageTransforms={setPageTransforms}
+                 artDims={artDims} setArtDims={setArtDims}
+-                onPagesDetected={(pg) => upSet(0, { pages: pg })}
++                // A locked contract's spec is never changed by the artwork: a longer PDF is
++                // reconciled/trimmed and flagged like any other mismatch, and there is no
++                // "use my artwork's size" offer (the prop being absent hides it).
++                onPagesDetected={_LOCK ? undefined : (pg) => upSet(0, { pages: pg })}
+                 onCoverArt={setCoverArt}
+                 onBackCoverArt={setBackCoverArt}
+                 openPreviewModalRef={openPreviewModalRef}
+                 debug={proofDebug}
+                 onArtwork={setArtFiles}
+                 onBleedDetected={(has) => { if(has) setBleed(0); else setBleed(1); }}
+-                onSizeOverride={(w, h) => {
++                onSizeOverride={_LOCK ? undefined : (w, h) => {
+                   setSizeMode("custom"); setSizeLabel("Custom Size");
+                   const long = Math.max(w, h), short = Math.min(w, h);
+                   setCustomLong(parseFloat(long.toFixed(3))); setCustomShort(parseFloat(short.toFixed(3)));
+@@ -7764,12 +7866,14 @@ function App(){
+ 
+             {/* Proofing options */}
+             <div style={{marginTop:10}}/>
+-            <Sel label={<Tip k="proofing">Proofing</Tip>} badge={<TurnBadge days={r.ti?.proof}/>} value={proof} onChange={v=>setProof(Number(v))} note={proof>=3&&!r.hcOK?"Hardcopy proofs may add lead time with non-factory papers":null}>
++            {_NOPROOF
++              ? <div style={{fontSize:12.5,color:CC.mid,lineHeight:1.5}}>{Math.abs(Number(artwork)-0.01)<0.005 ? "We print your file as supplied — there is no proof to approve." : "No proof step for this booklet."}</div>
++              : <Sel label={<Tip k="proofing">Proofing</Tip>} badge={<TurnBadge days={r.ti?.proof}/>} value={proof} onChange={v=>setProof(Number(v))} note={proof>=3&&!r.hcOK?"Hardcopy proofs may add lead time with non-factory papers":null}>
+               {artwork===0.01 && <option value={0}>Proof & Approve Online (included)</option>}
+               {artwork!==0.01 && artwork!==0.04 && <option value={0}>No Proof Needed</option>}
+               <option value={0.01}>{`Manual Digital Proof ($${PCF.proof_digital_cost})`}</option>
+               <option value={3.01}>{`Hardcopy Proof ($${PCF.proof_hardcopy_cost})`}</option>
+-            </Sel>
++            </Sel>}
+             {proof >= 3 && (
+               <div style={{marginTop:8, padding:"10px 12px", borderRadius:6, background:"#fefce8", border:"1px solid #fde68a"}}>
+                 <div style={{fontSize:11, fontWeight:700, color:"#854d0e", marginBottom:6}}>📮 Proof Shipping Address</div>
+@@ -7799,7 +7903,7 @@ function App(){
+           </Sec>
+ 
+           {/* SECTION 5: Shipping & Delivery */}
+-          <Sec step={5} summary={secSummary.s5} title="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
++          <Sec step={_LOCK?3:5} summary={secSummary.s5} title="Shipping & Delivery" open={op.s5} onToggle={()=>tog("s5")} badge={r.shipping?.rushCost>0?`+$${r.shipping.rushCost.toFixed(0)} rush`:null}>
+ 
+             <div style={{fontSize:11,fontWeight:600,color:CC.mid,textTransform:"uppercase",letterSpacing:".5px",marginBottom:8}}>Shipping Address</div>
+             <div style={{...r2,marginTop:12}}>

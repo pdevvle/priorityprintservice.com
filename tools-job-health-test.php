@@ -31,7 +31,8 @@ function wc_get_orders( $args ) { return array_values( $GLOBALS['fake_orders'] )
 function get_option( $k, $d = false ) { return $GLOBALS['options'][ $k ] ?? $d; }
 function update_option( $k, $v, $autoload = null ) { $GLOBALS['options'][ $k ] = $v; return true; }
 function wp_mail( $to, $subject, $body, $headers = array() ) { $GLOBALS['mail'][] = compact( 'to', 'subject', 'body' ); return true; }
-function wp_next_scheduled( $h ) { return false; }
+function wp_next_scheduled( $h ) { return ! empty( $GLOBALS['scheduled_now'][ $h ] ); }
+function wp_clear_scheduled_hook( $h ) { $GLOBALS['cleared'][] = $h; unset( $GLOBALS['scheduled_now'][ $h ] ); }
 function wp_schedule_event( $t, $r, $h ) { $GLOBALS['scheduled'][] = array( $r, $h ); }
 function wp_json_encode( $v ) { return json_encode( $v ); }
 function wp_strip_all_tags( $s ) { return strip_tags( (string) $s ); }
@@ -249,7 +250,13 @@ ok( 'a first run does not replay the whole refusal log, only the last week', cou
 $GLOBALS['mail'] = array(); $GLOBALS['fake_orders'] = array(); $GLOBALS['options']['pps_checkout_refusals'] = array(); $GLOBALS['options']['pps_job_health_last_ts'] = time();
 pps_job_health_digest( true );
 ok( 'nothing to say → no mail', count( $GLOBALS['mail'] ) === 0 );
-ok( 'the daily cron is scheduled once on init', ( fire( 'init' ) === null ) && count( array_filter( $GLOBALS['scheduled'] ?? array(), function( $s ) { return $s[0] === 'daily' && $s[1] === 'pps_job_health_digest'; } ) ) === 1 );
+// Retired 2026-10-15 (owner): the daily email no longer goes out. A site that still carries
+// the event has it cleared on init; nothing schedules it again and nothing listens for it.
+$GLOBALS['scheduled_now'] = array( 'pps_job_health_digest' => 1 ); $GLOBALS['scheduled'] = array(); $GLOBALS['mail'] = array();
+fire( 'init' );
+ok( 'the retired daily email is unscheduled on init and never scheduled again', in_array( 'pps_job_health_digest', $GLOBALS['cleared'] ?? array(), true ) && empty( $GLOBALS['scheduled'] ) );
+fire( 'pps_job_health_digest' );
+ok( 'a leftover digest event sends nothing', count( $GLOBALS['mail'] ) === 0 );
 
 // tidy
 foreach ( glob( "$T/pps-artwork/2026/09/*" ) as $f ) @unlink( $f ); @rmdir( "$T/pps-artwork/2026/09" ); @rmdir( "$T/pps-artwork/2026" );

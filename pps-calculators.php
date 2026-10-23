@@ -145,9 +145,14 @@ function pps_get_public_config() {
         $cfg['pcf']['shippo_enabled'] = ! empty( $cfg['pcf']['shippo_api_token'] );
         unset(
             $cfg['pcf']['shippo_api_token'],
+            $cfg['pcf']['google_address_api_key'],
             $cfg['pcf']['question_recipient_email']
         );
     }
+    // The SEO block is public business info (phone, address, rating) and was sent whole,
+    // which carried the Places API key into every calculator page's source once it was
+    // added there (found 2026-10-04). Keys stay on the server.
+    if ( isset( $cfg['seo'] ) && is_array( $cfg['seo'] ) ) unset( $cfg['seo']['places_api_key'] );
     return $cfg;
 }
 
@@ -251,8 +256,35 @@ if ( file_exists( PPS_CALC_DIR . 'pps-paper-report.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-paper-report.php';
 }
 
-// Job health: the print file measured on the order, and the daily exceptions
-// digest to the office. Reads pps_reorder_contact_recipient() and
+// Paper order: the copy-paste supply order (sheets and parent sheets) from every open
+// job, custom orders included. Uses the paper report's catalog and classifier.
+if ( file_exists( PPS_CALC_DIR . 'pps-paper-order.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-paper-order.php';
+}
+
+// Ship schedule: every open job by its must-ship date, also kept in an option.
+if ( file_exists( PPS_CALC_DIR . 'pps-ship-schedule.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-ship-schedule.php';
+}
+
+// Ship-to changes: the order's address is the source; Job Tickets, the Missive panel's subtasks
+// and conversation notes follow, and Shippo's copy is checked.
+if ( file_exists( PPS_CALC_DIR . 'pps-shipto.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-shipto.php';
+}
+
+// Production analytics: intake, fulfilment, sheets and paper + colour cost by week.
+if ( file_exists( PPS_CALC_DIR . 'pps-analytics.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-analytics.php';
+}
+
+// Missive panel: a read-only production view for Missive's sidebar (key-protected).
+if ( file_exists( PPS_CALC_DIR . 'pps-missive-panel.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-missive-panel.php';
+}
+
+// Job health: the print file measured on the order. Its daily exceptions email was
+// retired on 2026-10-15 in favour of the Paper Order screen. Reads pps_reorder_contact_recipient() and
 // pps_paper_report_open_statuses() when they exist.
 if ( file_exists( PPS_CALC_DIR . 'pps-job-health.php' ) ) {
     require_once PPS_CALC_DIR . 'pps-job-health.php';
@@ -1300,6 +1332,9 @@ add_action( 'wp', function() {
         if ( ! empty( $product_defaults ) && is_array( $product_defaults ) ) {
             $config['defaults'] = $product_defaults;
         }
+        // A customer's agreed price list, when the product has one (pps_contract_parse()).
+        $contract = pps_contract_for_product( $product_id );
+        if ( $contract ) $config['contract'] = $contract;
 
         // Forward reorder config if present on the product page URL
         if ( ! empty( $_GET['pps_reorder'] ) ) {
@@ -1399,6 +1434,7 @@ add_action( 'wp', function() {
 
         // ── Config ──
         echo '<script data-cfasync="false">window.PPS_CONFIG=' . wp_json_encode( $config ) . ';</script>';
+        echo pps_question_token_script();
 
         // ── Edit mode banner + button text override ──
         if ( ! empty( $config['editMode'] ) ) {
@@ -1800,6 +1836,26 @@ function pps_quote_question_rate_key() {
     return 'pps_qq_' . substr( hash( 'sha256', $ip . $salt ), 0, 24 );
 }
 
+/**
+ * The intake forms' form token (pps-intake.php), for the calculators' "Ask a question". The
+ * eight calculators post that form from compiled code, so rather than rebuild them this
+ * script, printed beside PPS_CONFIG, fetches a token on the visitor's first pointer, touch or
+ * key on the page and adds it to any pps_quote_question post (holding the post until the token
+ * is in; a failed fetch posts without one, and the server keeps that as a draft). A question
+ * posted without running the page carries none.
+ */
+function pps_question_token_script() {
+    return '<script data-cfasync="false">(function(){if(window.__ppsQTok||!window.fetch)return;window.__ppsQTok=1;'
+      . 'var u=' . wp_json_encode( admin_url( 'admin-ajax.php?action=pps_intake_token' ) ) . ',p=null,of=window.fetch;'
+      . 'function get(){if(!p)p=of.call(window,u,{credentials:"same-origin",cache:"no-store"}).then(function(x){return x.ok?x.text():""})'
+        . '.then(function(t){return /^\d+\.[0-9a-f]{32}$/.test(t)?t:""}).catch(function(){return ""});return p}'
+      . '["pointerdown","touchstart","keydown"].forEach(function(e){document.addEventListener(e,get,{once:true,passive:true,capture:true})});'
+      . 'window.fetch=function(r,o){var b=o&&o.body,a=arguments,s=this;'
+        . 'if(window.FormData&&b instanceof FormData&&b.get("action")==="pps_quote_question"&&!b.has("pps_tok"))'
+        . 'return get().then(function(t){b.append("pps_tok",t);return of.apply(s,a)});'
+        . 'return of.apply(this,a)}})();</script>';
+}
+
 function pps_ajax_quote_question() {
     check_ajax_referer( 'pps_add_to_cart', 'nonce' );
 
@@ -1925,13 +1981,24 @@ function pps_ajax_quote_question() {
     // depth in case wp_insert_post stores HTML escapes oddly.
     $post_title = sprintf( '%s — %s', $name, $calc_label !== '' ? $calc_label : 'Calculator' );
     if ( $total > 0 ) $post_title .= sprintf( ' · $%s', number_format( $total, 2 ) );
+    // Same judgment as the intake forms (pps-intake.php): a submission that reads as the
+    // October 2026 phishing run is kept as a draft and mailed to nobody.
+    // And, like them, a question with no form token (posted without running the page, as the
+    // 2026-10-18 subscription-bombing run did) or one sent under 2 s after the first touch.
+    $spam = function_exists( 'pps_intake_spam_reason' )
+        ? pps_intake_spam_reason( array(
+            '__spam'  => function_exists( 'pps_intake_token_reason' ) ? pps_intake_token_reason( wp_unslash( $_POST['pps_tok'] ?? '' ) ) : '',
+            'name'    => $name, 'phone' => $phone, 'message' => $message ) )
+        : '';
+
     $post_id = wp_insert_post( array(
         'post_type'    => 'pps_question',
-        'post_status'  => 'publish',
+        'post_status'  => $spam === '' ? 'publish' : 'draft',
         'post_title'   => wp_strip_all_tags( $post_title ),
         'post_content' => $message,
     ), true );
     if ( ! is_wp_error( $post_id ) && $post_id > 0 ) {
+        if ( $spam !== '' ) update_post_meta( $post_id, '_pps_q_spam', $spam );
         update_post_meta( $post_id, '_pps_q_name',         $name );
         update_post_meta( $post_id, '_pps_q_email',        $email );
         update_post_meta( $post_id, '_pps_q_phone',        $phone );
@@ -1947,44 +2014,38 @@ function pps_ajax_quote_question() {
         update_post_meta( $post_id, '_pps_q_user_ip',      isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( $_SERVER['REMOTE_ADDR'] ) : '' );
     }
 
+    if ( $spam !== '' ) {
+        // Answer as though it worked, like the honeypot: a bot told it failed retries.
+        wp_send_json_success( array( 'message' => 'Thanks! We received your question and emailed you a confirmation. Expect a reply within 1 business day.' ) );
+    }
+
     $sent_staff = wp_mail( $recipient, $subject, $staff_body, $staff_headers );
     if ( ! is_wp_error( $post_id ) && $post_id > 0 ) {
         update_post_meta( $post_id, '_pps_q_email_sent', $sent_staff ? 1 : 0 );
     }
 
     // ── Compose customer confirmation ──
-    $site_name = wp_specialchars_decode( get_bloginfo( 'name' ), ENT_QUOTES );
-    $cust_subject = sprintf( 'We got your question — %s', $site_name );
-    $cust_lines = array();
-    $cust_lines[] = sprintf( 'Hi %s,', $name );
-    $cust_lines[] = '';
-    $cust_lines[] = 'Thanks for reaching out about your quote. We typically respond within 1 business day.';
-    $cust_lines[] = '';
-    $cust_lines[] = 'For reference, here is the quote you were looking at:';
-    $cust_lines[] = '';
-    if ( $calc_label !== '' ) $cust_lines[] = 'Calculator: ' . $calc_label;
-    if ( $total > 0 )         $cust_lines[] = 'Total:      $' . number_format( $total, 2 );
-    if ( $qty > 0 )           $cust_lines[] = 'Quantity:   ' . number_format( $qty );
-    if ( $summary !== '' ) {
-        $cust_lines[] = '';
-        foreach ( explode( "\n", $summary ) as $line ) $cust_lines[] = $line;
+    // It carries NOTHING the visitor posted: not the name, the question, the calculator
+    // label, the spec summary or the reopen link. Every one of those is free text (or a
+    // URL whose query is) sent to an address nobody has verified, so echoing any of them
+    // lets a bot have this server mail its words to a stranger under the shop's name — what
+    // the quote form's "Hi <name>" did in October 2026. Staff get the full detail above.
+    // Capped site-wide, because the per-IP limit does not hold a bot that rotates addresses.
+    if ( ! function_exists( 'pps_intake_confirm_allowed' ) || pps_intake_confirm_allowed() ) {
+        $site_name  = wp_specialchars_decode( get_bloginfo( 'name' ), ENT_QUOTES );
+        $cust_lines = array(
+            'Hello,',
+            '',
+            'Thanks for reaching out about your quote. We have your question and typically respond within 1 business day.',
+            '',
+            sprintf( '— The %s team', $site_name ),
+        );
+        wp_mail( $email, sprintf( 'We got your question — %s', $site_name ), implode( "\n", $cust_lines ),
+            array( 'Content-Type: text/plain; charset=UTF-8' ) );
     }
-    if ( $reorder_url !== '' ) {
-        $cust_lines[] = '';
-        $cust_lines[] = 'Re-open this quote in the calculator:';
-        $cust_lines[] = $reorder_url;
-    }
-    $cust_lines[] = '';
-    $cust_lines[] = 'Your question:';
-    $cust_lines[] = $message;
-    $cust_lines[] = '';
-    $cust_lines[] = sprintf( '— The %s team', $site_name );
-
-    $cust_headers = array( 'Content-Type: text/plain; charset=UTF-8' );
-    wp_mail( $email, $cust_subject, implode( "\n", $cust_lines ), $cust_headers );
 
     if ( $sent_staff ) {
-        wp_send_json_success( array( 'message' => 'Thanks! We received your question and emailed you a copy. Expect a reply within 1 business day.' ) );
+        wp_send_json_success( array( 'message' => 'Thanks! We received your question and emailed you a confirmation. Expect a reply within 1 business day.' ) );
     } else {
         wp_send_json_error( array( 'message' => 'Sorry — there was a problem submitting your question. Please try again or call us directly.' ) );
     }
@@ -2015,6 +2076,76 @@ function pps_ajax_quote_question() {
  *
  * @return float|null Floor in dollars, or null when it cannot be determined.
  */
+/**
+ * Contract price lists (owner 2026-10-18 — the Armadillo Home Warranty booklet moved off its
+ * WCPA form: "keep their price list", "lock it, quantity only").
+ *
+ * A product may carry `_pps_contract` meta: { name, lock, prices: { qty: price } }. The product
+ * page injects it as PPS_CONFIG.contract, and the calculator (saddle, for now) then offers only
+ * those quantities at exactly those prices, with proofing, artwork services and rush on top;
+ * `lock` fixes the spec to the product's PPS Defaults. Prices live in the database only — the
+ * repo is public. pps_contract_check() holds the price to the same list at add to cart.
+ */
+function pps_contract_parse( $raw ) {
+    if ( is_string( $raw ) && $raw !== '' ) $raw = json_decode( $raw, true );
+    if ( ! is_array( $raw ) || empty( $raw['prices'] ) || ! is_array( $raw['prices'] ) ) return null;
+    $prices = array();
+    foreach ( $raw['prices'] as $q => $p ) {
+        $q = (int) $q; $p = round( (float) $p, 2 );
+        if ( $q > 0 && $q <= 99999 && $p > 0 && $p < 1000000 ) $prices[ $q ] = $p;
+        if ( count( $prices ) >= 50 ) break;
+    }
+    if ( ! $prices ) return null;
+    ksort( $prices );
+    $name = trim( preg_replace( '/\s+/', ' ', wp_strip_all_tags( (string) ( $raw['name'] ?? '' ) ) ) );
+    // What the customer is told the papers are ("House-provided cardstock"); the order still
+    // carries the real stock, which is what the Paper Order and the Job Ticket count.
+    $show = array();
+    foreach ( array( 'inside', 'cover' ) as $f ) {
+        $v = trim( preg_replace( '/\s+/', ' ', wp_strip_all_tags( (string) ( $raw['show'][ $f ] ?? '' ) ) ) );
+        if ( $v !== '' ) $show[ $f ] = function_exists( 'mb_substr' ) ? mb_substr( $v, 0, 80 ) : substr( $v, 0, 80 );
+    }
+    return array(
+        'name'   => function_exists( 'mb_substr' ) ? mb_substr( $name !== '' ? $name : 'Contract', 0, 80 ) : substr( $name !== '' ? $name : 'Contract', 0, 80 ),
+        'lock'   => ! isset( $raw['lock'] ) || (bool) $raw['lock'],
+        'prices' => $prices,
+        'show'   => (object) $show,
+        // No online proof: the customer uploads as supplied, emails it, or it was discussed.
+        'simpleArt' => ! empty( $raw['simpleArt'] ),
+    );
+}
+
+function pps_contract_for_product( $product_id ) {
+    return $product_id ? pps_contract_parse( get_post_meta( $product_id, '_pps_contract', true ) ) : null;
+}
+
+/** "100 = 150.43" per line (also "100: $150.43", "100, 150.43") → [ qty => price ]. */
+function pps_contract_lines_to_prices( $text ) {
+    $out = array();
+    foreach ( preg_split( '/\r?\n/', (string) $text ) as $line ) {
+        if ( preg_match( '/^\s*([\d,]+)\s*[=:,\t]\s*\$?\s*([\d,]*\.?\d+)\s*$/', $line, $m ) ) {
+            $out[ (int) str_replace( ',', '', $m[1] ) ] = (float) str_replace( ',', '', $m[2] );
+        }
+    }
+    return $out;
+}
+
+/**
+ * '' when a posted line agrees with the product's price list, else the refusal. The quantity
+ * must be a listed one (taken from the job itself, not just the contract field) and the price
+ * at least the listed one — proofing, artwork services and rush only ever add to it.
+ */
+function pps_contract_check( $contract, $price, $metadata_json ) {
+    $meta = json_decode( (string) $metadata_json, true );
+    $msg  = 'This product has a set price list. Refresh the page and choose one of its quantities.';
+    if ( ! is_array( $meta ) || empty( $meta['contract'] ) || ! is_array( $meta['contract'] ) ) return $msg;
+    $qty = 0;
+    foreach ( (array) ( $meta['sets'] ?? array() ) as $set ) $qty += (int) ( $set['qty'] ?? 0 );
+    if ( $qty <= 0 || (int) ( $meta['contract']['qty'] ?? 0 ) !== $qty || ! isset( $contract['prices'][ $qty ] ) ) return $msg;
+    if ( (float) $price + 0.005 < (float) $contract['prices'][ $qty ] ) return 'Price below the agreed price for ' . $qty . '. Refresh and try again.';
+    return '';
+}
+
 function pps_materials_price_floor( $product_id, $metadata_json ) {
     $meta = json_decode( (string) $metadata_json, true );
     if ( ! is_array( $meta ) ) return null;
@@ -2216,6 +2347,16 @@ function pps_ajax_add_to_cart() {
         wp_send_json_error( 'Invalid product or price.' );
     }
 
+    // A contract product is held to its price list, not to the formula's floors below.
+    $contract = pps_contract_for_product( $product_id );
+    if ( $contract ) {
+        $refuse = pps_contract_check( $contract, $price, $metadata );
+        if ( $refuse !== '' ) {
+            error_log( sprintf( '[pps] add-to-cart contract check refused: pid=%d submitted=%.2f', $product_id, $price ) );
+            wp_send_json_error( $refuse );
+        }
+    }
+
     $meta_obj = json_decode( $metadata, true );
     // Valid JSON is not enough: a bare string or number here passed, and then threw a
     // TypeError while the order was being written (audit 2026-09-27).
@@ -2309,7 +2450,7 @@ function pps_ajax_add_to_cart() {
     // Scales with the job, unlike the flat product floor above: a large booklet order
     // can no longer be checked out near the $5/50%-of-regular_price minimum. Returns
     // null and skips whenever an input can't be resolved authoritatively.
-    $mat_floor = pps_materials_price_floor( $product_id, $metadata );
+    $mat_floor = $contract ? null : pps_materials_price_floor( $product_id, $metadata );
     if ( $mat_floor !== null && $price < $mat_floor ) {
         error_log( sprintf(
             '[pps] add-to-cart materials floor rejected: pid=%d submitted=%.2f required>=%.2f',
@@ -2424,16 +2565,17 @@ function pps_ajax_add_to_cart() {
     unset( $GLOBALS['pps_internal_add_to_cart'] );
 
     if ( $cart_item_key ) {
-        // Carry the delivery address the customer just typed into the checkout session,
-        // so the address block on /checkout/ agrees with the "Ship to:" on the line item
-        // instead of showing a second, older address from their account.
-        pps_prefill_customer_shipping( $metadata );
-
         // Edit mode: now safe to remove old item since new one succeeded
         if ( $edit_key && $edit_key !== $cart_item_key ) {
             WC()->cart->remove_cart_item( $edit_key );
             WC()->session->set( 'pps_edit_key_' . $product_id, null );
         }
+
+        // Carry the delivery address into the checkout session, so the address block on
+        // /checkout/ agrees with the ship-to the order will carry instead of showing a
+        // second, older address from their account. After the edit removal, because the
+        // address comes from the first calculator line in the cart, which an edit can change.
+        pps_prefill_from_cart();
         // Discount code, if the customer entered one. Applied through WooCommerce so
         // Woo remains the single authority on coupon maths and renders the discount
         // line natively in cart, checkout, order emails and the admin order screen.
@@ -3253,6 +3395,37 @@ add_filter( 'get_post_metadata', function( $value, $object_id, $meta_key, $singl
     return $single ? '1' : array( '1' );
 }, 10, 4 );
 
+/* The same rule for forms assigned to the PRODUCT itself (2026-10-18). WCPA decides that a
+ * product "has a form" from one cached list (the `wcpa_products_transient_ver_3` transient,
+ * which never expires and is rebuilt only by WCPA's own admin screens), then renders that
+ * form and refuses checkout with "Addon data missing" when the line carries no form data.
+ * Moving product 35765 (Armadillo) from its WCPA form into the registry left it on that list
+ * — the meta was gone, the cache was not, and the cache lives in the object cache where
+ * nothing here can clear it. So the list is filtered as it is read: a product the registry
+ * owns is never a WCPA product, whatever WCPA cached. Language-suffixed copies (`…_en`) are
+ * covered by the same filter on each key WCPA might read.
+ */
+function pps_wcpa_drop_registry_products( $list ) {
+    if ( ! is_array( $list ) || ! function_exists( 'pps_get_calculator_for_product' ) ) return $list;
+    foreach ( array( 'full', 'direct_purchasable' ) as $k ) {
+        if ( empty( $list[ $k ] ) || ! is_array( $list[ $k ] ) ) continue;
+        $list[ $k ] = array_values( array_filter( $list[ $k ], function ( $id ) { return ! pps_get_calculator_for_product( (int) $id ); } ) );
+    }
+    return $list;
+}
+add_filter( 'transient_wcpa_products_transient_ver_3', 'pps_wcpa_drop_registry_products' );
+// WCPA's per-product field cache (`wcpa_fields_<id>`, 24 h) is read as a miss for registry
+// products, so it is rebuilt from the product's own meta — no form, global forms excluded above.
+add_action( 'init', function () {
+    foreach ( pps_get_registry() as $meta ) {
+        foreach ( pps_registry_product_ids( $meta['products'] ?? '' ) as $id ) add_filter( 'transient_wcpa_fields_' . $id, '__return_false' );
+    }
+} );
+add_action( 'init', function () {
+    if ( ! function_exists( 'pll_languages_list' ) ) return;
+    foreach ( (array) pll_languages_list() as $l ) add_filter( 'transient_wcpa_products_transient_ver_3_' . $l, 'pps_wcpa_drop_registry_products' );
+} );
+
 /* A refused checkout on a PPS cart must not be silent.
  *
  * The WCPA collision above cost a customer four days and a rush-mail bill, and we
@@ -3866,6 +4039,11 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
             // Single-line spec string: size | qty | pages | paper | color | proof | rush | turnaround
             list( $spec, $addons ) = pps_build_spec( $full, (string) ( $values['pps_summary'] ?? '' ), $prepress, $biz_days );
             $item->add_meta_data( 'PPS-Spec', $spec, true );
+            // A contract that names its papers in the customer's words ("House-provided
+            // cardstock") keeps the stock off everything the customer reads, so production
+            // gets it here — staff-only, like PPS-Spec (owner 2026-10-18).
+            $pp = pps_production_paper_line( $full );
+            if ( $pp !== '' ) $item->add_meta_data( 'Production Paper', $pp, true );
 
             // The add-ons as their own visible line — on the admin notification, the
             // customer's receipt and the order screen — so a coating or a perforation is
@@ -3917,7 +4095,7 @@ function pps_build_spec( array $full, $summary, $prepress, $biz_days ) {
     // An order that took the prepress escape hatch was never approved by
     // anyone; saying SelfApproved on its ticket would be a lie prepress acts on.
     $proof    = $prepress !== '' ? 'PREPRESS-REVIEW'
-        : ( ( $full['proof'] ?? 0 ) >= 3 ? 'Hardcopy' : ( ( $full['proof'] ?? 0 ) > 0 ? 'DigitalProof' : 'SelfApproved' ) );
+        : ( ! empty( $full['noProof'] ) ? 'AsSupplied' : ( ( $full['proof'] ?? 0 ) >= 3 ? 'Hardcopy' : ( ( $full['proof'] ?? 0 ) > 0 ? 'DigitalProof' : 'SelfApproved' ) ) );
     $rush     = ( $full['rushCost'] ?? 0 ) > 0 ? 'RUSH' : 'Standard';
     $days     = intval( $full['days'] ?? $biz_days );
     $sets_ct  = $is_flat ? 1 : count( $sets );
@@ -4080,6 +4258,9 @@ function pps_job_ticket( array $full, array $values, DateTime $delivery, $prepre
             $put( 'Art status', 'Artwork already discussed with us — confirm which files before printing' );
         } elseif ( abs( $art - 0.04 ) < 0.001 ) {
             $put( 'Art status', 'Canva design — download from the link above; no proof approved' );
+        } elseif ( ! empty( $full['noProof'] ) ) {
+            // A contract with no proof step (simpleArt): nobody approved it, and nobody was asked to.
+            $put( 'Art status', 'Uploaded as supplied — no proof on this contract; print the file as received' );
         } else {
             $put( 'Art status', $proof_hash ? 'Self-approved online (approval bound to the print file)' : 'Self-approved online' );
         }
@@ -4175,7 +4356,17 @@ function pps_order_addons( $full, $summary ) {
 function pps_internal_item_meta_keys() {
     // 'Print File Check' is a prepress measurement ("BELOW PRINT RESOLUTION … before
     // plating") — it was reaching customers' receipts (audit 2026-09-27).
-    return array( 'PPS-Spec', 'PPS-Production-Start', 'Preset', 'PPS-Prepress-Review', 'Print File Check', 'PPS-Data-Error' );
+    return array( 'PPS-Spec', 'PPS-Production-Start', 'Preset', 'PPS-Prepress-Review', 'Print File Check', 'PPS-Data-Error', 'Production Paper' );
+}
+
+/** The real stocks of a contract line whose papers are worded for the customer, or ''. */
+function pps_production_paper_line( $meta ) {
+    if ( ! is_array( $meta ) || empty( $meta['contract'] ) ) return '';
+    $label = function ( $p ) { return is_array( $p ) ? trim( (string) ( $p['label'] ?? '' ) ) : trim( (string) $p ); };
+    $in    = $label( $meta['insidePaper'] ?? '' );
+    if ( $in === '' ) return '';
+    $cover = ( $meta['coverMode'] ?? 'same' ) === 'same' ? 'same as inside' : $label( $meta['coverPaper'] ?? '' );
+    return 'Inside: ' . $in . ( $cover !== '' ? ' · Cover: ' . $cover : '' );
 }
 
 // WooCommerce renders both notifications through the same meta accessor, so the filter
@@ -4213,10 +4404,39 @@ add_filter( 'woocommerce_order_item_get_formatted_meta_data', function( $formatt
     foreach ( $formatted as $id => $meta ) {
         if ( isset( $meta->key ) && in_array( $meta->key, $internal, true ) ) {
             unset( $formatted[ $id ] );
+        } elseif ( isset( $meta->key ) && $meta->key === 'Job Ticket' ) {
+            $meta->value         = pps_customer_ticket( (string) $meta->value );
+            $meta->display_value = pps_customer_ticket( (string) $meta->display_value );
         }
     }
     return $formatted;
 }, 10, 2 );
+
+/**
+ * The Job Ticket as the customer reads it (owner 2026-10-21: "That shouldn't be shown to the
+ * customer. Only the eta; the others are just on our copy of the receipt"): the shop's own
+ * schedule — "Production start" and "Must ship by" — comes out; the Delivery line stays. The
+ * stored ticket is untouched, so the order screen, the admin email and Missive keep both.
+ * Works on the plain value and on the rendered one (lines split by newlines or <br>).
+ */
+function pps_customer_ticket_labels() { return array( 'Production start', 'Must ship by' ); }
+function pps_customer_ticket( $text ) {
+    $labels = implode( '|', array_map( function ( $l ) { return preg_quote( $l, '/' ); }, pps_customer_ticket_labels() ) );
+    $lines  = explode( "\n", (string) $text );            // the rendered value keeps a newline after each <br />
+    $out = array();
+    foreach ( $lines as $line ) {
+        if ( preg_match( '/^(\s*(?:<(?!br)[^>]+>\s*)*)(?:' . $labels . '):.*?((?:<\/[^>]+>\s*)*)\s*$/i', $line, $m ) ) {
+            if ( $m[1] !== '' || $m[2] !== '' ) {                                 // keep a <p> or </p> the line carried
+                $keep = $m[1] . $m[2];
+                if ( $m[2] !== '' && $out ) { $out[ count( $out ) - 1 ] = preg_replace( '/<br\s*\/?>\s*$/i', '', $out[ count( $out ) - 1 ] ) . $keep; }
+                else $out[] = $keep;
+            }
+            continue;
+        }
+        $out[] = $line;
+    }
+    return implode( "\n", $out );
+}
 
 // ═══════════════════════════════════════════════════════════════
 // ORDER: LIFT THE CALCULATOR'S SHIP-TO ONTO THE ORDER ITSELF
@@ -4473,9 +4693,11 @@ function pps_apply_calculator_shipping_address( $order_or_id ) {
     // Auditable: whoever picks this order up in Shippo can see where the address came
     // from, rather than wondering why it differs from billing.
     $order->add_order_note( sprintf(
-        'Delivery address taken from the calculator: %s, %s %s %s.%s',
-        $addr['street1'], $addr['city'], $addr['state'], $addr['zip'],
-        $weight > 0 ? sprintf( ' Estimated %.2f lb in %d carton(s).', $weight, max( 1, $cartons ) ) : ''
+        'Delivery address taken from the calculator: %s, %s %s %s.%s%s',
+        $addr['street1'] . ( $addr['street2'] !== '' ? ', ' . $addr['street2'] : '' ), $addr['city'], $addr['state'], $addr['zip'],
+        $weight > 0 ? sprintf( ' Estimated %.2f lb in %d carton(s).', $weight, max( 1, $cartons ) ) : '',
+        // UPS does not deliver to a PO Box; the quote already carries the extra day.
+        pps_is_po_box( $addr['street1'], $addr['street2'] ) ? ' PO BOX — UPS cannot deliver; ship Ground Advantage.' : ''
     ) );
 
     $order->save();
@@ -4567,6 +4789,324 @@ function pps_prefill_customer_shipping( $metadata_json ) {
 
     return true;
 }
+
+/**
+ * One ship-to per cart, chosen the way the order chooses it: the FIRST calculator line
+ * with a whole address (pps_apply_calculator_shipping_address(), "first usable address
+ * wins"). Until 2026-10-04 the checkout was filled from the line added LAST while the
+ * order shipped to the line added FIRST, so a cart with two destinations showed the
+ * customer one address and sent the job to the other.
+ *
+ * Re-runs when a line is removed, because the first line can change; the session
+ * remembers which address it last wrote, so an address the customer has since typed
+ * over at checkout is only replaced when the cart's ship-to actually changes.
+ *
+ * @return bool True when the session was updated.
+ */
+function pps_prefill_from_cart() {
+    if ( ! function_exists( 'WC' ) || ! WC()->cart || ! WC()->session ) return false;
+    foreach ( WC()->cart->get_cart() as $item ) {
+        $raw = isset( $item['pps_metadata'] ) ? (string) $item['pps_metadata'] : '';
+        if ( $raw === '' ) continue;
+        $meta = json_decode( $raw, true );
+        if ( ! is_array( $meta ) ) continue;
+        $a = isset( $meta['shipAddr'] ) && is_array( $meta['shipAddr'] ) ? $meta['shipAddr'] : array();
+        $street = trim( (string) ( $a['street1'] ?? '' ) );
+        $city   = trim( (string) ( $a['city'] ?? '' ) );
+        $state  = trim( (string) ( $a['state'] ?? $meta['shipState'] ?? '' ) );
+        $zip    = trim( (string) ( $a['zip'] ?? $meta['shipZip'] ?? '' ) );
+        if ( $street === '' || $city === '' || $state === '' || $zip === '' ) continue;
+        $key = md5( strtoupper( preg_replace( '/[^A-Za-z0-9]/', '', $street . (string) ( $a['street2'] ?? '' ) . $city . $state . $zip . (string) ( $a['name'] ?? '' ) . (string) ( $a['company'] ?? '' ) ) ) );
+        if ( WC()->session->get( 'pps_prefill_key' ) === $key ) return false;
+        if ( ! pps_prefill_customer_shipping( $raw ) ) return false;
+        WC()->session->set( 'pps_prefill_key', $key );
+        return true;
+    }
+    return false;
+}
+add_action( 'woocommerce_cart_item_removed', function() {
+    try { pps_prefill_from_cart(); } catch ( \Throwable $e ) { error_log( 'PPS prefill: ' . $e->getMessage() ); }
+} );
+
+/** A PO Box in either address line. UPS does not deliver to them. */
+function pps_is_po_box( $line1, $line2 = '' ) {
+    $re = '/\b(?:p\.?\s*o\.?\s*b(?:ox)?|post\s*office\s*box|postal\s*box)\b\.?\s*#?\s*\d|^\s*box\s*#?\s*\d+\s*$/i';
+    return (bool) ( preg_match( $re, (string) $line1 ) || preg_match( $re, (string) $line2 ) );
+}
+
+/**
+ * Normalise an address line for comparison: case, punctuation and the USPS
+ * abbreviations, so "7000 Lindell Road" and "7000 LINDELL RD" compare equal and a
+ * standardised suggestion is not shown to the customer as a correction.
+ */
+function pps_addr_norm( $s ) {
+    static $abbr = array(
+        'STREET' => 'ST', 'ROAD' => 'RD', 'AVENUE' => 'AVE', 'AV' => 'AVE', 'DRIVE' => 'DR', 'BOULEVARD' => 'BLVD',
+        'LANE' => 'LN', 'COURT' => 'CT', 'CIRCLE' => 'CIR', 'PLACE' => 'PL', 'HIGHWAY' => 'HWY', 'PARKWAY' => 'PKWY',
+        'TERRACE' => 'TER', 'TRAIL' => 'TRL', 'SQUARE' => 'SQ', 'EXPRESSWAY' => 'EXPY', 'FREEWAY' => 'FWY',
+        'SUITE' => 'STE', 'APARTMENT' => 'APT', 'BUILDING' => 'BLDG', 'FLOOR' => 'FL', 'ROOM' => 'RM', 'UNIT' => 'UNIT',
+        'NORTH' => 'N', 'SOUTH' => 'S', 'EAST' => 'E', 'WEST' => 'W', 'NORTHEAST' => 'NE', 'NORTHWEST' => 'NW',
+        'SOUTHEAST' => 'SE', 'SOUTHWEST' => 'SW', 'MOUNT' => 'MT', 'SAINT' => 'ST', 'FORT' => 'FT',
+    );
+    $s = strtoupper( (string) $s );
+    $s = str_replace( '#', ' # ', $s );
+    $s = preg_replace( '/[^A-Z0-9# ]+/', ' ', $s );
+    $out = array();
+    foreach ( preg_split( '/\s+/', trim( $s ) ) as $w ) {
+        if ( $w === '' || $w === '#' ) continue;
+        $out[] = $abbr[ $w ] ?? $w;
+    }
+    return implode( ' ', $out );
+}
+
+/**
+ * What a Shippo v2 validation means for the customer. Pure, so it can be tested.
+ *
+ *   verified   — the postal data matches; a standardised spelling or an added ZIP+4 is
+ *                not a correction and is not shown to the customer.
+ *   corrected  — the postal data suggests a different street, city, state or ZIP;
+ *                'suggested' carries it for "Did you mean …?".
+ *   unit       — the building was found but the apartment/suite is missing or wrong.
+ *   not_found  — the address is not in the postal database.
+ *
+ * The customer is ASKED about corrected, unit and not_found, never refused: the
+ * owner's rule is that nobody is blocked at ordering, and a new building, a campus
+ * or a trade-show booth is legitimately absent from postal data.
+ */
+function pps_addr_verify_classify( array $in, array $res ) {
+    $an   = isset( $res['analysis'] ) && is_array( $res['analysis'] ) ? $res['analysis'] : array();
+    $vr   = isset( $an['validation_result'] ) && is_array( $an['validation_result'] ) ? $an['validation_result'] : array();
+    $val  = strtolower( (string) ( $vr['value'] ?? '' ) );
+    $type = strtolower( (string) ( $an['address_type'] ?? '' ) );
+    if ( ! in_array( $type, array( 'residential', 'commercial', 'po_box' ), true ) ) $type = '';
+    $codes = array();
+    foreach ( (array) ( $vr['reasons'] ?? array() ) as $r ) {
+        if ( is_array( $r ) && ! empty( $r['code'] ) ) $codes[] = preg_replace( '/[^a-z0-9_]/', '', strtolower( (string) $r['code'] ) );
+    }
+    $codes = array_values( array_filter( $codes ) );
+    $out = array( 'status' => 'unavailable', 'type' => $type, 'reasons' => $codes, 'suggested' => null );
+    if ( $val === '' ) return $out;
+    if ( $val === 'invalid' ) { $out['status'] = 'not_found'; return $out; }
+
+    $rec  = isset( $res['recommended_address'] ) && is_array( $res['recommended_address'] ) ? $res['recommended_address'] : array();
+    $conf = strtolower( (string) ( $rec['confidence_result']['score'] ?? '' ) );
+    // A building the postal data does not hold — a campus, a dealership, a trade-show
+    // hall — comes back with low confidence and a "suggestion" that can drop the building
+    // name. Not wrong, and not worth a question (2026-10-04 sample: 87321, 87273).
+    if ( $conf === 'low' || in_array( 'address_found_non_postal_match', $codes, true ) ) {
+        $out['status'] = 'verified';
+        $out['lowConfidence'] = true;
+        return $out;
+    }
+    $sug = array(
+        'street1' => trim( (string) ( $rec['address_line_1'] ?? '' ) ),
+        'street2' => trim( (string) ( $rec['address_line_2'] ?? '' ) ),
+        'city'    => trim( (string) ( $rec['city_locality'] ?? '' ) ),
+        'state'   => strtoupper( trim( (string) ( $rec['state_province'] ?? '' ) ) ),
+        'zip'     => trim( (string) ( $rec['postal_code'] ?? '' ) ),
+    );
+    $in_unit  = pps_addr_unit( trim( ( $in['street1'] ?? '' ) . ' ' . ( $in['street2'] ?? '' ) ) );
+    $missing  = false;
+    foreach ( $codes as $c ) { if ( preg_match( '/missing_secondary|secondary_missing|secondary_required/', $c ) ) $missing = true; }
+    // A unit the customer gave that the postal data does not list (suites in office
+    // buildings mostly): the building is right, and asking would only add friction.
+    if ( in_array( 'address_confirmed_invalid_secondary', $codes, true ) ) $out['unitUnconfirmed'] = true;
+    if ( $missing && $in_unit === '' ) { $out['status'] = 'unit'; return $out; }
+    if ( $sug['street1'] === '' ) { $out['status'] = 'verified'; return $out; }
+
+    // Only a change that moves the parcel is a correction: the street (number and name),
+    // the city, the state, the five-digit ZIP or the unit number. Case, abbreviations,
+    // a street suffix, a direction word, "#" vs "Ste" and an added ZIP+4 are not.
+    $z5 = static function( $z ) { return substr( preg_replace( '/[^0-9]/', '', (string) $z ), 0, 5 ); };
+    $same = pps_addr_loose( ( $in['street1'] ?? '' ) . ' ' . ( $in['street2'] ?? '' ) ) === pps_addr_loose( $sug['street1'] . ' ' . $sug['street2'] )
+        && pps_addr_norm( $in['city'] ?? '' ) === pps_addr_norm( $sug['city'] )
+        && strtoupper( trim( (string) ( $in['state'] ?? '' ) ) ) === $sug['state']
+        && $z5( $in['zip'] ?? '' ) === $z5( $sug['zip'] );
+    if ( $same ) { $out['status'] = 'verified'; return $out; }
+    $out['status']    = 'corrected';
+    $out['suggested'] = $sug;
+    return $out;
+}
+
+/** Street line for comparison without suffix, direction or unit words: "S 3rd St # 4" → "3RD 4". */
+function pps_addr_loose( $s ) {
+    static $drop = array( 'ST', 'RD', 'AVE', 'DR', 'BLVD', 'LN', 'CT', 'CIR', 'PL', 'HWY', 'PKWY', 'TER', 'TRL', 'SQ', 'WAY',
+        'EXPY', 'FWY', 'N', 'S', 'E', 'W', 'NE', 'NW', 'SE', 'SW', 'STE', 'APT', 'UNIT', 'RM', 'BLDG', 'FL', '#' );
+    $w = array_diff( explode( ' ', pps_addr_norm( $s ) ), $drop );
+    return implode( ' ', array_values( array_filter( $w, 'strlen' ) ) );
+}
+
+/** The unit part of an address ("Apt 4", "Ste 300", "# 12"), or "". */
+function pps_addr_unit( $s ) {
+    return preg_match( '/(?:\b(?:APT|STE|SUITE|UNIT|RM|ROOM|FL|FLOOR|BLDG|APARTMENT)\b\.?|#)\s*([A-Z0-9-]+)/i', (string) $s, $m ) ? strtoupper( $m[1] ) : '';
+}
+
+/**
+ * Is address verification switched on? PPS Config → Production → "Verify Addresses"
+ * (pcf address_verify). Off by default: Shippo charges per US address checked, and the
+ * owner turns it on.
+ */
+function pps_addr_verify_enabled( $cfg = null ) {
+    if ( $cfg === null ) $cfg = pps_get_config();
+    $v = $cfg['pcf']['address_verify'] ?? 0;
+    return ( $v === true || (string) $v === '1' ) && pps_addr_provider( $cfg ) !== '';
+}
+
+/** The Google key for address validation: its own field, else the Places key the site already has. */
+function pps_addr_google_key( $cfg ) {
+    $k = trim( (string) ( $cfg['pcf']['google_address_api_key'] ?? '' ) );
+    if ( $k === '' ) $k = trim( (string) ( $cfg['seo']['places_api_key'] ?? '' ) );
+    return $k;
+}
+
+/**
+ * Which service checks addresses: Google Address Validation when a key is set (free up to
+ * 5,000 checks a month — far above our volume), else Shippo (2 cents each), else none.
+ */
+function pps_addr_provider( $cfg ) {
+    if ( pps_addr_google_key( $cfg ) !== '' ) return 'google';
+    if ( ! empty( $cfg['pcf']['shippo_api_token'] ) ) return 'shippo';
+    return '';
+}
+
+/**
+ * What a Google Address Validation answer means, in the same terms as
+ * pps_addr_verify_classify() so the calculators cannot tell the providers apart.
+ * USPS's delivery-point answer (CASS, requested with enableUspsCass) decides when present:
+ * Y deliverable, S unit not listed, D unit missing, N not deliverable. A building Google
+ * places exactly but USPS does not deliver to by name (a campus, a dealership) is
+ * verified with lowConfidence, never "not found" — the 2026-10-04 sample had two.
+ */
+function pps_addr_verify_classify_google( array $in, array $res ) {
+    $r  = isset( $res['result'] ) && is_array( $res['result'] ) ? $res['result'] : array();
+    $v  = isset( $r['verdict'] ) && is_array( $r['verdict'] ) ? $r['verdict'] : array();
+    $md = isset( $r['metadata'] ) && is_array( $r['metadata'] ) ? $r['metadata'] : array();
+    $u  = isset( $r['uspsData'] ) && is_array( $r['uspsData'] ) ? $r['uspsData'] : array();
+    $type = ! empty( $md['poBox'] ) ? 'po_box' : ( ! empty( $md['business'] ) ? 'commercial' : ( ! empty( $md['residential'] ) ? 'residential' : '' ) );
+    $out  = array( 'status' => 'unavailable', 'type' => $type, 'reasons' => array(), 'suggested' => null );
+    if ( ! $v ) return $out;
+    $dpv    = strtoupper( (string) ( $u['dpvConfirmation'] ?? '' ) );
+    $gran   = strtoupper( (string) ( $v['validationGranularity'] ?? '' ) );
+    $action = strtoupper( (string) ( $v['possibleNextAction'] ?? '' ) );
+    $premise = in_array( $gran, array( 'PREMISE', 'SUB_PREMISE' ), true );
+    if ( $dpv !== '' ) $out['reasons'][] = 'dpv_' . strtolower( $dpv );
+    if ( $action !== '' ) $out['reasons'][] = 'next_' . strtolower( $action );
+    $missing = array_map( 'strtolower', (array) ( $r['address']['missingComponentTypes'] ?? array() ) );
+
+    // The suggestion: USPS's standardised form when we have it, else Google's postal address.
+    $sa = isset( $u['standardizedAddress'] ) && is_array( $u['standardizedAddress'] ) ? $u['standardizedAddress'] : array();
+    if ( ! empty( $sa['firstAddressLine'] ) ) {
+        $zip = trim( (string) ( $sa['zipCode'] ?? '' ) );
+        if ( $zip !== '' && ! empty( $sa['zipCodeExtension'] ) ) $zip .= '-' . trim( (string) $sa['zipCodeExtension'] );
+        $sug = array( 'street1' => trim( (string) $sa['firstAddressLine'] ), 'street2' => trim( (string) ( $sa['secondAddressLine'] ?? '' ) ),
+                      'city' => trim( (string) ( $sa['city'] ?? '' ) ), 'state' => strtoupper( trim( (string) ( $sa['state'] ?? '' ) ) ), 'zip' => $zip );
+    } else {
+        $pa = isset( $r['address']['postalAddress'] ) && is_array( $r['address']['postalAddress'] ) ? $r['address']['postalAddress'] : array();
+        $ln = array_values( (array) ( $pa['addressLines'] ?? array() ) );
+        $sug = array( 'street1' => trim( (string) ( $ln[0] ?? '' ) ), 'street2' => trim( (string) ( $ln[1] ?? '' ) ),
+                      'city' => trim( (string) ( $pa['locality'] ?? '' ) ), 'state' => strtoupper( trim( (string) ( $pa['administrativeArea'] ?? '' ) ) ),
+                      'zip' => trim( (string) ( $pa['postalCode'] ?? '' ) ) );
+    }
+    $in_unit = pps_addr_unit( trim( ( $in['street1'] ?? '' ) . ' ' . ( $in['street2'] ?? '' ) ) );
+
+    if ( $dpv === 'N' || ( $dpv === '' && $action === 'FIX' ) ) {
+        if ( $premise ) { $out['status'] = 'verified'; $out['lowConfidence'] = true; return $out; }
+        $out['status'] = 'not_found';
+        return $out;
+    }
+    if ( ( $dpv === 'D' || $action === 'CONFIRM_ADD_SUBPREMISES' || in_array( 'subpremise', $missing, true ) ) && $in_unit === '' ) {
+        $out['status'] = 'unit';
+        return $out;
+    }
+    if ( $dpv === 'S' ) $out['unitUnconfirmed'] = true;
+    if ( $dpv === '' && ! $premise ) {
+        // No USPS answer and Google could not place the building: say nothing rather than guess.
+        $out['status'] = 'unavailable';
+        return $out;
+    }
+    $z5 = static function( $z ) { return substr( preg_replace( '/[^0-9]/', '', (string) $z ), 0, 5 ); };
+    $same = $sug['street1'] === ''
+        || ( pps_addr_loose( ( $in['street1'] ?? '' ) . ' ' . ( $in['street2'] ?? '' ) ) === pps_addr_loose( $sug['street1'] . ' ' . $sug['street2'] )
+            && pps_addr_norm( $in['city'] ?? '' ) === pps_addr_norm( $sug['city'] )
+            && strtoupper( trim( (string) ( $in['state'] ?? '' ) ) ) === $sug['state']
+            && $z5( $in['zip'] ?? '' ) === $z5( $sug['zip'] ) );
+    if ( $same ) { $out['status'] = 'verified'; return $out; }
+    $out['status']    = 'corrected';
+    $out['suggested'] = $sug;
+    return $out;
+}
+
+/** The ZIP → city table (pps-zip-city.php, generated from GeoNames by tools-build-zip-city.mjs). */
+function pps_zip_city_table() {
+    static $t = null;
+    if ( $t === null ) {
+        $f = __DIR__ . '/pps-zip-city.php';
+        $t = is_readable( $f ) ? include $f : array();
+        if ( ! is_array( $t ) ) $t = array();
+    }
+    return $t;
+}
+
+/**
+ * A city that does not belong to the ZIP, as a hint — free, no outside service. The post
+ * office accepts more than one name for many ZIPs (Hollywood for 90046, New River for
+ * 85086), so any city found anywhere in the same three-digit ZIP area is accepted; only a
+ * city from somewhere else, or a misspelling, gets a hint. Never a question, never a stop.
+ *
+ * @return array|null { zipCity: the ZIP's city, typo: true when it looks like a misspelling }
+ */
+function pps_zip_city_hint( $zip, $city ) {
+    $t = pps_zip_city_table();
+    if ( empty( $t['z'] ) ) return null;
+    $z5 = substr( preg_replace( '/[^0-9]/', '', (string) $zip ), 0, 5 );
+    if ( strlen( $z5 ) !== 5 || ! isset( $t['z'][ $z5 ] ) ) return null;
+    $norm = static function( $s ) {
+        $s = strtoupper( preg_replace( '/[^A-Za-z ]+/', ' ', (string) $s ) );
+        $s = preg_replace( array( '/\bSAINT\b/', '/\bMOUNT\b/', '/\bFORT\b/' ), array( 'ST', 'MT', 'FT' ), $s );
+        return trim( preg_replace( '/\s+/', ' ', $s ) );
+    };
+    $c = $norm( $city );
+    if ( $c === '' ) return null;
+    $name = explode( '|', (string) $t['c'][ $t['z'][ $z5 ] ] )[0];
+    if ( $norm( $name ) === $c ) return null;
+    foreach ( (array) ( $t['p'][ substr( $z5, 0, 3 ) ] ?? array() ) as $i ) {
+        if ( $norm( explode( '|', (string) ( $t['c'][ $i ] ?? '' ) )[0] ) === $c ) return null;
+    }
+    return array( 'zipCity' => ucwords( strtolower( $name ) ), 'typo' => levenshtein( $c, $norm( $name ) ) <= 2 );
+}
+
+/**
+ * What production should hear about a line's address check, as sentences; empty when
+ * nothing needs a person. Read from the metadata the calculator posts ('addrCheck' for
+ * the delivery address, 'proofAddrCheck' for a hardcopy proof sent elsewhere): the
+ * customer was asked, and these are the cases where they kept something the check
+ * doubted. Used by the daily exceptions email.
+ */
+function pps_addr_check_problems( array $meta ) {
+    $out = array();
+    foreach ( array( 'addrCheck' => 'Delivery address', 'proofAddrCheck' => 'Proof address' ) as $k => $label ) {
+        $c = isset( $meta[ $k ] ) && is_array( $meta[ $k ] ) ? $meta[ $k ] : null;
+        if ( ! $c ) continue;
+        $st   = (string) ( $c['status'] ?? '' );
+        $used = (string) ( $c['used'] ?? '' );
+        if ( ! empty( $c['zipState'] ) ) {
+            $out[] = $label . ': the ZIP belongs to ' . preg_replace( '/[^A-Z]/', '', strtoupper( (string) $c['zipState'] ) ) . ', not the state given (customer kept it)';
+        }
+        if ( $st === 'not_found' ) {
+            $out[] = $label . ': not found in postal data (customer kept it as entered)';
+        } elseif ( $st === 'corrected' && $used === 'entered' ) {
+            $s = is_array( $c['suggested'] ?? null ) ? $c['suggested'] : array();
+            $sug = trim( implode( ', ', array_filter( array( $s['street1'] ?? '', $s['street2'] ?? '', trim( ( $s['city'] ?? '' ) . ' ' . ( $s['state'] ?? '' ) . ' ' . ( $s['zip'] ?? '' ) ) ) ) ) );
+            $out[] = $label . ': customer kept their version over the postal suggestion' . ( $sug !== '' ? ' (' . $sug . ')' : '' );
+        } elseif ( $st === 'unit' && $used === 'entered' ) {
+            $out[] = $label . ': postal data expects an apartment/suite number; customer said none is needed';
+        }
+    }
+    return array_map( static function( $s ) { return pps_clean_text( $s ); }, $out );
+}
+
+/** Most Shippo validations one day may spend before the endpoint answers "unavailable". */
+if ( ! defined( 'PPS_ADDR_VERIFY_DAILY_CAP' ) ) define( 'PPS_ADDR_VERIFY_DAILY_CAP', 300 );
 
 // Classic checkout, block checkout, and the admin "create order" screen. Each fires
 // once the line items exist, which is what this reads from.
@@ -4898,6 +5438,9 @@ add_filter( 'woocommerce_product_data_tabs', function( $tabs ) {
 add_action( 'woocommerce_product_data_panels', function() {
     global $post;
     $defaults = get_post_meta( $post->ID, '_pps_defaults', true ) ?: array();
+    // Stored as JSON text by tools that write meta from outside (the product page already reads
+    // it that way). Shown as blank fields it would be wiped by the next save of this screen.
+    if ( is_string( $defaults ) ) { $defaults = json_decode( $defaults, true ); if ( ! is_array( $defaults ) ) $defaults = array(); }
     ?>
     <div id="pps_defaults_data" class="panel woocommerce_options_panel" style="padding:12px 20px">
         <p style="color:#666;font-size:12px">Set default calculator values for this product. Leave blank to use the global defaults. URL parameters override these.</p>
@@ -4978,7 +5521,47 @@ add_action( 'woocommerce_product_data_panels', function() {
             </span>
         </p>
         <?php
+        // ── Contract price list ──
+        $contract = function_exists( 'pps_contract_for_product' ) ? pps_contract_for_product( $post->ID ) : null;
+        $lines    = '';
+        if ( $contract ) foreach ( $contract['prices'] as $q => $p ) $lines .= $q . ' = ' . number_format( $p, 2, '.', '' ) . "\n";
         ?>
+        <div style="border-top:1px solid #eee;padding-top:12px;margin-top:8px">
+            <p style="margin:0 0 6px"><strong>Contract price list</strong> — a customer's agreed prices. When set, the calculator offers only these quantities and charges exactly these prices (proofs, artwork services and rush are added on top). Leave the list empty for normal pricing.</p>
+            <p class="form-field">
+                <label for="pps_contract_name">Customer / list name</label>
+                <input type="text" id="pps_contract_name" name="pps_contract_name" maxlength="80"
+                       value="<?php echo esc_attr( $contract ? $contract['name'] : '' ); ?>" placeholder="Armadillo Home Warranty" style="width:300px" />
+            </p>
+            <p class="form-field">
+                <label for="pps_contract_prices">Quantity = price</label>
+                <textarea id="pps_contract_prices" name="pps_contract_prices" rows="9" style="width:300px;font-family:monospace"
+                          placeholder="100 = 150.43&#10;250 = 198.48"><?php echo esc_textarea( $lines ); ?></textarea>
+                <span class="description" style="display:block;margin-left:0">One per line. The price is for the whole quantity.</span>
+            </p>
+            <p class="form-field">
+                <label for="pps_contract_show_inside">Inside paper, as the customer sees it</label>
+                <input type="text" id="pps_contract_show_inside" name="pps_contract_show_inside" maxlength="80"
+                       value="<?php echo esc_attr( $contract && ! empty( $contract['show']->inside ) ? $contract['show']->inside : '' ); ?>" placeholder="House-provided text weight paper" style="width:300px" />
+            </p>
+            <p class="form-field">
+                <label for="pps_contract_show_cover">Cover paper, as the customer sees it</label>
+                <input type="text" id="pps_contract_show_cover" name="pps_contract_show_cover" maxlength="80"
+                       value="<?php echo esc_attr( $contract && ! empty( $contract['show']->cover ) ? $contract['show']->cover : '' ); ?>" placeholder="House-provided cardstock" style="width:300px" />
+                <span class="description" style="display:block;margin-left:0">Optional. The real papers are the defaults above — that is what the Job Ticket and the Paper Order use; the customer's page shows these words (the receipt shows both).</span>
+            </p>
+            <p class="form-field">
+                <label for="pps_contract_lock">Lock the spec</label>
+                <input type="checkbox" id="pps_contract_lock" name="pps_contract_lock" value="1" <?php checked( ! $contract || $contract['lock'] ); ?> />
+                <span class="description">Size, pages, paper, colour and finishing are fixed to the defaults above; the customer chooses quantity, proof and artwork only.</span>
+            </p>
+            <p class="form-field">
+                <label for="pps_contract_simple_art">No proof step</label>
+                <input type="checkbox" id="pps_contract_simple_art" name="pps_contract_simple_art" value="1" <?php checked( $contract && ! empty( $contract['simpleArt'] ) ); ?> />
+                <span class="description">Artwork is uploaded as supplied, emailed after ordering, or already discussed — no online proof, no approval, no proof options.</span>
+            </p>
+            <input type="hidden" name="pps_contract_form" value="1" />
+        </div>
     </div>
     <?php
 } );
@@ -5045,6 +5628,22 @@ add_action( 'woocommerce_process_product_meta', function( $post_id ) {
         update_post_meta( $post_id, '_price', $price );
     } elseif ( $typed === '' && $url_price === null ) {
         delete_post_meta( $post_id, '_pps_defaults_price' );
+    }
+
+    // Contract price list. An empty list removes it — the product goes back to normal pricing.
+    if ( ! empty( $_POST['pps_contract_form'] ) ) {
+        $c = pps_contract_parse( array(
+            'name'   => sanitize_text_field( wp_unslash( $_POST['pps_contract_name'] ?? '' ) ),
+            'lock'   => ! empty( $_POST['pps_contract_lock'] ),
+            'simpleArt' => ! empty( $_POST['pps_contract_simple_art'] ),
+            'prices' => pps_contract_lines_to_prices( wp_unslash( $_POST['pps_contract_prices'] ?? '' ) ),
+            'show'   => array(
+                'inside' => sanitize_text_field( wp_unslash( $_POST['pps_contract_show_inside'] ?? '' ) ),
+                'cover'  => sanitize_text_field( wp_unslash( $_POST['pps_contract_show_cover'] ?? '' ) ),
+            ),
+        ) );
+        if ( $c ) update_post_meta( $post_id, '_pps_contract', wp_json_encode( $c ) );
+        else      delete_post_meta( $post_id, '_pps_contract' );
     }
 } );
 
@@ -5273,6 +5872,107 @@ add_action( 'rest_api_init', function() {
                 return new WP_Error( 'shippo_error', $resp->get_error_message(), array( 'status' => 502 ) );
             }
             return rest_ensure_response( json_decode( wp_remote_retrieve_body( $resp ), true ) );
+        },
+    ) );
+
+    // POST /wp-json/pps/v1/shipping/verify — is this delivery address real? Called by the
+    // calculators when the customer finishes the address (focus leaves a complete address,
+    // never per keystroke) and, if that never happened, once at Add to Order. Two halves:
+    // a free local ZIP → city hint, always; and the postal check (Google Address
+    // Validation, else Shippo) only when PPS Config → Shippo Integration → Verify
+    // Addresses is on. Public (most customers are guests), so the outside call is cached
+    // per address for 30 days, limited to 10 a minute per IP and capped per day. Every
+    // failure answers "unavailable" with HTTP 200 — the calculator then lets the order
+    // through marked not checked. Nothing here may ever stop an order.
+    register_rest_route( 'pps/v1', '/shipping/verify', array(
+        'methods'             => 'POST',
+        'permission_callback' => '__return_true',
+        'callback'            => function( $request ) {
+            $unavailable = array( 'status' => 'unavailable', 'type' => '', 'reasons' => array(), 'suggested' => null );
+            try {
+                $cfg = pps_get_config();
+                $d  = (array) $request->get_json_params();
+                $in = array(
+                    'street1' => substr( sanitize_text_field( (string) ( $d['street1'] ?? '' ) ), 0, 120 ),
+                    'street2' => substr( sanitize_text_field( (string) ( $d['street2'] ?? '' ) ), 0, 120 ),
+                    'city'    => substr( sanitize_text_field( (string) ( $d['city'] ?? '' ) ), 0, 80 ),
+                    'state'   => strtoupper( substr( preg_replace( '/[^A-Za-z]/', '', (string) ( $d['state'] ?? '' ) ), 0, 2 ) ),
+                    'zip'     => substr( preg_replace( '/[^0-9-]/', '', (string) ( $d['zip'] ?? '' ) ), 0, 10 ),
+                );
+                // The free, local half: a city that does not belong to the ZIP. Always
+                // answered, whether or not a paid check is switched on.
+                $local = array();
+                $hint  = pps_zip_city_hint( $in['zip'], $in['city'] );
+                if ( $hint ) $local['cityHint'] = $hint;
+                if ( ! empty( $d['localOnly'] ) || ! pps_addr_verify_enabled( $cfg ) ) {
+                    return rest_ensure_response( array( 'status' => 'off' ) + $local );
+                }
+                if ( $in['street1'] === '' || ( $in['zip'] === '' && ( $in['city'] === '' || $in['state'] === '' ) ) ) {
+                    return rest_ensure_response( $unavailable + $local );
+                }
+                $provider = pps_addr_provider( $cfg );
+                $ck  = 'pps_addrv1_' . $provider . '_' . md5( strtoupper( implode( '|', $in ) ) );
+                $hit = get_transient( $ck );
+                if ( is_array( $hit ) ) { $hit['cached'] = true; return rest_ensure_response( $hit + $local ); }
+
+                // Only an outside call is limited: 10 a minute per visitor and a daily cap.
+                $ip     = isset( $_SERVER['REMOTE_ADDR'] ) ? preg_replace( '/[^0-9a-f:.]/i', '', (string) $_SERVER['REMOTE_ADDR'] ) : '0';
+                $rl_key = 'pps_addrv_rl_' . md5( $ip );
+                $hits   = (int) get_transient( $rl_key );
+                if ( $hits >= 10 ) return rest_ensure_response( $unavailable + $local );
+                set_transient( $rl_key, $hits + 1, MINUTE_IN_SECONDS );
+                // One option, not one per day: today's count plus a running total, which is
+                // also how the owner sees what verification has used.
+                $spend = get_option( 'pps_addrv_spend', array() );
+                if ( ! is_array( $spend ) ) $spend = array();
+                $today = gmdate( 'Y-m-d' );
+                if ( ( $spend['day'] ?? '' ) !== $today ) { $spend['day'] = $today; $spend['n'] = 0; }
+                if ( (int) $spend['n'] >= PPS_ADDR_VERIFY_DAILY_CAP ) return rest_ensure_response( $unavailable + $local );
+                $spend['n']     = (int) $spend['n'] + 1;
+                $spend['total'] = (int) ( $spend['total'] ?? 0 ) + 1;
+                $spend[ $provider ] = (int) ( $spend[ $provider ] ?? 0 ) + 1;
+                update_option( 'pps_addrv_spend', $spend, false );
+
+                if ( $provider === 'google' ) {
+                    // The key travels in a header, never the URL, so it cannot land in a log.
+                    $resp = wp_remote_post( 'https://addressvalidation.googleapis.com/v1:validateAddress', array(
+                        'headers' => array( 'Content-Type' => 'application/json', 'X-Goog-Api-Key' => pps_addr_google_key( $cfg ) ),
+                        'body'    => wp_json_encode( array(
+                            'address' => array(
+                                'regionCode'         => 'US',
+                                'addressLines'       => array_values( array_filter( array( $in['street1'], $in['street2'] ), 'strlen' ) ),
+                                'locality'           => $in['city'],
+                                'administrativeArea' => $in['state'],
+                                'postalCode'         => $in['zip'],
+                            ),
+                            'enableUspsCass' => true,
+                        ) ),
+                        'timeout' => 5,
+                    ) );
+                } else {
+                    $q = array( 'address_line_1' => $in['street1'], 'country_code' => 'US' );
+                    if ( $in['street2'] !== '' ) $q['address_line_2'] = $in['street2'];
+                    if ( $in['city'] !== '' )    $q['city_locality']  = $in['city'];
+                    if ( $in['state'] !== '' )   $q['state_province'] = $in['state'];
+                    if ( $in['zip'] !== '' )     $q['postal_code']    = $in['zip'];
+                    $resp = wp_remote_get( 'https://api.goshippo.com/v2/addresses/validate?' . http_build_query( $q, '', '&', PHP_QUERY_RFC3986 ), array(
+                        'headers' => array( 'Authorization' => 'ShippoToken ' . $cfg['pcf']['shippo_api_token'] ),
+                        'timeout' => 5,
+                    ) );
+                }
+                if ( is_wp_error( $resp ) || (int) wp_remote_retrieve_response_code( $resp ) !== 200 ) {
+                    return rest_ensure_response( $unavailable + $local );
+                }
+                $body = json_decode( (string) wp_remote_retrieve_body( $resp ), true );
+                $body = is_array( $body ) ? $body : array();
+                $out  = $provider === 'google' ? pps_addr_verify_classify_google( $in, $body ) : pps_addr_verify_classify( $in, $body );
+                $out['provider'] = $provider;
+                if ( $out['status'] !== 'unavailable' ) set_transient( $ck, $out, 30 * DAY_IN_SECONDS );
+                return rest_ensure_response( $out + $local );
+            } catch ( \Throwable $e ) {
+                error_log( 'PPS address verify: ' . $e->getMessage() );
+                return rest_ensure_response( $unavailable );
+            }
         },
     ) );
 
@@ -6555,6 +7255,7 @@ function pps_render_preset_calculator( $preset ) {
     ob_start();
 
     echo '<script data-cfasync="false">window.PPS_CONFIG=' . wp_json_encode( $config ) . ';</script>';
+    echo pps_question_token_script();
 
     // Scoped styles (mirror existing logic at line ~537)
     if ( $parts['styles'] ) {
