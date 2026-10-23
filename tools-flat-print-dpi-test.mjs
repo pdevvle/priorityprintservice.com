@@ -34,7 +34,10 @@ const require = createRequire(import.meta.url);
 const DEPS = process.env.PPS_DEPS_DIR || new URL('./node_modules', import.meta.url).pathname;
 const fs = await import('fs');
 
-const FILES = (process.env.PPS_FLAT_PAGES || 'flat-brochure.html,flat-postcard.html,flat-letterhead.html,flat-greeting-card.html,flat-sticker.html').split(',').map(s => s.trim()).filter(Boolean);
+// A bare product name ("postcard") means its harness page: given as-is it was fetched as a page
+// called "postcard" and failed with nothing but "postcard: ran".
+const FILES = (process.env.PPS_FLAT_PAGES || 'flat-brochure.html,flat-postcard.html,flat-letterhead.html,flat-greeting-card.html,flat-sticker.html').split(',').map(s => s.trim()).filter(Boolean)
+  .map(s => (/^[a-z-]+$/.test(s) ? 'flat-' + s.replace(/^flat-/, '') + '.html' : s));
 const DPI = 300;
 const MODULE_IN = 4 / DPI;           // the module size measured on order 87171's print-ready file
 const PAYLOAD = ['HTTPS://PRIORITYPRINTSERVICE.COM/GATE/87171/SIDE-1/QR-FIDELITY', 'HTTPS://PRIORITYPRINTSERVICE.COM/GATE/87171/SIDE-2/QR-FIDELITY'];

@@ -392,6 +392,47 @@ const approvedShown = p => p.evaluate(() => [...document.querySelectorAll('butto
   await t.ctx.close();
 }
 
+// ── a portrait design on a staff-proof order: its print file still goes with it, turned as approval turns it ──
+{
+  // Nobody approves online on a staff (or hardcopy) proof, so no approval package is made. Until
+  // 2026-10-23 the order carried only the standing design, which the imposition tool turns onto the
+  // sheet the other way to the approved print file; an off-centre perforation then landed at the
+  // other end. Now the designer's print file, front /Rotate 90 and back 270, rides with it.
+  const t = await open(b, '/designer/designer.html');
+  const { p } = t;
+  await p.locator('select:has(option[value="4×6"])').first().selectOption('4×6');
+  await p.locator('select', { has: p.locator('option', { hasText: 'Manual Digital Proof' }) }).first().selectOption('0.01');
+  await p.waitForTimeout(800);
+  await p.click('[data-pps-design="portrait"]');
+  const frame = p.frameLocator('.pps-designer-overlay iframe');
+  await frame.locator('#print:not([disabled])').waitFor({ timeout: 120000 });
+  await frame.locator('[data-text="heading"]').click();
+  await frame.locator('#textInput').fill('Staff proof card');
+  await frame.locator('#textDone').click();
+  await frame.locator('#print').click();
+  await frame.locator('#sheetGo').click();
+  await p.locator('.pps-designer-overlay').waitFor({ state: 'detached', timeout: 60000 });
+  await p.waitForTimeout(5000);
+  const clicked = await p.evaluate(() => {
+    const btns = [...document.querySelectorAll('button')].filter(x => /^Add to Order$/.test((x.textContent || '').trim()));
+    const bt = btns.find(x => x.offsetParent !== null && !x.disabled) || btns.find(x => !x.disabled);
+    if (!bt) return false; bt.click(); return true;
+  });
+  let landed = false;
+  for (let i = 0; i < 60 && clicked && !landed; i++) { await p.waitForTimeout(1000); landed = /cart\.html$/.test(p.url()); }
+  ok('staff proof: the portrait design orders', landed, t.dialogs.join(' || '));
+  const design = t.uploads.find(n => DESIGN_NAME.test(n)) || '';
+  const prName = t.uploads.find(n => /_print-ready\.pdf$/.test(n)) || '';
+  ok('staff proof: the order carries the design, then its print file named for it', t.uploads[0] === design && prName === design.replace(/\.pdf$/, '_print-ready.pdf'), JSON.stringify(t.uploads));
+  if (prName) {
+    const pr = pdfOf(t.bodies[prName]);
+    const rot = JSON.parse(execFileSync('python3', ['-I', '-c', 'import sys,pikepdf,json; p=pikepdf.open(sys.argv[1]); print(json.dumps([int(pg.obj.get("/Rotate",0)) for pg in p.pages]))', writeTmp(pr)]).toString());
+    ok('staff proof: …turned onto the sheet as an approved one is (front 90°, back 270°), still PDF/X 1.6', JSON.stringify(rot) === '[90,270]' && Buffer.from(pr).subarray(0, 8).toString('latin1') === '%PDF-1.6', JSON.stringify(rot));
+  }
+  ok('staff proof: no page errors', t.errs.length === 0, t.errs.join(' | '));
+  await t.ctx.close();
+}
+
 // ── a portrait card perforated off-centre: the designer's guide is where the order perforates ──
 {
   // A 4 × 9 rack card, one perforation across the long edge at 78% (7.02 in from the sheet's left).

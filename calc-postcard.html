@@ -2684,9 +2684,33 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
   useEffect(() => {
     if (approved || !onArtwork) return;
     const list = allOriginals();
-    if (list.length) { _origEmittedRef.current = true; onArtwork({ type: "files", list, approved: false, back: !!backArt }); }
-    else if (_origEmittedRef.current) { _origEmittedRef.current = false; onArtwork({ type: "none" }); }
-  }, [frontArt, backArt, approved]);
+    if (!list.length) {
+      if (_origEmittedRef.current) { _origEmittedRef.current = false; onArtwork({ type: "none" }); }
+      return;
+    }
+    _origEmittedRef.current = true;
+    onArtwork({ type: "files", list, approved: false, back: !!backArt });
+    // A portrait card designed online, on an order nobody approves online (a staff or hardcopy
+    // proof): no approval package is made, so the order carried only the design as designed, a
+    // standing page. The imposition tool turned that onto the wide sheet the other way to the
+    // approved print file (anticlockwise, not clockwise), so an off-centre perforation, which the
+    // ticket gives as a share of the sheet as the proof shows it, landed at the other end. The
+    // designer's own print file, turned as approval turns it, now rides with the order too, under
+    // the name an approval package's would have (2026-10-23). Only for a design nobody changed:
+    // the order's size and sides, its pages in order, crop at 100%, no turn but the card's.
+    const dz = frontArt && frontArt.file && frontArt.file.__ppsDesigner;
+    if (!dz || !dz.portrait || designStale || (backArt && backArt.file !== frontArt.file)) return;
+    const tx = k => pageTransforms[k] || DEFAULT_TX;
+    const turned = (k, steps) => tx(k).fitMode === "crop" && tx(k).artScale === 100 && tx(k).rotateSteps === steps;
+    if (!turned("front", 1) || (dz.pages === 2 && !turned("back", 3))) return;
+    let live = true;
+    ppsTurnedDesignerPdf(frontArt.file, i => (i === 0 ? 1 : 3))
+      .then(blob => {
+        if (live) onArtwork({ type: "files", list: [...list, new File([blob], pkgBaseName() + "_print-ready.pdf", { type: "application/pdf" })], approved: false, back: !!backArt });
+      })
+      .catch(e => console.warn("[pps] the designer's print file could not be made; the design goes to the order as designed", e));
+    return () => { live = false; };
+  }, [frontArt, backArt, approved, JSON.stringify(pageTransforms), sides, longEdge, shortEdge]);
   const [approvalPkg, setApprovalPkg] = useState(null);
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [genProgress, setGenProgress] = useState(null);
@@ -2859,6 +2883,22 @@ function SheetPreview({ longEdge, shortEdge, foldType, foldDir, panels, perfCoun
       document.head.appendChild(el);
     });
     return window.__ppsPdfLib;
+  }
+  // A portrait card's design turned onto the wide sheet it prints on, as the print file: the
+  // designer's own PDF with each page's /Rotate set (front 90°, back 270°; `steps(i)` quarter turns),
+  // nothing redrawn. Plain page objects, no object streams: the server's Print File Check reads
+  // pages and boxes straight out of the file. pdf-lib always writes a %PDF-1.7 header; PDF/X-4
+  // files are PDF 1.6 at most and a strict preflight rejects the claim, so the designer's own
+  // version is put back (same length, offsets unchanged; nothing 1.7-only is written).
+  async function ppsTurnedDesignerPdf(file, steps) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const PL = await ppsLoadPdfLib();
+    const doc = await PL.PDFDocument.load(bytes, { updateMetadata: false });
+    doc.getPages().forEach((pg, i) => pg.setRotation(PL.degrees(steps(i) * 90)));
+    const out = await doc.save({ useObjectStreams: false });
+    const ver = String.fromCharCode(...bytes.subarray(0, 8)), outVer = String.fromCharCode(...out.subarray(0, 8));
+    if (/^%PDF-1\.[0-6]$/.test(ver) && outVer === "%PDF-1.7") out[7] = ver.charCodeAt(7);
+    return new Blob([out], { type: "application/pdf" });
   }
   // The share (at most 1) of a w × h canvas this device can actually hold. Safari on iPhone and
   // iPad stops at about 16.7 million pixels: past that a canvas gives no context or draws
@@ -3800,23 +3840,8 @@ generate();
     if (designerVector) {
       try {
         setGenProgress({ step: "print-ready", page: 1, totalPages });
-        const bytes = new Uint8Array(await frontArt.file.arrayBuffer());
-        if (dz.portrait) {
-          const PL = await ppsLoadPdfLib();
-          const doc = await PL.PDFDocument.load(bytes, { updateMetadata: false });
-          doc.getPages().forEach((pg, i) => pg.setRotation(PL.degrees(autoSteps(i) * 90)));
-          // Plain page objects, no object streams: the server's Print File Check reads pages and
-          // boxes straight out of the file.
-          const out = await doc.save({ useObjectStreams: false });
-          // pdf-lib always writes a %PDF-1.7 header; PDF/X-4 files are PDF 1.6 at most, and a
-          // strict preflight rejects the claim. Nothing 1.7-only is written (no object streams),
-          // so the designer's own version is put back, same length, offsets unchanged.
-          const ver = String.fromCharCode(...bytes.subarray(0, 8)), outVer = String.fromCharCode(...out.subarray(0, 8));
-          if (/^%PDF-1\.[0-6]$/.test(ver) && outVer === "%PDF-1.7") out[7] = ver.charCodeAt(7);
-          printReadyBlob = new Blob([out], { type: "application/pdf" });
-        } else {
-          printReadyBlob = new Blob([bytes], { type: "application/pdf" });
-        }
+        printReadyBlob = dz.portrait ? await ppsTurnedDesignerPdf(frontArt.file, autoSteps)
+          : new Blob([new Uint8Array(await frontArt.file.arrayBuffer())], { type: "application/pdf" });
       } catch (e) {
         // pdf-lib could not be fetched, or the file would not load: the picture path still works.
         console.warn("[pps] the designer's PDF could not be used as the print file; rasterising instead", e);
