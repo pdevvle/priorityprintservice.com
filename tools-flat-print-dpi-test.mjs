@@ -33,6 +33,9 @@ const { createRequire } = await import('node:module');
 const require = createRequire(import.meta.url);
 const DEPS = process.env.PPS_DEPS_DIR || new URL('./node_modules', import.meta.url).pathname;
 const fs = await import('fs');
+// Test files go in a folder of their own, not the repo (they were left at its root as untracked
+// PDFs); PPS_DPI_OUT keeps the print-ready files somewhere to look at.
+const OUT = process.env.PPS_DPI_OUT || fs.mkdtempSync((await import('os')).tmpdir() + '/pps-dpi-');
 
 // A bare product name ("postcard") means its harness page: given as-is it was fetched as a page
 // called "postcard" and failed with nothing but "postcard: ran".
@@ -70,7 +73,7 @@ const QR_MODULES = [];
       if (q.modules.get(r, c)) doc.rect(x0 + c * MODULE_IN, y0 + r * MODULE_IN, MODULE_IN, MODULE_IN, 'F');
     }
   });
-  fs.writeFileSync('./art-qr-flat.pdf', Buffer.from(doc.output('arraybuffer')));
+  fs.writeFileSync(OUT + '/art-qr-flat.pdf', Buffer.from(doc.output('arraybuffer')));
 }
 
 const jsQR = require(DEPS + '/jsqr');
@@ -166,7 +169,7 @@ async function run(b, file, cap) {
   await p.waitForSelector('select'); await p.waitForTimeout(2500);
   await p.evaluate(() => { window.__manifests = 0; const OB = window.Blob; window.Blob = function (parts, opts) { const bl = new OB(parts, opts); if (opts && opts.type === 'text/plain') window.__manifests++; return bl; }; window.Blob.prototype = OB.prototype; });
 
-  await p.locator('input[type=file]').first().setInputFiles('./art-qr-flat.pdf');
+  await p.locator('input[type=file]').first().setInputFiles(OUT + '/art-qr-flat.pdf');
   await p.waitForTimeout(7000);
   // Open the proof: the flats open it from the side thumbnail, some builds from a button.
   await p.evaluate(() => {
@@ -225,7 +228,7 @@ async function run(b, file, cap) {
   await ctx.close();
   if (!(printReady && manifest)) return;
 
-  fs.writeFileSync('./flat-print-ready-' + file.replace(/\.html$/, '') + (cap ? '-phone' : '') + '.pdf', printReady);   // kept for eyeballing
+  fs.writeFileSync(OUT + '/flat-print-ready-' + file.replace(/\.html$/, '') + (cap ? '-phone' : '') + '.pdf', printReady);   // kept for eyeballing
   const bm = manifest.match(/Bleed-inclusive size: ([\d.]+)″ × ([\d.]+)″/);
   const sides = jpegStreams(printReady);
   ok(`${tag}: the print-ready PDF carries one JPEG per side`, sides.length >= 1, sides.length + ' streams');
