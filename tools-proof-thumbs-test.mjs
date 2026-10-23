@@ -166,10 +166,24 @@ console.log('\n── draft: the thumbnail in each page heading (?thumbs=rail) �
   const { page: ref, ctx: refCtx } = await open('');
   await setPages(ref, 16);
   const stripStage = (await stripShape(ref)).stage;
+  // Page 1 is "selected" from the start. Scrolling the rail to its heading on
+  // switching would carry the Preflight section off the top, unasked.
+  const switched = await ref.evaluate(async () => {
+    const s = document.getElementById('thumbsLayout');
+    if (!s) return { missing: 'no switch' };
+    s.value = 'rail'; s.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise(r => setTimeout(r, 400));
+    return { mini: document.querySelectorAll('#rail .pg.mini').length, top: Math.round(document.getElementById('rail').scrollTop) };
+  });
+  ok('switching to the draft keeps the rail at the top, Preflight in view', switched.mini === 16 && switched.top === 0,
+     JSON.stringify(switched));
   await refCtx.close();
 
   const { page, ctx } = await open('?thumbs=rail');
   await setPages(page, 16);
+  ok('opening in the draft layout does the same', await page.evaluate(() =>
+     document.getElementById('rail').scrollTop === 0 && document.querySelectorAll('#rail .pg.mini').length === 16),
+     await page.evaluate(() => 'scrollTop ' + Math.round(document.getElementById('rail').scrollTop)));
   const shape = await stripShape(page);
   ok('the bottom strip is gone', shape.display === 'none' && shape.cells === 0, JSON.stringify(shape));
   ok('and the stage has its height back', shape.stage > stripStage + 60, stripStage + ' → ' + shape.stage + 'px');

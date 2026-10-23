@@ -1958,12 +1958,11 @@ function dropTarget(el, n, lit){
 /* Every render rebuilds the cells, so the scroll position is carried across
    by hand, and the selected page is brought into view only when the selection
    has actually moved — re-rendering for a magnifier toggle must not yank a
-   strip the customer has just scrolled. A change of mode or layout counts as
-   a move: the container was emptied while it was out of sight, and has lost
-   its place. */
+   strip the customer has just scrolled. sig says what counts as a move: for
+   the strip a change of mode or layout does too, since it was emptied while
+   out of sight and has lost its place. */
 const lastInView = {};
-function keepInView(box, el, axis, key){
-  const sig = state.mode + '|' + thumbLayout + '|' + state.selected;
+function keepInView(box, el, axis, key, sig){
   if (!box || !el || lastInView[key] === sig) return;
   lastInView[key] = sig;
   const b = box.getBoundingClientRect(), r = el.getBoundingClientRect();
@@ -2009,7 +2008,8 @@ function renderStrip(){
     target.appendChild(grp);
   });
   scroller.scrollLeft = keepX; scroller.scrollTop = keepY;
-  keepInView(scroller, target.querySelector('.pg.sel'), book ? 'y' : 'x', book ? 'rail3d' : 'strip');
+  keepInView(scroller, target.querySelector('.pg.sel'), book ? 'y' : 'x', book ? 'rail3d' : 'strip',
+             state.mode + '|' + thumbLayout + '|' + state.selected);
 }
 function isSel(n){
   if (state.mode !== 'book') return n === state.selected;
@@ -2115,7 +2115,11 @@ function renderRail(){
     rail.appendChild(acc);
   });
   rail.scrollTop = keepY;
-  if (withThumbs) keepInView(rail, rail.querySelector('.pg.mini.sel'), 'y', 'railhead');
+  // Only a page someone picked (its section is the open one). Page 1 is
+  // "selected" from the start, and scrolling to it on open — or on switching
+  // to this layout — would carry the Preflight section off the top unasked.
+  if (withThumbs && state.openPage === state.selected)
+    keepInView(rail, rail.querySelector('.pg.mini.sel'), 'y', 'railhead', thumbLayout + '|' + state.selected);
 }
 
 /* One control, every behaviour. While it is ticked, this page IS the document:
