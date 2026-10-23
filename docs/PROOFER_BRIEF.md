@@ -107,9 +107,11 @@ is harmless and does nothing.
 
 Preconditions this sandbox meets and the brief's original recipe never stated: Node 22;
 Playwright at `/opt/node22/lib/node_modules/playwright` (three suites hard-code it, the
-rest default to it via `PPS_PLAYWRIGHT`); Chromium at
-`/opt/pw-browsers/chromium-1194/chrome-linux/chrome` (hard-coded in eight suites). On any
-other machine, fix those first.
+rest default to it via `PPS_PLAYWRIGHT`); Chromium from `PPS_CHROME`, else
+`/opt/pw-browsers/chromium` — the sandbox's stable link to whichever build is installed.
+Until 2026-10-23 every browser suite hard-coded `chromium-1194/chrome-linux/chrome`, which a
+newer sandbox image does not have, so none of them launched. On any other machine, set
+`PPS_CHROME`.
 
 ```bash
 S=/tmp/claude-0/-home-user-priorityprintservice-com/a7cc322e-a48b-50c5-b9b9-c14f307e7bcc/scratchpad
