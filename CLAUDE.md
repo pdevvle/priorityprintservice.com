@@ -948,6 +948,12 @@ Sequencing across lanes: **code before the content that depends on it**
   - https://pdevvle.github.io/priorityprintservice.com/calc-perfect-bound.html (perfect bound)
   - https://pdevvle.github.io/priorityprintservice.com/calc-brochure.html (brochure)
   - https://pdevvle.github.io/priorityprintservice.com/calc-coupon-book.html (coupon book)
+  - https://pdevvle.github.io/priorityprintservice.com/new-proof-preview.html (saddle stitch
+    with the **new proofer switched on** — staging's saddle build, `b5a6f75`, plus one
+    `<script>` in `<head>` setting `proofUrl`; published 2026-10-23 at `6fa9d97`). Named
+    outside `calc-*` on purpose so the deploy watcher can never take it for a calculator.
+    `proof-ui-draft.html` on this branch is PR #56's proofer; the four calculators above
+    still have New Proof URL blank, so they open the built-in modal.
 - Each calculator has a build-stamp chip in the bottom-right corner. After a push, wait ~60 seconds for Pages to rebuild, then hard-refresh (Cmd/Ctrl+Shift+R) or use an Incognito window. If the chip still doesn't update, verify `.nojekyll` exists on `pps-pricing-config` root — that's the #1 cause of "my push didn't show up."
 - **Publish surface:** the `pages-public` branch is what Pages should serve — an orphan branch carrying only the nine calculators, `pps-theme/preview.html` and `.nojekyll`. Pages serves the *entire tree* of whatever branch it publishes from, so publishing `pps-pricing-config` also served every `.php` file as plain text (Pages doesn't execute PHP), plus `docs/MASTER_PRICING_LOGIC.md` and `CLAUDE.md`. Calculator changes get cherry-picked to `pages-public`; nothing else goes on it.
 - **Go private (deferred by owner 2026-08-01 until the build is finished).** When ready:
