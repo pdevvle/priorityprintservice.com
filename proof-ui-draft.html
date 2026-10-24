@@ -453,15 +453,20 @@
                  background:none;border:0;font-family:var(--pps-display);font-size:10px;font-weight:700;
                  letter-spacing:.08em;text-transform:uppercase;color:var(--bp-faint);text-align:left}
   .chk-group.notpassed .chk-grouphead{color:var(--magenta)}
-  .chk-group.passed .chk-grouphead{color:var(--green);cursor:pointer}
-  .chk-group.passed .chk-grouphead:hover{color:var(--cyan)}
+  .chk-group.passed .chk-grouphead{color:var(--green)}
+  button.chk-grouphead{cursor:pointer}
+  button.chk-grouphead:hover{color:var(--cyan)}
   .chk-grouphead .caret{margin-left:auto;font-size:12px;transition:transform .18s}
   .chk-group.open .chk-grouphead .caret{transform:rotate(180deg)}
-  .chk-group.passed:not(.open) .chk-row{display:none}
+  .chk-group:not(.open) .chk-row{display:none}
+  /* Unverified says its reason once, under the heading, folded or not */
+  .chk-groupnote{margin:0 2px 6px;font-size:11px;line-height:1.45;color:var(--bp-faint)}
   .chk-row{border-top:1px solid var(--bp-line)}
   .chk-sum{display:flex;align-items:center;gap:9px;width:100%;padding:7px 2px;background:none;border:0;
            cursor:pointer;font-family:inherit;text-align:left;color:var(--bp-ink)}
   .chk-sum:hover .chk-label{color:var(--cyan)}
+  .chk-sum.static{cursor:default}
+  .chk-sum.static:hover .chk-label{color:inherit}
   .chk-sum .caret{color:var(--bp-dim);font-size:12px;transition:transform .18s}
   .chk-row.open .chk-sum .caret{transform:rotate(180deg)}
   .chk-state{flex-shrink:0;width:9px;height:9px;border-radius:50%;background:var(--bp-faint)}
@@ -1123,8 +1128,8 @@ const state = { mode:'proof', selected:1, openPage:null, wholeOpen:true, perPage
                 bookMode:'closed', spread:0, rot:{ x:-15, y:-25 },
                 zoom:'fit', lens:null,
                 // the Preflight list: which checks have their explanation open,
-                // whether the Passed group is unfolded, and the deliverables box
-                chkOpen:new Set(), passedOpen:false, delivOpen:false,
+                // which of its folded groups are open, and the deliverables box
+                chkOpen:new Set(), groupOpen:{}, delivOpen:false,
                 // what approving last said, redrawn by every rail render
                 approveNote:null, approveError:null, escapeOffered:false, escapeTaken:false };
 
@@ -2120,41 +2125,55 @@ function renderRail(){
   rail.innerHTML = '';
   const withThumbs = thumbsInRail();
 
-  /* Preflight, condensed (owner, 2026-10-24: "crowded"). Two groups in the
-     order they matter — Not passed, then Passed — one line per check, and the
-     explanation opens on a click. Passed starts folded: a list of things that
-     are fine is the part nobody needs to read first. "Not passed" covers
-     anything short of a pass, worst first; a check that could not run (an
-     image has no structure to inspect) is in it, marked by a hollow dot, and
-     its explanation says why. */
+  /* Preflight, condensed (owner, 2026-10-24: "crowded"). Three groups in the
+     order they matter — Not passed, Unverified, Passed — one line per check,
+     the explanation opening on a click.
+       Not passed: failed or warned, worst first. Always shown.
+       Unverified: a check this file type cannot answer — an image has no
+         fonts, colour spaces or layers to inspect (owner, 2026-10-24: its own
+         category, not lumped in with Not passed). Folded. The reason is nearly
+         always the same one (NO_STRUCTURE), so it is said once under the
+         heading, folded or not, and a row keeps only what it adds to it.
+       Passed: folded; a list of things that are fine is read last.
+     The approve gate counts only Not passed; it always has (jobFlags). */
   const checks = runFileChecks();
-  const passed = c => c.state === 'pass' || c.state === 'na';
-  const RANK = { fail:0, warn:1, unknown:2 };
-  const notPassed = checks.filter(c => !passed(c)).sort((a, b) => (RANK[a.state] ?? 3) - (RANK[b.state] ?? 3));
-  const okChecks  = checks.filter(passed);
-  const worstFile = notPassed.length ? notPassed[0].state : 'pass';
+  const verdict = c => c.state === 'pass' || c.state === 'na' ? 'passed'
+                     : c.state === 'unknown' ? 'unverified' : 'notpassed';
+  const SAY = { notpassed:'Not passed', unverified:'Unverified', passed:'Passed' };
+  const notPassed  = checks.filter(c => verdict(c) === 'notpassed')
+                           .sort((a, b) => (a.state === 'fail' ? 0 : 1) - (b.state === 'fail' ? 0 : 1));
+  const unverified = checks.filter(c => verdict(c) === 'unverified');
+  const okChecks   = checks.filter(c => verdict(c) === 'passed');
+  const shared = unverified.length && unverified.every(c => String(c.text).startsWith(NO_STRUCTURE)) ? NO_STRUCTURE : '';
+  const rowText = c => shared && verdict(c) === 'unverified' ? String(c.text).slice(shared.length).trim() : c.text;
+  const worstFile = notPassed.length ? notPassed[0].state : unverified.length ? 'unknown' : 'pass';
   const row = c => {
-    const open = state.chkOpen.has(c.id);
+    const text = rowText(c), open = !!text && state.chkOpen.has(c.id);
+    const dot = '<span class="chk-state"><span class="sr">' + SAY[verdict(c)] + '</span></span>' +
+                '<span class="chk-label">' + c.label + '</span>';
+    // nothing to add beyond the group's note: a plain line, not a control
     return '<div class="chk-row ' + c.state + (open ? ' open' : '') + '" data-chk="' + c.id + '">' +
-      '<button class="chk-sum" aria-expanded="' + open + '">' +
-        '<span class="chk-state"><span class="sr">' + (passed(c) ? 'Passed' : 'Not passed') + '</span></span>' +
-        '<span class="chk-label">' + c.label + '</span><span class="caret">⌄</span></button>' +
-      '<p class="chk-text"' + (open ? '' : ' hidden') + '>' + c.text + '</p></div>';
+      (text ? '<button class="chk-sum" aria-expanded="' + open + '">' + dot + '<span class="caret">⌄</span></button>' +
+              '<p class="chk-text"' + (open ? '' : ' hidden') + '>' + text + '</p>'
+            : '<div class="chk-sum static">' + dot + '</div>') + '</div>';
   };
+  const foldable = (key, list, note) => list.length ? '<div class="chk-group ' + key + (state.groupOpen[key] ? ' open' : '') + '">' +
+      '<button class="chk-grouphead" data-group="' + key + '" aria-expanded="' + !!state.groupOpen[key] + '">' +
+        SAY[key] + ' · ' + list.length + '<span class="caret">⌄</span></button>' +
+      (note ? '<p class="chk-groupnote">' + note + '</p>' : '') +
+      list.map(row).join('') + '</div>' : '';
+  const chip = [notPassed.length ? notPassed.length + ' not passed' : '',
+                unverified.length ? unverified.length + ' unverified' : ''].filter(Boolean).join(' · ') || 'all passed';
   const wf = document.createElement('div');
   wf.className = 'acc' + (state.wholeOpen ? ' open' : '');
   wf.innerHTML = '<button class="acchead"><span>Preflight</span>' +
-      '<span class="chip ' + worstFile + '">' +
-        (notPassed.length ? notPassed.length + ' not passed' : 'all passed') +
-      '</span><span class="caret">⌄</span></button>' +
+      '<span class="chip ' + worstFile + '">' + chip + '</span><span class="caret">⌄</span></button>' +
     '<div class="accbody"><div class="checklist">' +
       (notPassed.length ? '<div class="chk-group notpassed open">' +
         '<div class="chk-grouphead">Not passed · ' + notPassed.length + '</div>' +
         notPassed.map(row).join('') + '</div>' : '') +
-      (okChecks.length ? '<div class="chk-group passed' + (state.passedOpen ? ' open' : '') + '">' +
-        '<button class="chk-grouphead" aria-expanded="' + state.passedOpen + '">Passed · ' + okChecks.length +
-        '<span class="caret">⌄</span></button>' +
-        okChecks.map(row).join('') + '</div>' : '') +
+      foldable('unverified', unverified, shared) +
+      foldable('passed', okChecks, '') +
     '</div>' +
     '<button class="delivtoggle' + (state.delivOpen ? ' open' : '') + '" aria-expanded="' + state.delivOpen + '">' +
       'What approving produces<span class="caret">⌄</span></button>' +
@@ -2166,13 +2185,15 @@ function renderRail(){
   };
   // These only open and close text, so they re-render the rail alone: a full
   // renderAll would recompose the stage for nothing.
-  wf.querySelectorAll('.chk-sum').forEach(b => b.onclick = () => {
+  wf.querySelectorAll('button.chk-sum').forEach(b => b.onclick = () => {
     const id = b.parentNode.dataset.chk;
     state.chkOpen.has(id) ? state.chkOpen.delete(id) : state.chkOpen.add(id);
     renderRail();
   });
-  const pg = wf.querySelector('.chk-group.passed .chk-grouphead');
-  if (pg) pg.onclick = () => { state.passedOpen = !state.passedOpen; renderRail(); };
+  wf.querySelectorAll('button.chk-grouphead').forEach(b => b.onclick = () => {
+    state.groupOpen[b.dataset.group] = !state.groupOpen[b.dataset.group];
+    renderRail();
+  });
   wf.querySelector('.delivtoggle').onclick = () => { state.delivOpen = !state.delivOpen; renderRail(); };
   const dv = wf.querySelector('#deliv');
   if (dv) dv.hidden = !state.delivOpen;
@@ -2931,8 +2952,8 @@ async function loadArt(n, file){
    five states. "unknown" is a first-class result and not a quiet pass: most of
    these can only be answered by a file that carries its own structure, and
    saying so is the difference between a preflight and a reassurance. The rail
-   lists them in two groups, Not passed and Passed (renderRail); an "unknown"
-   sits in Not passed with a hollow dot, and its text says why. */
+   lists them in three groups — Not passed, Unverified, Passed (renderRail);
+   "unknown" is Unverified, with a hollow dot. */
 
 function fileFacts(){
   const all = [...uploads.values()];
@@ -4226,6 +4247,21 @@ if (pageCountEl){
 if (window.PPS_PROOF_JOB){
   bootJob(window.PPS_PROOF_JOB);
 } else {
+  // With no calculator behind it, the link itself can size the booklet being
+  // tried, so a real file can be previewed at its own size (owner, 2026-10-24):
+  // ?size=8.5x11&pages=12. Saddle stitch, like the rest of the standalone page;
+  // anything that does not parse is ignored. A host's job always wins.
+  const q = new URLSearchParams(location.search);
+  const sz = /^(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)$/i.exec(q.get('size') || '');
+  if (sz && +sz[1] >= 2 && +sz[2] >= 2 && +sz[1] <= 20 && +sz[2] <= 20){
+    MODEL.trim = { w: +sz[1], h: +sz[2] };
+    recomputeDerived();
+  }
+  const pc = parseInt(q.get('pages'), 10);
+  if (pc >= 4 && pc <= 200 && pc % 4 === 0){
+    if (![...pageCountEl.options].some(o => +o.value === pc)) pageCountEl.add(new Option(pc + ' pages', String(pc)));
+    pageCountEl.value = String(pc);
+  }
   rebuildModel(parseInt(pageCountEl.value, 10));
   renderAll();
 }
