@@ -976,7 +976,7 @@ Sequencing across lanes: **code before the content that depends on it**
   - https://pdevvle.github.io/priorityprintservice.com/calc-coupon-book.html (coupon book)
   - https://pdevvle.github.io/priorityprintservice.com/new-proof-preview.html (saddle stitch
     with the **new proofer switched on** — staging's saddle build, `b5a6f75`, plus one
-    `<script>` in `<head>` setting `proofUrl`; published 2026-10-23, latest `cb81385`). Named
+    `<script>` in `<head>` setting `proofUrl`; published 2026-10-23, latest `76debb1`). Named
     outside `calc-*` on purpose so the deploy watcher can never take it for a calculator.
     `proof-ui-draft.html` on this branch is PR #56's proofer; the four calculators above
     still have New Proof URL blank, so they open the built-in modal. Add `?thumbs=rail` to
