@@ -330,6 +330,15 @@ function pps_mp_order_in( $text ) {
 }
 
 /** A unix timestamp as a shop-day Y-m-d, or ''. */
+/** A Missive timestamp as H:i shop time ('' when none) — the time on a subtask's due pill. */
+function pps_mp_unix_hm( $ts ) {
+    $ts = (int) $ts;
+    if ( $ts <= 0 ) return '';
+    $tz = function_exists( 'pps_shop_timezone' ) ? pps_shop_timezone() : 'America/Phoenix';
+    try { return ( new DateTimeImmutable( '@' . $ts ) )->setTimezone( new DateTimeZone( $tz ) )->format( 'H:i' ); }
+    catch ( \Throwable $e ) { return gmdate( 'H:i', $ts ); }
+}
+
 function pps_mp_unix_ymd( $ts ) {
     $ts = (int) $ts;
     if ( $ts <= 0 ) return '';
@@ -355,7 +364,7 @@ function pps_mp_pair_tasks( array $tasks, array $conv, array $items = array() ) 
         $cid   = is_array( $t['conversation'] ) ? (string) ( $t['conversation']['id'] ?? '' ) : (string) $t['conversation'];
         $order = pps_mp_order_in( $t['title'] ?? '' ) ?: (int) ( $conv[ $cid ] ?? 0 );
         $row = array( 'id' => (string) $t['id'], 'title' => (string) ( $t['title'] ?? '' ), 'state' => (string) ( $t['state'] ?? 'todo' ),
-                      'due' => pps_mp_unix_ymd( $t['due_at'] ?? 0 ), 'started' => pps_mp_unix_ymd( $t['started_at'] ?? 0 ), 'conversation' => $cid );
+                      'due' => pps_mp_unix_ymd( $t['due_at'] ?? 0 ), 'due_time' => pps_mp_unix_hm( $t['due_at'] ?? 0 ), 'started' => pps_mp_unix_ymd( $t['started_at'] ?? 0 ), 'conversation' => $cid );
         if ( isset( $item_of[ $row['id'] ] ) ) { $by_item[ $item_of[ $row['id'] ] ] = $row; continue; }   // one created per job
         if ( ! $order ) { $unpaired[] = $row; continue; }
         $cur = $by[ $order ] ?? null;
@@ -438,7 +447,7 @@ function pps_mp_extra_rows( array $tasks, array $conv, array $rows, $max = 40 ) 
             'order' => $order, 'item' => 0, 'customer' => $customer, 'what' => (string) ( $t['title'] ?? '' ), 'qty' => 0, 'size' => '',
             'start' => $due, 'must_ship' => $due, 'delivery' => '', 'rush' => false, 'printed' => false, 'source' => 'missive',
             'finishing' => array(), 'addons' => array(), 'paper' => '', 'sheet' => '', 'paper_key' => '', 'sheets' => 0, 'papers' => array(),
-            'task' => array( 'id' => (string) $t['id'], 'title' => (string) ( $t['title'] ?? '' ), 'state' => $state, 'due' => $due,
+            'task' => array( 'id' => (string) $t['id'], 'title' => (string) ( $t['title'] ?? '' ), 'state' => $state, 'due' => $due, 'due_time' => pps_mp_unix_hm( $t['due_at'] ?? 0 ),
                              'started' => pps_mp_unix_ymd( $t['started_at'] ?? 0 ), 'conversation' => $cid ),
             'drive' => '', 'due_mismatch' => false, 'missive_only' => true, 'reason' => $reason, 'order_status' => $status,
         );
@@ -599,12 +608,13 @@ function pps_mp_set_state( $task_id, $state ) {
 /**
  * Move one paired subtask's due date (owner 2026-10-24: "the pill on the subtask with the due date
  * should be editable and should change the task due date in missive"). Same switch and pairing rule
- * as a state change; PATCHes only `due_at`, at 17:00 shop time on the day chosen (the time subtasks
- * are created with). Returns true or a WP_Error naming why not.
+ * as a state change; PATCHes only `due_at`: the day chosen at one of PPS_MP_DUE_TIMES shop time (4, 5 or
+ * 7 pm; 5 pm, the time subtasks are created with, when none is given). Returns true or a WP_Error.
  */
-function pps_mp_set_due( $task_id, $ymd ) {
+function pps_mp_set_due( $task_id, $ymd, $hm = '17:00' ) {
     if ( ! get_option( PPS_MP_ALLOW_OPTION, false ) ) return new WP_Error( 'off', 'Changing subtasks from the panel is switched off (PPS Calculators → Missive Panel).' );
-    $at = pps_mp_due_unix( $ymd );
+    if ( ! in_array( (string) $hm, PPS_MP_DUE_TIMES, true ) ) return new WP_Error( 'time', 'Pick 4 pm, 5 pm or 7 pm.' );
+    $at = pps_mp_due_unix( $ymd, $hm );
     if ( ! $at || $ymd !== gmdate( 'Y-m-d', strtotime( $ymd . ' 12:00 UTC' ) ) ) return new WP_Error( 'due', 'That is not a date.' );
     $tasks = pps_mp_tasks();
     if ( is_wp_error( $tasks ) ) return $tasks;
@@ -630,11 +640,14 @@ function pps_mp_set_due( $task_id, $ymd ) {
 
 function pps_mp_item_map() { $m = get_option( PPS_MP_ITEMS_OPTION, array() ); return is_array( $m ) ? $m : array(); }
 
-/** A shop-day Y-m-d at 17:00 shop time, as a unix timestamp, or 0. */
-function pps_mp_due_unix( $ymd ) {
-    if ( ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', (string) $ymd ) ) return 0;
+/** The due times the panel offers (owner 2026-10-24: "just use the 4pm 5pm 7pm presets"); 17:00 is the default. */
+const PPS_MP_DUE_TIMES = array( '16:00', '17:00', '19:00' );
+
+/** A shop-day Y-m-d at a shop time (default 17:00), as a unix timestamp, or 0. */
+function pps_mp_due_unix( $ymd, $hm = '17:00' ) {
+    if ( ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', (string) $ymd ) || ! preg_match( '/^\d{2}:\d{2}$/', (string) $hm ) ) return 0;
     $tz = function_exists( 'pps_shop_timezone' ) ? pps_shop_timezone() : 'America/Phoenix';
-    try { return ( new DateTimeImmutable( $ymd . ' 17:00', new DateTimeZone( $tz ) ) )->getTimestamp(); }
+    try { return ( new DateTimeImmutable( $ymd . ' ' . $hm, new DateTimeZone( $tz ) ) )->getTimestamp(); }
     catch ( \Throwable $e ) { return 0; }
 }
 
@@ -720,7 +733,7 @@ add_action( 'rest_api_init', function () {
         'methods' => 'POST', 'permission_callback' => $key_ok,
         'callback' => function ( $req ) {
             $r = $req->get_param( 'due' ) !== null
-                ? pps_mp_set_due( (string) $req->get_param( 'task' ), (string) $req->get_param( 'due' ) )
+                ? pps_mp_set_due( (string) $req->get_param( 'task' ), (string) $req->get_param( 'due' ), (string) ( $req->get_param( 'time' ) ?? '17:00' ) )
                 : pps_mp_set_state( (string) $req->get_param( 'task' ), (string) $req->get_param( 'state' ) );
             return is_wp_error( $r ) ? new WP_REST_Response( array( 'ok' => false, 'error' => $r->get_error_message() ), 200 )
                                      : new WP_REST_Response( array( 'ok' => true ), 200 );
@@ -769,7 +782,7 @@ a{color:#2563eb;cursor:pointer;text-decoration:none}
 .pill.k-pages{background:#e2f5f1;color:#0f5348;border-color:#9fd6cb} .pill.k-qty{background:#e8f5e2;color:#24521a;border-color:#b0d8a2}
 .pill.k-size{background:#fbf0dc;color:#6b4610;border-color:#e6c88f}
 .subs .row:last-child{border-bottom:0} .subs b{font-weight:600}
-button.pill.edit{cursor:pointer;font:inherit;font-size:11px} button.pill.edit:hover{border-color:#888} .duebox{display:inline-flex;gap:3px;align-items:center} .duebox input{font-size:11px;padding:1px 2px}
+button.pill.edit{cursor:pointer;font:inherit;font-size:11px} button.pill.edit:hover{border-color:#888} .duebox{display:inline-flex;flex-wrap:wrap;gap:3px;align-items:center} .duebox input{font-size:11px;padding:1px 2px} .tchip{font:inherit;font-size:11px;border:1px solid #bbb;border-radius:10px;padding:0 7px;background:transparent;cursor:pointer} .tchip.on{background:#1f6feb;border-color:#1f6feb;color:#fff}
 .pill.pill-flag{background:#7f1d1d;color:#fff;border-color:#5f1414;font-weight:600}
 .pill.pill-plain{background:rgba(128,128,128,.12);color:inherit;border-color:rgba(128,128,128,.35)} .pill.pill-late{background:#c62828;color:#fff;border-color:#a51f1f;font-weight:600}
 .tag{display:inline-block;border:1px solid rgba(128,128,128,.4);border-radius:3px;padding:0 4px;margin:1px 2px 1px 0;font-size:11px}
@@ -905,7 +918,10 @@ function subtaskStrip(o){
     r.appendChild(specPills(j));
     box.appendChild(r);
   });
-  if(o.order_task) box.appendChild(el('div',{cls:'small'},[ el('span',{cls:'muted',text:'Order subtask: '}), o.order_task.title, ' ', el('span',{cls:'st st-'+o.order_task.state,text:STATE_WORD[o.order_task.state]||o.order_task.state}) ]));
+  if(o.order_task){ var ot = el('div',{cls:'row'});
+    ot.appendChild(el('div',{},[ el('span',{cls:'muted small',text:'Order subtask · '}), el('b',{text:o.order_task.title}) ]));
+    var otl = taskLine(o.order_task, '', false); if(otl) ot.appendChild(otl);
+    box.appendChild(ot); }
   return box;
 }
 window.addEventListener('message', function(e){ if(e.origin===location.origin && e.data && typeof e.data.ppsOpen==='string' && /^https:\/\//.test(e.data.ppsOpen)) open(e.data.ppsOpen); });
@@ -928,24 +944,30 @@ function load(ids, conv){
     .catch(function(e){ app.className=''; app.textContent=''; app.appendChild(el('div',{cls:'late',text:'Could not load: '+e.message})); });
 }
 
-// The due date as a pill; with state changes allowed, clicking it opens a date field and saving
-// moves the subtask's due date in Missive (owner 2026-10-24).
+// The due date AND time as a pill ("due Mon, Oct 26 at 5pm"). With state changes allowed the pill itself
+// is the change control (owner 2026-10-24): clicking it opens the date and the 4pm / 5pm / 7pm presets
+// in its place; Save moves the subtask's due date in Missive, Cancel puts the pill back.
+var DUE_TIMES = [['16:00','4pm'],['17:00','5pm'],['19:00','7pm']];
+function hm12(t){ if(!t) return ''; var h=+t.slice(0,2), m=t.slice(3,5); return (h%12||12)+(m!=='00'?':'+m:'')+(h<12?'am':'pm'); }
+function dueLabel(t){ return 'due '+(t.due ? md(t.due)+(t.due_time ? ' at '+hm12(t.due_time) : '') : '—'); }
 function duePill(t){
-  var label = 'due '+(t.due?md(t.due):'—');
-  if(!DATA.missive.can_change) return el('span',{cls:'pill pill-plain due',text:label});
-  var p = el('button',{cls:'pill pill-plain due edit',text:label+' ✎',title:'Change this subtask\'s due date in Missive'});
+  if(!DATA.missive.can_change) return el('span',{cls:'pill pill-plain due',text:dueLabel(t)});
+  var p = el('button',{cls:'pill pill-plain due edit',text:dueLabel(t),title:'Click to change this subtask\'s due date and time in Missive'});
   p.addEventListener('click',function(){
     var f = el('span',{cls:'duebox'}), inp = el('input',{type:'date'}); inp.value = t.due || DATA.today;
+    var pick = DUE_TIMES.some(function(x){ return x[0]===t.due_time; }) ? t.due_time : '17:00', chips = [];
+    DUE_TIMES.forEach(function(x){ var c = el('button',{cls:'tchip'+(x[0]===pick?' on':''),text:x[1]});
+      c.addEventListener('click',function(){ pick = x[0]; chips.forEach(function(k){ k.classList.toggle('on', k===c); }); }); chips.push(c); });
     var save = el('button',{cls:'b',text:'Save'}), cancel = el('button',{cls:'b',text:'Cancel'});
-    save.addEventListener('click',function(){ if(!inp.value || inp.value===t.due){ f.replaceWith(p); return; } setDue(t, inp.value, save); });
+    save.addEventListener('click',function(){ if(!inp.value || (inp.value===t.due && pick===t.due_time)){ f.replaceWith(p); return; } setDue(t, inp.value, pick, save); });
     cancel.addEventListener('click',function(){ f.replaceWith(p); });
-    f.appendChild(inp); f.appendChild(save); f.appendChild(cancel); p.replaceWith(f); inp.focus();
+    f.appendChild(inp); chips.forEach(function(c){ f.appendChild(c); }); f.appendChild(save); f.appendChild(cancel); p.replaceWith(f); inp.focus();
   });
   return p;
 }
-function setDue(task, ymd, btn){
+function setDue(task, ymd, time, btn){
   btn.disabled = true; btn.textContent = '…';
-  fetch(CFG.stateApi,{method:'POST',headers:{'X-PPS-Panel-Key':CFG.key,'Content-Type':'application/json'},credentials:'omit',body:JSON.stringify({task:task.id,due:ymd})})
+  fetch(CFG.stateApi,{method:'POST',headers:{'X-PPS-Panel-Key':CFG.key,'Content-Type':'application/json'},credentials:'omit',body:JSON.stringify({task:task.id,due:ymd,time:time})})
     .then(function(r){ return r.json(); })
     .then(function(d){ if(!d.ok){ alert(d.error||'Could not change the due date.'); } load(LAST.ids, LAST.conv); })
     .catch(function(){ alert('Could not reach the site.'); load(LAST.ids, LAST.conv); });

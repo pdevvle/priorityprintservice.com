@@ -90,10 +90,10 @@ const job2 = (o) => Object.assign({ order: 87001, item: 11, job: 'Menu', product
   window: ['2026-10-21', '2026-10-23'], rush: false, printed: false, source: 'calculator', addons: 'Coating: UV Gloss (both sides); Fold: Tri-fold', ticket: [], batch: { mates: [], combined: [] },
   papers: [{ label: '100lb Gloss Text', sheet: '13×19', sheets: 250, role: 'stock', in_stock: true, key: 'g' }], task: null, own_task: false }, o);
 const answer2 = Object.assign({}, answer, { missive: { connected: true, can_change: true, can_create: false }, orders: [{ order: 87001, status: 'processing', admin_url: 'https://site.test/wp-admin/x',
-  jobs: [ job2({ task: { id: 't1', title: '#87001 · Menu · 500 × 8.5×11 · start Wed Oct 21 · ship Fri Oct 23 · deliver Wed Oct 28', state: 'in_progress', due: '2026-10-21', started: '', conversation: 'c1' }, own_task: true }),
+  jobs: [ job2({ task: { id: 't1', title: '#87001 · Menu · 500 × 8.5×11 · start Wed Oct 21 · ship Fri Oct 23 · deliver Wed Oct 28', state: 'in_progress', due: '2026-10-21', due_time: '17:00', started: '', conversation: 'c1' }, own_task: true }),
           job2({ item: 12, job: 'Booklet', qty: '200', size: '5.5×8.5', print: 'Inside Color · Cover Color', pages: '16 pp', rush: true, addons: '', start: '2026-10-15',
                  papers: [{ label: '80lb Matte Cardstock', sheet: '13×19', sheets: 90, role: 'cover', in_stock: false, key: 'm' }] }) ],
-  conv_ok: false, needs: 1, order_task: null, drive: null, ship: { labels: 2, last: 'UPS Ground', tracking: '1Z2', track_url: 'https://t.test/1Z2', tracks: [ { tracking: '1Z1', url: 'https://t.test/1Z1', carrier: 'UPS', service: 'Ground', from: 'panel' }, { tracking: '1Z2', url: 'https://t.test/1Z2', carrier: 'UPS', service: 'Ground', from: 'panel' }, { tracking: '9400WEB', url: '', carrier: 'USPS', service: 'Ground Advantage', from: 'shippo' } ] },
+  conv_ok: false, needs: 1, order_task: { id: 'ot1', title: 'Print 87001 (AI)', state: 'todo', due: '2026-10-26', due_time: '16:00', started: '', conversation: 'c1' }, drive: null, ship: { labels: 2, last: 'UPS Ground', tracking: '1Z2', track_url: 'https://t.test/1Z2', tracks: [ { tracking: '1Z1', url: 'https://t.test/1Z1', carrier: 'UPS', service: 'Ground', from: 'panel' }, { tracking: '1Z2', url: 'https://t.test/1Z2', carrier: 'UPS', service: 'Ground', from: 'panel' }, { tracking: '9400WEB', url: '', carrier: 'USPS', service: 'Ground Advantage', from: 'shippo' } ] },
   ship_to: { addr: { name: 'Ann Lee', company: '', street1: '1 Old Rd', street2: '', city: 'Mesa', state: 'AZ', zip: '85201', phone: '' }, line: 'Ann Lee, 1 Old Rd, Mesa AZ 85201',
     last: { at: '2026-10-18 10:00', who: 'Pat (order screen)', from: 'Ann Lee, 9 Elm, Mesa AZ 85201', shippo: 'stale', shippo_words: 'Shippo still shows the OLD address (x).' }, can_edit: true } }] });
 const t2 = await b.newPage({ viewport: { width: 380, height: 900 } }); const posted = []; const dialogs = [];
@@ -124,10 +124,16 @@ ok(pr1.some(x => /k-paper/.test(x.cls) && x.t === '100lb Gloss Text · 13×19 ·
 ok(pr2.some(x => /NOT STOCKED/.test(x.t) && /\(cover\)/.test(x.t) && x.bg === RED) && pr2.some(x => x.t === '16 pp' && /k-pages/.test(x.cls)) && pr2.some(x => x.t === 'RUSH' && x.bg === RED) && pr2.some(x => x.t === 'LATE START' && x.bg === LATE), 'a cover paper not in stock, the page count, rush and a late start on the second job', pr2);
 if (shot) await t2.screenshot({ path: shot.replace(/\.png$/, '-order.png') });
 const due = await q.$('.subs button.pill.due');
-ok(due && /^due Wed, Oct 21 ✎$/.test(await due.textContent()), 'the subtask\'s due date is a pill that can be clicked to change it', due && await due.textContent());
-if (due) { await due.click(); await t2.waitForTimeout(50); await q.fill('.subs .duebox input[type=date]', '2026-10-27'); await q.click('.subs .duebox button:has-text("Save")'); await t2.waitForTimeout(250); }
+ok(due && (await due.textContent()) === 'due Wed, Oct 21 at 5pm', 'the subtask\'s due pill shows the date and the time, and is itself the button', due && await due.textContent());
+const duePills = await q.$$eval('.subs button.pill.due', b => b.map(x => x.textContent));
+ok(duePills.includes('due Mon, Oct 26 at 4pm') && await q.evaluate(() => /Order subtask · Print 87001 \(AI\)/.test(document.querySelector('.subs').innerText) && /To do/.test(document.querySelector('.subs').innerText)), 'the conversation\'s order-level subtask is in the top box too, with its state and its own editable due pill', duePills);
+if (due) { await due.click(); await t2.waitForTimeout(50); }
+if (shot) await t2.screenshot({ path: shot.replace(/\.png$/, '-due.png'), clip: { x: 0, y: 0, width: 380, height: 360 } });
+const chips = await q.$$eval('.subs .duebox .tchip', b => b.map(x => x.textContent + (x.classList.contains('on') ? '*' : '')));
+ok(chips.join(',') === '4pm,5pm*,7pm', 'clicking it opens the date and the 4pm / 5pm / 7pm presets, the current time chosen', chips);
+if (due) { await q.fill('.subs .duebox input[type=date]', '2026-10-27'); await q.click('.subs .duebox .tchip:has-text("7pm")'); await q.click('.subs .duebox button:has-text("Save")'); await t2.waitForTimeout(250); }
 const dp = posted.filter(x => x.state);
-ok(dp.length === 1 && dp[0].body.task === 't1' && dp[0].body.due === '2026-10-27' && dp[0].key === 'KEY123' && !('state' in dp[0].body), 'Save sends the new due date for that subtask only, with the panel key', dp);
+ok(dp.length === 1 && dp[0].body.task === 't1' && dp[0].body.due === '2026-10-27' && dp[0].body.time === '19:00' && dp[0].key === 'KEY123' && !('state' in dp[0].body), 'Save sends the new date and time for that subtask only, with the panel key', dp);
 posted.length = 0;
 const cpb = await q.$('button:has-text("Copy tracking")');
 ok(cpb && (await cpb.textContent()) === 'Copy tracking (3)', 'a shipped order\'s Shipping box has a Copy tracking button naming how many', cpb && await cpb.textContent());
