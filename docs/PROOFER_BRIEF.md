@@ -97,6 +97,7 @@ a real origin).
 | `tools-proof-screen-res-test.mjs` | The surface settles to the 300 DPI print render, and its pixels are page 1 of the approved PRINT_READY; blank pages are never swapped and browsing them cannot break approval; a job arriving after the demo is never shown it | + `PPS_DEPS_DIR` (pdf-lib) |
 | `tools-proof-handoff-test.mjs` | What `PROOFER_SINCE_HANDOFF.md` asks of the saddle: staples from the calculator only, page counts no calculator sends are refused, a mixed book is refused not simulated, unreadable files are refused by name, an untyped JPEG still loads | `PPS_PLAYWRIGHT`, `PPS_PROOF_BASE` |
 | `tools-proof-thumbs-test.mjs` | **The page thumbnails, both layouts** (2026-10-23). Under the stage: one row at 64 pages, one cell tall, scrolls sideways; the stage is as tall at 64 pages as at 8; a mouse wheel scrolls it and lets go at the ends; the selected page is kept in view, and an unrelated re-render does not move it. The draft (`?thumbs=rail`): no bottom strip and a taller stage; each page heading carries its own cell (chip, drop target, dashing); the cell selects and opens, the chip picks for its page, a drop lands on its page; a page chosen in 3D is in view back in Proof, while opening or switching to the draft leaves the rail at the top (page 1 is selected from the start, and scrolling to it would carry Preflight away); a hosted job keeps the layout; a phone does not scroll sideways. The pre-change proofer fails 20 of 31 | + `PPS_PROOF_PATH` |
+| `tools-proof-rail-test.mjs` | **The Artwork Edit rail** (2026-10-24). Preflight condensed: one line per check, explanation folded until clicked and kept open across a re-render; a Not passed group first (fail, then warn, then could-not-run), then a folded Passed group; the chip says "N not passed" / "all passed" and the old state words are gone; "What approving produces" folds away. The "!" flags (page headings, strip thumbnails) show that page's findings on hover, on a tap without opening the page, and on keyboard focus; a tapped or focused tip follows its flag while the rail scrolls and goes when the flag does; the findings are in the heading's accessible text. A failed approval's message and, after two, the escape hatch are on screen even with a page open, and survive a re-render (both were written into the panel once, so an open page hid them and the next render wiped them). The pre-change proofer fails 25 of the 28 checks it reaches | + `PPS_PROOF_PATH` |
 | `tools-proof-package-test.mjs` | **DEAD.** Pre-harness prototype: imports `./node_modules/playwright`, reads `ui/vendor/`, opens the file over `file://`, needs an uncommitted `test-art.pdf`. Superseded by the draft + progress suites. Delete or revive; do not count it as green. |
 | `tools-proof-serve.mjs` | Static server on `127.0.0.1:8137` + `/vendor/`. Its second log line names `node_modules` regardless of where it found the libraries — trust `curl -sI http://127.0.0.1:8137/vendor/pdf.min.js`. Its header still says "three suites"; stale. |
 | `tools-proof-vendor.mjs` | Installs the proofer's pinned pdf.js 3.11.174 / pdf-lib 1.17.1 into `proof-vendor/`. `--check` reports without installing. |
@@ -129,9 +130,9 @@ BABEL_DIR=$S/node_modules node tools-compile-calcs.mjs
 # 2. Port 8137 holds one server at a time.
 fuser -k 8137/tcp; node tools-proof-serve.mjs &
 
-# 3. The eighteen live suites.
+# 3. The nineteen live suites.
 for t in ui-draft ui-preflight ui-mobile ui-style embed integration slots progress blank-pages \
-         size-check print-fidelity reconcile paid spine transforms screen-res handoff thumbs; do
+         size-check print-fidelity reconcile paid spine transforms screen-res handoff thumbs rail; do
   node tools-proof-$t-test.mjs | tail -1
 done
 ```
@@ -962,7 +963,7 @@ self-approval path was the only one anyone had exercised.
 ## 11. First moves for a new session
 
 1. Read this file, then `CLAUDE.md` §"Proofing — two surfaces, one of them dark".
-2. Run §1.3 exactly. Eighteen suites green; `tools-proof-package-test.mjs` is dead by design.
+2. Run §1.3 exactly. Nineteen suites green; `tools-proof-package-test.mjs` is dead by design.
 3. §7.0, §7.4 and §7.6 were closed 2026-09-28. Enable `proof_url` on staging first, with
    a real booklet through it, before production. On staging the knob already exists; that
    makes it easier to enable by accident.

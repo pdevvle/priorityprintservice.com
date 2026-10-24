@@ -435,10 +435,8 @@
   .chip.fail{background:var(--magenta);border-color:var(--magenta);color:#fff}
   .chip.warn{background:var(--yellow-tint);border-color:var(--yellow-line);color:var(--bp-warn)}
   .chip.pass{background:rgba(56,161,105,.12);border-color:var(--green);color:var(--green)}
-  .deliv{margin-top:14px;padding:12px 13px;border:1px solid var(--bp-line);border-radius:12px;
+  .deliv{margin-top:4px;padding:12px 13px;border:1px solid var(--bp-line);border-radius:12px;
          background:var(--bp-surface-2)}
-  .delivhead{font-family:var(--pps-display);font-size:10px;font-weight:700;letter-spacing:.08em;
-             text-transform:uppercase;color:var(--bp-faint);margin-bottom:9px}
   .delivrow{font-size:11.5px;line-height:1.5;color:var(--bp-faint)}
   .delivrow + .delivrow{margin-top:9px;padding-top:9px;border-top:1px solid var(--bp-line)}
   .delivrow strong{color:var(--bp-ink)}
@@ -446,16 +444,62 @@
   .origins li{margin-top:3px}
   .ofile{color:var(--bp-ink);font-weight:600}
   .ohash{font-variant-numeric:tabular-nums;font-size:10.5px}
-  .checklist{display:flex;flex-direction:column;gap:2px}
-  .chk-row{display:flex;gap:10px;align-items:flex-start;padding:9px 2px;border-top:1px solid var(--bp-line)}
-  .chk-row:first-child{border-top:none}
-  .chk-state{flex-shrink:0;width:78px;font-size:10px;font-weight:700;letter-spacing:.03em;
-             text-transform:uppercase;padding-top:2px;color:var(--bp-faint)}
-  .chk-row.fail .chk-state{color:var(--magenta)}
-  .chk-row.warn .chk-state{color:var(--bp-warn)}
-  .chk-row.pass .chk-state{color:var(--green)}
-  .chk-label{font-size:12.5px;font-weight:600;color:var(--bp-ink)}
-  .chk-text{margin:3px 0 0;font-size:11.5px;line-height:1.5;color:var(--bp-faint)}
+  /* Condensed: a group heading, then one line per check — a dot for its state
+     and its name. The explanation opens under the line on a click. The state
+     column this replaced (78px of "NOT CHECKED" on every row) was most of why
+     the panel read as a wall. */
+  .checklist{display:flex;flex-direction:column;gap:12px}
+  .chk-grouphead{display:flex;align-items:center;gap:6px;width:100%;margin:0 0 2px;padding:2px 2px 4px;
+                 background:none;border:0;font-family:var(--pps-display);font-size:10px;font-weight:700;
+                 letter-spacing:.08em;text-transform:uppercase;color:var(--bp-faint);text-align:left}
+  .chk-group.notpassed .chk-grouphead{color:var(--magenta)}
+  .chk-group.passed .chk-grouphead{color:var(--green);cursor:pointer}
+  .chk-group.passed .chk-grouphead:hover{color:var(--cyan)}
+  .chk-grouphead .caret{margin-left:auto;font-size:12px;transition:transform .18s}
+  .chk-group.open .chk-grouphead .caret{transform:rotate(180deg)}
+  .chk-group.passed:not(.open) .chk-row{display:none}
+  .chk-row{border-top:1px solid var(--bp-line)}
+  .chk-sum{display:flex;align-items:center;gap:9px;width:100%;padding:7px 2px;background:none;border:0;
+           cursor:pointer;font-family:inherit;text-align:left;color:var(--bp-ink)}
+  .chk-sum:hover .chk-label{color:var(--cyan)}
+  .chk-sum .caret{color:var(--bp-dim);font-size:12px;transition:transform .18s}
+  .chk-row.open .chk-sum .caret{transform:rotate(180deg)}
+  .chk-state{flex-shrink:0;width:9px;height:9px;border-radius:50%;background:var(--bp-faint)}
+  .chk-row.fail .chk-state{background:var(--magenta)}
+  .chk-row.warn .chk-state{background:var(--bp-warn)}
+  .chk-row.unknown .chk-state{background:transparent;box-shadow:inset 0 0 0 1.5px var(--bp-faint)}
+  .chk-row.pass .chk-state,.chk-row.na .chk-state{background:var(--green)}
+  .chk-label{flex:1;min-width:0;font-size:12.5px;font-weight:600;color:inherit;transition:color .15s}
+  .chk-text{margin:0 0 9px 18px;font-size:11.5px;line-height:1.5;color:var(--bp-faint)}
+  .delivtoggle{display:flex;align-items:center;width:100%;margin-top:12px;padding:10px 2px 6px;background:none;border:0;
+               border-top:1px solid var(--bp-line);cursor:pointer;font-family:var(--pps-display);font-size:10px;
+               font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--bp-faint);text-align:left}
+  .delivtoggle:hover{color:var(--cyan)}
+  .delivtoggle .caret{margin-left:auto;font-size:12px;transition:transform .18s}
+  .delivtoggle.open .caret{transform:rotate(180deg)}
+  /* read by a screen reader, not drawn */
+  .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+  /* ── the "!" flags explain themselves ── one floating tip, fixed to the
+     window because the rail scrolls and would clip anything hung off it */
+  [data-flag]{cursor:help}
+  .flagtip{position:fixed;z-index:40;width:280px;max-width:calc(100vw - 16px);box-sizing:border-box;
+           font-size:11.5px;line-height:1.5;background:var(--bp-surface);color:var(--bp-dim);
+           border:1px solid var(--bp-line);border-radius:10px;padding:10px 12px;
+           box-shadow:0 4px 6px rgba(16,24,40,.06), 0 12px 28px rgba(16,24,40,.18);
+           opacity:0;visibility:hidden;transform:translateY(-3px);pointer-events:none;
+           transition:opacity .14s ease,transform .14s ease,visibility .14s}
+  .flagtip.on{opacity:1;visibility:visible;transform:none}
+  .flagtip b{display:block;color:var(--bp-ink);font-weight:700;font-size:11.5px;margin-bottom:6px}
+  .flagtip ul{margin:0;padding:0;list-style:none}
+  .flagtip li{display:flex;gap:7px;color:var(--magenta)}
+  .flagtip li + li{margin-top:6px}
+  .flagtip li.warn{color:var(--bp-warn)}
+  .flagtip li.info{color:var(--bp-faint)}
+  .flagtip li .bang{width:15px;height:15px;font-size:10px}
+  .flagtip li.warn .bang{background:var(--bp-warn)}
+  .flagtip li.info .bang{background:var(--bp-faint)}
+  @media (prefers-reduced-motion:reduce){ .flagtip{transition:none;transform:none} }
   .behavior{display:flex;align-items:center;gap:10px;margin:4px 0 12px}
   .behavior select{padding:8px 11px;border:1px solid var(--bp-line);border-radius:10px;
                    background:var(--bp-surface);color:var(--bp-ink);font-size:13.5px;font-family:inherit;
@@ -895,6 +939,7 @@
 </div>
 
 <input type="file" id="filePick" accept="image/*,application/pdf" multiple hidden>
+<div class="flagtip" id="flagTip" role="tooltip"></div>
 
 <script>
 /* ─────────────────────────────────────────────────────────────
@@ -1076,7 +1121,12 @@ const BEHAVIORS = {
 
 const state = { mode:'proof', selected:1, openPage:null, wholeOpen:true, perPage:{}, applyAll:false,
                 bookMode:'closed', spread:0, rot:{ x:-15, y:-25 },
-                zoom:'fit', lens:null };
+                zoom:'fit', lens:null,
+                // the Preflight list: which checks have their explanation open,
+                // whether the Passed group is unfolded, and the deliverables box
+                chkOpen:new Set(), passedOpen:false, delivOpen:false,
+                // what approving last said, redrawn by every rail render
+                approveNote:null, approveError:null, escapeOffered:false, escapeTaken:false };
 
 /* Undo: whole-map snapshots. Cheap at this size and impossible to get subtly
    wrong, which matters more here than the memory would. */
@@ -1923,7 +1973,7 @@ function pageCell(n, mini){
   } else {
     const issues = analyze(n);
     const worst = issues.some(i => i.level === 'error') ? 'error' : issues.length ? 'warn' : '';
-    badge = (worst ? '<span class="dot'+(worst === 'warn' ? ' warn' : '')+'">!</span>' : '');
+    badge = (worst ? '<span class="dot'+(worst === 'warn' ? ' warn' : '')+'" data-flag data-page="'+n+'">!</span>' : '');
   }
   d.innerHTML = '<div class="thumb" style="'+thumbStyle+'"></div>' +
                 (mini ? '' : '<div class="cap"><span class="n">P'+n+'</span>' + (p.name ? '<br>'+p.name : '') + '</div>') +
@@ -1988,10 +2038,55 @@ function stripWheel(e){
   e.preventDefault();
 }
 
+/* ── the "!" flags explain themselves ──────────────────────────
+   A red "!" on a page heading or a thumbnail said something on that page
+   needed a look, but not what (owner, 2026-10-24). Hover it — tap it on a
+   touch screen, or tab to its heading — and it lists that page's findings,
+   the same ones the issues column shows beside the open page. One tip for
+   every flag, fixed to the window: the rail scrolls, and would clip a tip
+   hung off the heading. */
+const flagTip = document.getElementById('flagTip');
+let flagFor = null, lastPointer = 'mouse';
+function showFlagTip(el){
+  const n = Number(el.dataset.page);
+  const issues = n ? analyze(n) : [];
+  if (!issues.length){ hideFlagTip(); return; }
+  const p = MODEL.pages.find(q => q.n === n);
+  flagTip.innerHTML = '<b></b><ul></ul>';
+  flagTip.firstChild.textContent = 'Page ' + n + (p && p.name ? ' (' + p.name + ')' : '');
+  issues.forEach(i => {
+    const li = document.createElement('li');
+    li.className = i.level === 'warn' ? 'warn' : i.level === 'info' ? 'info' : '';
+    // the issues column's own markup for the same text
+    li.innerHTML = '<span class="bang">!</span><span>' + i.text + '</span>';
+    flagTip.lastChild.appendChild(li);
+  });
+  flagFor = el;
+  flagTip.classList.add('on');
+  placeFlagTip();
+}
+/* Under the flag, or above it near the bottom of the window. Also run on any
+   scroll, so the tip follows its flag rather than vanishing mid-gesture — and
+   goes once the flag itself is out of sight (scrolled under the rail's edge). */
+function placeFlagTip(){
+  const el = flagFor;
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  const at = el.isConnected && document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  if (!at || !(at === el || el.contains(at))){ hideFlagTip(); return; }
+  const w = flagTip.offsetWidth, h = flagTip.offsetHeight;
+  let top = r.bottom + 8;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 8);
+  flagTip.style.left = Math.round(Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w + 8))) + 'px';
+  flagTip.style.top = Math.round(top) + 'px';
+}
+function hideFlagTip(){ flagFor = null; flagTip.classList.remove('on'); }
+
 /* ── filmstrip: identical cells, rendered into whichever container is
    active — bottom of the stage in Proof, the right panel in 3D, and
    nowhere in the draft rail layout, whose cells live in the page headings ── */
 function renderStrip(){
+  hideFlagTip();
   const book = state.mode === 'book';
   const target = document.getElementById(book ? 'stripRail' : 'stripBottom');
   const other  = document.getElementById(book ? 'stripBottom' : 'stripRail');
@@ -2019,35 +2114,73 @@ function isSel(n){
 
 /* ── right rail ─────────────────────────────────────────────── */
 function renderRail(){
+  hideFlagTip();                 // the flag it was pointing at is about to go
   const rail = document.getElementById('rail');
   const keepY = rail.scrollTop;
   rail.innerHTML = '';
   const withThumbs = thumbsInRail();
 
+  /* Preflight, condensed (owner, 2026-10-24: "crowded"). Two groups in the
+     order they matter — Not passed, then Passed — one line per check, and the
+     explanation opens on a click. Passed starts folded: a list of things that
+     are fine is the part nobody needs to read first. "Not passed" covers
+     anything short of a pass, worst first; a check that could not run (an
+     image has no structure to inspect) is in it, marked by a hollow dot, and
+     its explanation says why. */
   const checks = runFileChecks();
-  const worstFile = checks.some(c => c.state === 'fail') ? 'fail'
-                  : checks.some(c => c.state === 'warn') ? 'warn'
-                  : checks.some(c => c.state === 'unknown') ? 'unknown' : 'pass';
+  const passed = c => c.state === 'pass' || c.state === 'na';
+  const RANK = { fail:0, warn:1, unknown:2 };
+  const notPassed = checks.filter(c => !passed(c)).sort((a, b) => (RANK[a.state] ?? 3) - (RANK[b.state] ?? 3));
+  const okChecks  = checks.filter(passed);
+  const worstFile = notPassed.length ? notPassed[0].state : 'pass';
+  const row = c => {
+    const open = state.chkOpen.has(c.id);
+    return '<div class="chk-row ' + c.state + (open ? ' open' : '') + '" data-chk="' + c.id + '">' +
+      '<button class="chk-sum" aria-expanded="' + open + '">' +
+        '<span class="chk-state"><span class="sr">' + (passed(c) ? 'Passed' : 'Not passed') + '</span></span>' +
+        '<span class="chk-label">' + c.label + '</span><span class="caret">⌄</span></button>' +
+      '<p class="chk-text"' + (open ? '' : ' hidden') + '>' + c.text + '</p></div>';
+  };
   const wf = document.createElement('div');
   wf.className = 'acc' + (state.wholeOpen ? ' open' : '');
   wf.innerHTML = '<button class="acchead"><span>Preflight</span>' +
-      '<span class="chip ' + worstFile + '">' + (
-        worstFile === 'fail' ? checks.filter(c=>c.state==='fail').length + ' problem' + (checks.filter(c=>c.state==='fail').length===1?'':'s')
-      : worstFile === 'warn' ? checks.filter(c=>c.state==='warn').length + ' to check'
-      : worstFile === 'unknown' ? checks.filter(c=>c.state==='unknown').length + ' not checked'
-      : 'all checks ran') + '</span><span class="caret">⌄</span></button>' +
+      '<span class="chip ' + worstFile + '">' +
+        (notPassed.length ? notPassed.length + ' not passed' : 'all passed') +
+      '</span><span class="caret">⌄</span></button>' +
     '<div class="accbody"><div class="checklist">' +
-      checks.map(c => '<div class="chk-row ' + c.state + '">' +
-        '<span class="chk-state">' + STATE_LABEL[c.state] + '</span>' +
-        '<div><span class="chk-label">' + c.label + '</span>' +
-        '<p class="chk-text">' + c.text + '</p></div></div>').join('') +
-    '</div>' + deliverablesHtml() + '</div>';
+      (notPassed.length ? '<div class="chk-group notpassed open">' +
+        '<div class="chk-grouphead">Not passed · ' + notPassed.length + '</div>' +
+        notPassed.map(row).join('') + '</div>' : '') +
+      (okChecks.length ? '<div class="chk-group passed' + (state.passedOpen ? ' open' : '') + '">' +
+        '<button class="chk-grouphead" aria-expanded="' + state.passedOpen + '">Passed · ' + okChecks.length +
+        '<span class="caret">⌄</span></button>' +
+        okChecks.map(row).join('') + '</div>' : '') +
+    '</div>' +
+    '<button class="delivtoggle' + (state.delivOpen ? ' open' : '') + '" aria-expanded="' + state.delivOpen + '">' +
+      'What approving produces<span class="caret">⌄</span></button>' +
+    deliverablesHtml() + '</div>';
   wf.querySelector('.acchead').onclick = () => {
     state.wholeOpen = !state.wholeOpen;
     if (state.wholeOpen) state.openPage = null;     // same rule, the other way round
     renderAll();
   };
+  // These only open and close text, so they re-render the rail alone: a full
+  // renderAll would recompose the stage for nothing.
+  wf.querySelectorAll('.chk-sum').forEach(b => b.onclick = () => {
+    const id = b.parentNode.dataset.chk;
+    state.chkOpen.has(id) ? state.chkOpen.delete(id) : state.chkOpen.add(id);
+    renderRail();
+  });
+  const pg = wf.querySelector('.chk-group.passed .chk-grouphead');
+  if (pg) pg.onclick = () => { state.passedOpen = !state.passedOpen; renderRail(); };
+  wf.querySelector('.delivtoggle').onclick = () => { state.delivOpen = !state.delivOpen; renderRail(); };
+  const dv = wf.querySelector('#deliv');
+  if (dv) dv.hidden = !state.delivOpen;
   rail.appendChild(wf);
+  // the approval note is set as text, never as markup: it can carry a message
+  // from an exception
+  if (state.approveNote != null) document.getElementById('pkgNote').textContent = state.approveNote;
+  renderApprovalOutcome();
 
   MODEL.pages.forEach(p => {
     const open = state.openPage === p.n;
@@ -2056,7 +2189,12 @@ function renderRail(){
     const acc = document.createElement('div');
     acc.className = 'acc' + (open ? ' open' : '');
     const title = 'Page: ' + p.n + (p.name ? ' (' + p.name + ')' : '');
-    const bang = issues.length ? '<span class="bang"'+(issues.every(i=>i.level==='warn') ? ' style="background:var(--bp-warn)"' : '')+'>!</span>' : '';
+    // data-flag: hovering (or tapping) it shows this page's findings (flagTip)
+    // .sr: the findings, read with the heading, for anyone who cannot hover
+    const bang = issues.length ? '<span class="bang" data-flag data-page="' + p.n + '"' +
+      (issues.every(i=>i.level==='warn') ? ' style="background:var(--bp-warn)"' : '') + '>!<span class="sr"> ' +
+      issues.length + (issues.length === 1 ? ' finding: ' : ' findings: ') +
+      issues.map(i => String(i.text).replace(/<[^>]*>/g, '')).join('; ') + '</span></span>' : '';
     acc.innerHTML = '<button class="acchead"><span>'+title+'</span>'+bang+'<span class="caret">⌄</span></button>' +
                     '<div class="accbody"></div>';
     // Draft layout: the heading carries the page's own cell. A wrapper rather
@@ -2792,8 +2930,9 @@ async function loadArt(n, file){
    The checks a trade shop runs before it puts a job on a press, each in one of
    five states. "unknown" is a first-class result and not a quiet pass: most of
    these can only be answered by a file that carries its own structure, and
-   saying so is the difference between a preflight and a reassurance. */
-const STATE_LABEL = { pass:'OK', warn:'Check', fail:'Problem', unknown:'Not checked', na:'—' };
+   saying so is the difference between a preflight and a reassurance. The rail
+   lists them in two groups, Not passed and Passed (renderRail); an "unknown"
+   sits in Not passed with a hollow dot, and its text says why. */
 
 function fileFacts(){
   const all = [...uploads.values()];
@@ -3456,8 +3595,8 @@ function renderPackage(pkg){
 
 function deliverablesHtml(){
   const origins = deliverables();
+  // Its heading is the toggle above it in the rail, which folds it away.
   return '<div class="deliv" id="deliv">' +
-    '<div class="delivhead">What approving produces</div>' +
     '<div class="delivrow"><strong>The print file.</strong> Every page flattened at 300 DPI exactly as you see it ' +
       'here — the transforms baked in, nothing left to interpret. This is what goes on the press, because it is ' +
       'what you approved.</div>' +
@@ -3478,8 +3617,8 @@ function deliverablesHtml(){
     // becomes the fixed bottom bar.
     '<div class="pkgrow">' +
       '<button class="pkgbtn" id="pkgBtn">Build proof package</button>' +
-      '<span class="pkgnote" id="pkgNote">Same composition the proof view uses. ' +
-        'Rebuild after any change &mdash; a package is only valid for the state it was built from.</span>' +
+      '<span class="pkgnote" id="pkgNote">' + (state.approveNote != null ? '' : 'Same composition the proof view uses. ' +
+        'Rebuild after any change &mdash; a package is only valid for the state it was built from.') + '</span>' +
     '</div><div class="pkgout" id="pkgOut" hidden></div>' +
     '</div>';
 }
@@ -3851,15 +3990,38 @@ window.addEventListener('message', async ev => {
    placed. */
 let approveFailures = 0;
 
+/* What approving last said — its note, a failure, the escape hatch — is kept in
+   state and drawn by the rail, not written into the panel once. The panel is
+   rebuilt on every rail render, and the escape hatch used to be appended to it
+   and so vanished at the next one; it was also out of sight whenever a page's
+   section was open, and once "What approving produces" folded (2026-10-24) it
+   was out of sight always. A failure now unfolds it (revealApprovalOutcome). */
 function approvalNote(msg){
+  state.approveNote = msg || '';
   const el = document.getElementById('pkgNote');
-  if (el) el.textContent = msg || '';
+  if (el) el.textContent = state.approveNote;
+}
+function renderApprovalOutcome(){
+  const out = document.getElementById('pkgOut');
+  if (!out || !(state.approveError || state.escapeOffered)) return;
+  out.hidden = false;
+  out.replaceChildren();
+  if (state.approveError){
+    const e = document.createElement('div');
+    e.className = 'pkgerr';
+    e.textContent = state.approveError;
+    out.appendChild(e);
+  }
+  if (state.escapeOffered) out.appendChild(escapeBox());
+}
+function revealApprovalOutcome(){
+  state.wholeOpen = true; state.openPage = null; state.delivOpen = true;
+  renderRail();
+  const out = document.getElementById('pkgOut');
+  if (out && out.scrollIntoView) out.scrollIntoView({ block:'nearest' });
 }
 
-function offerEscapeHatch(){
-  const out = document.getElementById('pkgOut');
-  if (!out || document.getElementById('proofEscape')) return;
-  out.hidden = false;
+function escapeBox(){
   const box = document.createElement('div');
   box.id = 'proofEscape';
   box.style.cssText = 'margin-top:10px;padding:12px 14px;border:1px solid var(--yellow-line);'
@@ -3873,15 +4035,17 @@ function offerEscapeHatch(){
   b.className = 'pkgbtn';
   b.id = 'proofEscapeBtn';
   b.textContent = 'Continue and have prepress check my file';
+  b.disabled = !!state.escapeTaken;
   b.onclick = () => {
     post({ type:'pps-proof:escape',
            reason:'approval failed ' + approveFailures + ' times',
            attempts:approveFailures });
+    state.escapeTaken = true;
     approvalNote('Sent to prepress. You can close this and finish your order.');
     b.disabled = true;
   };
   box.append(p, b);
-  out.appendChild(box);
+  return box;
 }
 
 document.getElementById('reviewDone').onclick = () => post({ type:'pps-proof:close' });
@@ -3912,8 +4076,9 @@ document.getElementById('approveBtn').onclick = async () => {
 
   try {
     const pkg = await buildPackage();
-    renderPackage(pkg);
     approveFailures = 0;
+    state.approveError = null; state.escapeOffered = false;
+    renderPackage(pkg);
     btn.textContent = '✓ APPROVED';
     btn.classList.remove('nudge');
     btn.classList.add('done');
@@ -3930,23 +4095,17 @@ document.getElementById('approveBtn').onclick = async () => {
     btn.disabled = false;
     btn.textContent = wasLabel;
     btn.classList.remove('done');
-    const out = document.getElementById('pkgOut');
-    if (out){
-      out.hidden = false;
-      const e = document.createElement('div');
-      e.className = 'pkgerr';
-      // Where it got to is most of the diagnosis — "at: Rendering page 5 of 8"
-      // turns a support call into a look at page 5.
-      e.textContent = 'We could not prepare your proof: ' + (err && err.message ? err.message : err)
-                    + (lastStep ? '  (stopped at: ' + lastStep + ')' : '');
-      out.replaceChildren(e);
-    }
+    // Where it got to is most of the diagnosis — "at: Rendering page 5 of 8"
+    // turns a support call into a look at page 5.
+    state.approveError = 'We could not prepare your proof: ' + (err && err.message ? err.message : err)
+                       + (lastStep ? '  (stopped at: ' + lastStep + ')' : '');
     approvalNote('');
     post({ type:'pps-proof:approve-failed',
            attempts: approveFailures,
            step: lastStep,
            message: String(err && err.message || err) });
-    if (approveFailures >= 2) offerEscapeHatch();
+    if (approveFailures >= 2) state.escapeOffered = true;
+    revealApprovalOutcome();
   } finally {
     onPkgProgress = null;
     if (prog) prog.hidden = true;
@@ -3981,6 +4140,36 @@ applyTheme(!!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dar
 setThumbLayout(thumbLayout);
 document.getElementById('thumbsLayout').onchange = e => { setThumbLayout(e.target.value); renderAll(); };
 document.getElementById('stripBottom').addEventListener('wheel', stripWheel, { passive: false });
+
+// The flags' tip. A touch screen has no hover, so a tap on a flag answers it
+// (and does not also open the page beneath it); the next tap anywhere closes
+// it. Capture phase, so that tap never reaches the heading's own handler.
+document.addEventListener('pointerdown', e => { lastPointer = e.pointerType || 'mouse'; }, true);
+document.addEventListener('mouseover', e => {
+  if (lastPointer === 'touch') return;
+  const f = e.target.closest && e.target.closest('[data-flag]');
+  if (f && f !== flagFor) showFlagTip(f);
+});
+document.addEventListener('mouseout', e => {
+  const f = e.target.closest && e.target.closest('[data-flag]');
+  if (f && f === flagFor && !(e.relatedTarget && f.contains(e.relatedTarget))) hideFlagTip();
+});
+document.addEventListener('click', e => {
+  const f = e.target.closest && e.target.closest('[data-flag]');
+  if (f && lastPointer === 'touch'){
+    e.preventDefault(); e.stopPropagation();
+    if (flagFor === f) hideFlagTip(); else showFlagTip(f);
+    return;
+  }
+  if (!f && flagFor) hideFlagTip();
+}, true);
+document.addEventListener('focusin', e => {
+  const t = e.target, f = t && t.querySelector && t.querySelector(':scope > [data-flag]');
+  if (f && t.matches(':focus-visible')) showFlagTip(f);
+});
+document.addEventListener('focusout', () => { if (flagFor) hideFlagTip(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && flagFor) hideFlagTip(); });
+window.addEventListener('scroll', placeFlagTip, true);
 
 /* ── boot ──────────────────────────────────────────────────────
    Two ways in, one code path after.

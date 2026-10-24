@@ -227,5 +227,5 @@ it has sent `approved`.
 | `tools-job-health-test.php` | one-side-missing digest section (order 87285) |
 | `tools-gdrive-missing-test.php` | Drive uploads under the listed names |
 
-Also run the live proofer suites listed in `docs/PROOFER_BRIEF.md` §1.2 — eighteen
+Also run the live proofer suites listed in `docs/PROOFER_BRIEF.md` §1.2 — nineteen
 since 2026-09-30, including `tools-proof-handoff-test.mjs`.
