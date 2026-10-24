@@ -246,13 +246,36 @@ function pps_ms_shipments( $order ) {
     return is_array( $s ) ? array_values( $s ) : array();
 }
 
-/** One line for the panel's order card: labels already bought here. */
+/**
+ * One line for the panel's order card: labels bought here, plus every tracking number the order
+ * has (`tracks`, for its Copy tracking button) — the panel's own labels, and labels bought in
+ * Shippo's web app as far as the analytics label list (cached, `pps_an_labels`) already knows
+ * them; refunded ones left out. Never calls Shippo.
+ */
 function pps_ms_summary( $order ) {
     $s = pps_ms_shipments( $order );
-    if ( ! $s ) return array( 'labels' => 0 );
-    $last = end( $s );
+    $tracks = array(); $seen = array();
+    $add = function ( $num, $url, $carrier, $service, $from ) use ( &$tracks, &$seen ) {
+        $num = trim( (string) $num ); $url = (string) $url;
+        if ( $num === '' && $url === '' ) return;
+        $k = strtoupper( $num !== '' ? $num : $url );
+        if ( isset( $seen[ $k ] ) ) return;
+        $seen[ $k ] = 1;
+        $tracks[] = array( 'tracking' => $num, 'url' => preg_match( '#^https://#i', $url ) ? $url : '', 'carrier' => trim( (string) $carrier ), 'service' => trim( (string) $service ), 'from' => $from );
+    };
+    foreach ( $s as $x ) $add( $x['tracking'] ?? '', $x['track_url'] ?? '', $x['carrier'] ?? '', $x['service'] ?? '', 'panel' );
+    $num = method_exists( $order, 'get_order_number' ) ? preg_replace( '/\D/', '', (string) $order->get_order_number() ) : '';
+    $cached = $num !== '' ? get_transient( 'pps_an_labels' ) : false;
+    if ( is_array( $cached ) && ! empty( $cached['list'] ) ) {
+        foreach ( array_reverse( $cached['list'] ) as $l ) {
+            if ( (string) ( $l['order'] ?? '' ) !== $num || ( $l['status'] ?? '' ) !== 'SUCCESS' ) continue;
+            $add( $l['tracking'] ?? '', $l['tracking_url'] ?? '', $l['carrier'] ?? '', $l['service'] ?? '', 'shippo' );
+        }
+    }
+    if ( ! $s && ! $tracks ) return array( 'labels' => 0, 'tracks' => array() );
+    $last = $s ? end( $s ) : array();
     return array( 'labels' => count( $s ), 'last' => trim( ( $last['carrier'] ?? '' ) . ' ' . ( $last['service'] ?? '' ) ), 'tracking' => (string) ( $last['tracking'] ?? '' ),
-                  'track_url' => (string) ( $last['track_url'] ?? '' ) );
+                  'track_url' => (string) ( $last['track_url'] ?? '' ), 'tracks' => $tracks );
 }
 
 /**

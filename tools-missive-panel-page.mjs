@@ -85,7 +85,7 @@ ok(when && /hidden by: ships within 7 days/.test(readout) && !/Reprint flyers/.t
 await p.click('.tools a:has-text("reset")'); await p.waitForTimeout(150);
 ok(await p.evaluate(() => document.querySelectorAll('.row').length === 4), 'reset shows every row again');
 // ship-to: the order card's box, change it, what is posted
-const html2 = html.replace('"shipTo":""', '"shipTo":"https:\\/\\/site.test\\/wp-json\\/pps\\/v1\\/missive\\/ship-to"');
+const html2 = html.replace('"shipTo":""', '"shipTo":"https:\\/\\/site.test\\/wp-json\\/pps\\/v1\\/missive\\/ship-to"').replace('"ship":""', '"ship":"https:\\/\\/site.test\\/?pps_missive_ship=1"');
 const job2 = (o) => Object.assign({ order: 87001, item: 11, job: 'Menu', product: 'Brochure', qty: '500', size: '8.5×11', print: 'Color 2-sided', pages: '', start: '2026-10-21', must_ship: '2026-10-23', delivery: '2026-10-28',
   window: ['2026-10-21', '2026-10-23'], rush: false, printed: false, source: 'calculator', addons: 'Coating: UV Gloss (both sides); Fold: Tri-fold', ticket: [], batch: { mates: [], combined: [] },
   papers: [{ label: '100lb Gloss Text', sheet: '13×19', sheets: 250, role: 'stock', in_stock: true, key: 'g' }], task: null, own_task: false }, o);
@@ -93,10 +93,11 @@ const answer2 = Object.assign({}, answer, { missive: { connected: true, can_chan
   jobs: [ job2({ task: { id: 't1', title: '#87001 · Menu · 500 × 8.5×11 · start Wed Oct 21 · ship Fri Oct 23 · deliver Wed Oct 28', state: 'in_progress', due: '2026-10-21', started: '', conversation: 'c1' }, own_task: true }),
           job2({ item: 12, job: 'Booklet', qty: '200', size: '5.5×8.5', print: 'Inside Color · Cover Color', pages: '16 pp', rush: true, addons: '', start: '2026-10-15',
                  papers: [{ label: '80lb Matte Cardstock', sheet: '13×19', sheets: 90, role: 'cover', in_stock: false, key: 'm' }] }) ],
-  conv_ok: false, needs: 1, order_task: null, drive: null, ship: null,
+  conv_ok: false, needs: 1, order_task: null, drive: null, ship: { labels: 2, last: 'UPS Ground', tracking: '1Z2', track_url: 'https://t.test/1Z2', tracks: [ { tracking: '1Z1', url: 'https://t.test/1Z1', carrier: 'UPS', service: 'Ground', from: 'panel' }, { tracking: '1Z2', url: 'https://t.test/1Z2', carrier: 'UPS', service: 'Ground', from: 'panel' }, { tracking: '9400WEB', url: '', carrier: 'USPS', service: 'Ground Advantage', from: 'shippo' } ] },
   ship_to: { addr: { name: 'Ann Lee', company: '', street1: '1 Old Rd', street2: '', city: 'Mesa', state: 'AZ', zip: '85201', phone: '' }, line: 'Ann Lee, 1 Old Rd, Mesa AZ 85201',
     last: { at: '2026-10-18 10:00', who: 'Pat (order screen)', from: 'Ann Lee, 9 Elm, Mesa AZ 85201', shippo: 'stale', shippo_words: 'Shippo still shows the OLD address (x).' }, can_edit: true } }] });
 const t2 = await b.newPage({ viewport: { width: 380, height: 900 } }); const posted = []; const dialogs = [];
+await t2.addInitScript(() => { try { Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: (t) => { window.__copied = t; return Promise.resolve(); } } }); } catch (e) {} });
 t2.on('pageerror', e => errs.push('2: ' + e.message)); t2.on('dialog', d => { dialogs.push(d.message()); d.accept(); });
 await t2.addInitScript(() => { if (window.parent === window) return; window.Missive = { _h: {}, on(ev, fn) { this._h[ev] = fn; fn([]); }, fetchConversations: () => Promise.resolve([]), search: () => Promise.resolve([]), openURL() {} }; });
 await t2.route('https://integrations.missiveapp.com/**', r => r.fulfill({ contentType: r.request().url().endsWith('.css') ? 'text/css' : 'application/javascript', body: '' }));
@@ -120,6 +121,11 @@ ok(pr1.some(x => /k-paper/.test(x.cls) && x.t === '100lb Gloss Text · 13×19 ·
   && pr1.filter(x => /pill-flag/.test(x.cls) && x.bg === RED && x.fg === WHITE).map(x => x.t).join('|') === 'Coating: UV Gloss (both sides)|Fold: Tri-fold', 'with the board\'s colour-coded pills: kinds in their colours, each add-on dark red', pr1);
 ok(pr2.some(x => /NOT STOCKED/.test(x.t) && /\(cover\)/.test(x.t) && x.bg === RED) && pr2.some(x => x.t === '16 pp' && /k-pages/.test(x.cls)) && pr2.some(x => x.t === 'RUSH' && x.bg === RED) && pr2.some(x => x.t === 'LATE START' && x.bg === LATE), 'a cover paper not in stock, the page count, rush and a late start on the second job', pr2);
 if (shot) await t2.screenshot({ path: shot.replace(/\.png$/, '-order.png') });
+const cpb = await q.$('button:has-text("Copy tracking")');
+ok(cpb && (await cpb.textContent()) === 'Copy tracking (3)', 'a shipped order\'s Shipping box has a Copy tracking button naming how many', cpb && await cpb.textContent());
+if (cpb) { await cpb.click(); await t2.waitForTimeout(150); }
+const copied = await q.evaluate(() => window.__copied || '');
+ok(copied === 'Box 1: https://t.test/1Z1\nBox 2: https://t.test/1Z2\nBox 3: 9400WEB' && cpb && /Copied/.test(await cpb.textContent()), 'it copies every tracking link (the number where there is no link) and says so', copied);
 const card = await q.evaluate(() => { const c = [...document.querySelectorAll('.card')].find(x => /^Ship to/.test(x.textContent)); return c ? c.innerText : ''; });
 ok(/Ship to · Ann Lee, 1 Old Rd, Mesa AZ 85201/.test(card) && /Changed 2026-10-18 10:00 by Pat \(order screen\) — was Ann Lee, 9 Elm/.test(card) && /Shippo still shows the OLD address/.test(card) && /Check Shippo again/.test(card), 'the order card shows the ship-to, its last change and that Shippo is behind', card);
 await q.click('a:has-text("Check Shippo again")'); await t2.waitForTimeout(200);

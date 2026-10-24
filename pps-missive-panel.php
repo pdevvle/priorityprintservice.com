@@ -1143,6 +1143,24 @@ function renderBoard(here){
   return wrap;
 }
 
+// Copy tracking (owner 2026-10-24: "add a copy tracking button once shipping is started"): every
+// tracking link of the order as text to paste to the customer — one line, or "Box n:" lines.
+function trackingText(tracks){
+  var line = function(t){ return t.url || t.tracking; };
+  return tracks.length===1 ? line(tracks[0]) : tracks.map(function(t,i){ return 'Box '+(i+1)+': '+line(t); }).join('\\n');
+}
+function copyText(text, done){
+  // Missive's frame may not be granted the clipboard API; a selected textarea and execCommand works there.
+  var fallback = function(){ var ta = el('textarea',{style:'position:fixed;top:-1000px;opacity:0'}); ta.value = text; document.body.appendChild(ta); ta.select();
+    var ok = false; try{ ok = document.execCommand('copy'); }catch(e){} ta.remove(); done(ok); };
+  if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function(){ done(true); }, fallback); else fallback();
+}
+function copyTrackingButton(tracks){
+  var n = tracks.length, b = el('button',{cls:'b',text:'Copy tracking'+(n>1?' ('+n+')':''),title:trackingText(tracks)});
+  b.addEventListener('click',function(){ copyText(trackingText(tracks), function(ok){ b.textContent = ok ? 'Copied ✓' : 'Copy failed'; setTimeout(function(){ b.textContent='Copy tracking'+(n>1?' ('+n+')':''); }, 2000); }); });
+  return b;
+}
+
 function render(){
   var d = DATA; app.className=''; app.textContent='';
   if(AN && CFG.analytics){
@@ -1175,8 +1193,12 @@ function render(){
       var sh = o.ship || { labels: 0 }, sb = el('div',{cls:'card small',style:'display:flex;justify-content:space-between;align-items:center;gap:6px'});
       sb.appendChild(el('div',{},[ el('b',{text:'Shipping'}), sh.labels ? el('span',{},[' · '+sh.labels+' label'+(sh.labels===1?'':'s')+' bought · '+sh.last+' ',
         sh.track_url?el('a',{text:sh.tracking,on:function(){ open(sh.track_url); }}):sh.tracking ]) : el('span',{cls:'muted',text:' · no label bought from the panel yet'}) ]));
-      sb.appendChild(el('button',{cls:'b',text:sh.labels?'Ship again':'Ship',title:'Rates from every carrier, and the label',on:function(){ ship(o.order); }}));
+      var acts = el('span',{style:'display:flex;gap:4px;flex-shrink:0'});
+      if(sh.tracks && sh.tracks.length) acts.appendChild(copyTrackingButton(sh.tracks));
+      acts.appendChild(el('button',{cls:'b',text:sh.labels?'Ship again':'Ship',title:'Rates from every carrier, and the label',on:function(){ ship(o.order); }}));
+      sb.appendChild(acts);
       oc.appendChild(sb);
+      if(sh.tracks && sh.tracks.length && !sh.labels) sb.firstChild.appendChild(el('span',{cls:'muted',text:' · '+sh.tracks.length+' label'+(sh.tracks.length===1?'':'s')+' bought in Shippo'}));
     }
     if(o.ship_to && CFG.shipTo) oc.appendChild(shipToCard(o));
     var holder = app; app = oc;

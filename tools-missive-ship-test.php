@@ -233,6 +233,20 @@ ok( strpos( $note, "\nBox 1 of 2: " . $sh[0]['tracking'] . ' ' . $sh[0]['track_u
 ok( $o->st === 'processing', 'the order\'s status is not changed' );
 ok( is_wp_error( pps_ms_buy( 87551, $q['quote'], $byid['UPS Ground']['id'] ) ) && count( calls( 'transactions/' ) ) === 2, 'a second press on the same quote buys nothing' );
 ok( pps_ms_summary( $o )['labels'] === 2 && pps_ms_summary( $o )['last'] === 'UPS Ground', 'the panel\'s order card shows the labels bought', pps_ms_summary( $o ) );
+$sum = pps_ms_summary( $o );
+ok( count( $sum['tracks'] ) === 2 && $sum['tracks'][0]['tracking'] === $sh[0]['tracking'] && $sum['tracks'][0]['url'] === $sh[0]['track_url'] && $sum['tracks'][0]['from'] === 'panel', 'the card gets every tracking link for Copy tracking', $sum['tracks'] );
+$GLOBALS['tr']['pps_an_labels'] = array( 'list' => array(
+    array( 'order' => '87551', 'status' => 'SUCCESS', 'tracking' => 'SHIPPOWEB1', 'tracking_url' => 'https://t.example/SHIPPOWEB1', 'carrier' => 'USPS', 'service' => 'Ground Advantage' ),
+    array( 'order' => '87551', 'status' => 'REFUNDED', 'tracking' => 'VOIDED1', 'tracking_url' => 'https://t.example/VOIDED1', 'carrier' => 'USPS', 'service' => 'Priority' ),
+    array( 'order' => '87551', 'status' => 'SUCCESS', 'tracking' => $sh[1]['tracking'], 'tracking_url' => $sh[1]['track_url'], 'carrier' => 'UPS', 'service' => 'Ground' ),
+    array( 'order' => '99999', 'status' => 'SUCCESS', 'tracking' => 'OTHER1', 'tracking_url' => 'https://t.example/OTHER1', 'carrier' => 'UPS', 'service' => 'Ground' ),
+) );
+$sum = pps_ms_summary( $o ); $nums = array_column( $sum['tracks'], 'tracking' );
+ok( count( $nums ) === 3 && $nums[2] === 'SHIPPOWEB1' && $sum['tracks'][2]['from'] === 'shippo' && ! in_array( 'VOIDED1', $nums, true ) && ! in_array( 'OTHER1', $nums, true ), 'labels bought in Shippo\'s web app join it from the cached label list, once each; refunded ones and other orders do not', $nums );
+$bare = new O( 87552, array(), array(), array(), array() ); $GLOBALS['tr']['pps_an_labels']['list'][] = array( 'order' => '87552', 'status' => 'SUCCESS', 'tracking' => 'WEBONLY', 'tracking_url' => 'javascript:alert(1)', 'carrier' => 'FedEx', 'service' => 'Ground' );
+$sb = pps_ms_summary( $bare );
+ok( $sb['labels'] === 0 && count( $sb['tracks'] ) === 1 && $sb['tracks'][0]['tracking'] === 'WEBONLY' && $sb['tracks'][0]['url'] === '', 'an order shipped only from Shippo still gets its tracking number; only an https link is kept', $sb );
+unset( $GLOBALS['tr']['pps_an_labels'] );
 
 $q2 = pps_ms_rates( 87551, $v['to'], array( array( 'l' => 14, 'w' => 14, 'h' => 14, 'weight' => 32.2 ) ) );
 $r = pps_ms_buy( 87551, $q2['quote'], $q2['options'][0]['id'] );
