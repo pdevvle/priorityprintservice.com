@@ -175,6 +175,16 @@ $r = pps_mp_set_state( 't1', 'in_progress' );
 $last = end( $GLOBALS['http'] );
 ok( $r === true && $last['args']['method'] === 'PATCH' && strpos( $last['url'], '/v1/tasks/t1' ) !== false && $last['args']['body'] === '{"tasks":{"state":"in_progress"}}', 'allowed: a paired subtask gets exactly its state changed, nothing else', $last );
 ok( ! isset( $GLOBALS['tr'][ PPS_MP_TASKS_CACHE ] ), 'the task cache is dropped after a change so the board shows it' );
+// due date (owner 2026-10-24)
+ok( is_wp_error( pps_mp_set_due( 't3', '2026-10-30' ) ) && strpos( pps_mp_set_due( 't3', '2026-10-30' )->get_error_message(), 'not paired' ) !== false, 'an unpaired subtask\'s due date is never changed' );
+ok( is_wp_error( pps_mp_set_due( 't1', '2026-02-30' ) ) && is_wp_error( pps_mp_set_due( 't1', 'tomorrow' ) ), 'only a real date is accepted' );
+$GLOBALS['http'] = array();
+$r = pps_mp_set_due( 't1', '2026-10-30' ); $last = end( $GLOBALS['http'] );
+ok( $r === true && $last['args']['method'] === 'PATCH' && strpos( $last['url'], '/v1/tasks/t1' ) !== false && $last['args']['body'] === '{"tasks":{"due_at":' . pps_mp_due_unix( '2026-10-30' ) . '}}', 'allowed: a paired subtask gets exactly its due date moved, to 17:00 shop time on that day', $last );
+ok( ! isset( $GLOBALS['tr'][ PPS_MP_TASKS_CACHE ] ), 'and the board re-reads the tasks' );
+$GLOBALS['opts'][ PPS_MP_ALLOW_OPTION ] = 0; $GLOBALS['http'] = array();
+ok( is_wp_error( pps_mp_set_due( 't1', '2026-10-30' ) ) && ! $GLOBALS['http'], 'with the switch off, refused without calling Missive' );
+$GLOBALS['opts'][ PPS_MP_ALLOW_OPTION ] = 1;
 $GLOBALS['opts'][ PPS_MP_TOKEN_OPTION ] = 'wrong';  $GLOBALS['tr'] = array(); unset( $GLOBALS['opts'][ PPS_MP_ORG_OPTION ] );
 $bad = pps_mp_answer( array() );
 ok( $bad['missive']['connected'] === false && strpos( $bad['missive']['error'], 'refused' ) !== false && count( $bad['board'] ) === 6, 'a refused token is said on the panel and the board still shows', $bad['missive'] );
@@ -253,7 +263,7 @@ foreach ( array( 'createTask', 'addLabels', 'removeLabels', 'assign(', 'addAssig
 foreach ( array( 'update_status', '->save(', 'wc_update_order_item_meta', 'update_meta_data', 'add_order_note', 'wp_mail' ) as $w ) {
     ok( strpos( $code, $w ) === false, "the server never calls $w" );
 }
-ok( substr_count( $code, "pps_mp_api( 'PATCH'" ) === 1 && substr_count( $code, "pps_mp_api( 'POST', 'tasks'" ) === 1 && substr_count( $code, "pps_mp_api( 'POST'" ) === 1 && strpos( $code, "pps_mp_api( 'DELETE'" ) === false, 'the only Missive writes are a task state change and creating a subtask' );
+ok( substr_count( $code, "pps_mp_api( 'PATCH'" ) === 2 && substr_count( $code, 'array( \'tasks\' => array( \'due_at\' => $at ) )' ) === 1 && substr_count( $code, "pps_mp_api( 'POST', 'tasks'" ) === 1 && substr_count( $code, "pps_mp_api( 'POST'" ) === 1 && strpos( $code, "pps_mp_api( 'DELETE'" ) === false, 'the only Missive writes are a task state change, a task due date and creating a subtask' );
 ok( strpos( $src, "'methods' => 'GET', 'permission_callback' => \$key_ok" ) !== false && strpos( $src, "'methods' => 'POST', 'permission_callback' => \$key_ok" ) !== false && strpos( $src, 'pps_mp_key_ok( (string) $req->get_header' ) !== false, 'both endpoints need the key header' );
 $html = pps_mp_page_html( 'KEY123', 'https://x/wp-json/pps/v1/missive/panel' );
 ok( strpos( $html, '"key":"KEY123"' ) !== false && strpos( $html, 'textContent' ) !== false && strpos( $html, 'innerHTML' ) === false, 'the page carries its key and writes text, never HTML' );

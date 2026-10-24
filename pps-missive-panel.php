@@ -596,6 +596,28 @@ function pps_mp_set_state( $task_id, $state ) {
     return true;
 }
 
+/**
+ * Move one paired subtask's due date (owner 2026-10-24: "the pill on the subtask with the due date
+ * should be editable and should change the task due date in missive"). Same switch and pairing rule
+ * as a state change; PATCHes only `due_at`, at 17:00 shop time on the day chosen (the time subtasks
+ * are created with). Returns true or a WP_Error naming why not.
+ */
+function pps_mp_set_due( $task_id, $ymd ) {
+    if ( ! get_option( PPS_MP_ALLOW_OPTION, false ) ) return new WP_Error( 'off', 'Changing subtasks from the panel is switched off (PPS Calculators → Missive Panel).' );
+    $at = pps_mp_due_unix( $ymd );
+    if ( ! $at || $ymd !== gmdate( 'Y-m-d', strtotime( $ymd . ' 12:00 UTC' ) ) ) return new WP_Error( 'due', 'That is not a date.' );
+    $tasks = pps_mp_tasks();
+    if ( is_wp_error( $tasks ) ) return $tasks;
+    list( $by, , $by_item ) = pps_mp_pair_tasks( $tasks, pps_mp_conv_map(), pps_mp_item_map() );
+    $ok = false;
+    foreach ( array_merge( array_values( $by ), array_values( $by_item ) ) as $t ) if ( $t['id'] === $task_id ) { $ok = true; break; }
+    if ( ! $ok ) return new WP_Error( 'unpaired', 'That task is not paired with an order, so the panel will not change it.' );
+    $r = pps_mp_api( 'PATCH', 'tasks/' . rawurlencode( $task_id ), array(), array( 'tasks' => array( 'due_at' => $at ) ) );
+    if ( is_wp_error( $r ) ) return $r;
+    delete_transient( PPS_MP_TASKS_CACHE );
+    return true;
+}
+
 /* ── Creating one subtask per job ─────────────────────────────
  * Owner 2026-10-18: "create the tasks - one task per line item - in missive". From the panel,
  * inside the order's own conversation (the panel tells the site which one is open, and the
@@ -697,7 +719,9 @@ add_action( 'rest_api_init', function () {
     register_rest_route( 'pps/v1', '/missive/task-state', array(
         'methods' => 'POST', 'permission_callback' => $key_ok,
         'callback' => function ( $req ) {
-            $r = pps_mp_set_state( (string) $req->get_param( 'task' ), (string) $req->get_param( 'state' ) );
+            $r = $req->get_param( 'due' ) !== null
+                ? pps_mp_set_due( (string) $req->get_param( 'task' ), (string) $req->get_param( 'due' ) )
+                : pps_mp_set_state( (string) $req->get_param( 'task' ), (string) $req->get_param( 'state' ) );
             return is_wp_error( $r ) ? new WP_REST_Response( array( 'ok' => false, 'error' => $r->get_error_message() ), 200 )
                                      : new WP_REST_Response( array( 'ok' => true ), 200 );
         },
@@ -745,6 +769,7 @@ a{color:#2563eb;cursor:pointer;text-decoration:none}
 .pill.k-pages{background:#e2f5f1;color:#0f5348;border-color:#9fd6cb} .pill.k-qty{background:#e8f5e2;color:#24521a;border-color:#b0d8a2}
 .pill.k-size{background:#fbf0dc;color:#6b4610;border-color:#e6c88f}
 .subs .row:last-child{border-bottom:0} .subs b{font-weight:600}
+button.pill.edit{cursor:pointer;font:inherit;font-size:11px} button.pill.edit:hover{border-color:#888} .duebox{display:inline-flex;gap:3px;align-items:center} .duebox input{font-size:11px;padding:1px 2px}
 .pill.pill-flag{background:#7f1d1d;color:#fff;border-color:#5f1414;font-weight:600}
 .pill.pill-plain{background:rgba(128,128,128,.12);color:inherit;border-color:rgba(128,128,128,.35)} .pill.pill-late{background:#c62828;color:#fff;border-color:#a51f1f;font-weight:600}
 .tag{display:inline-block;border:1px solid rgba(128,128,128,.4);border-radius:3px;padding:0 4px;margin:1px 2px 1px 0;font-size:11px}
@@ -903,6 +928,29 @@ function load(ids, conv){
     .catch(function(e){ app.className=''; app.textContent=''; app.appendChild(el('div',{cls:'late',text:'Could not load: '+e.message})); });
 }
 
+// The due date as a pill; with state changes allowed, clicking it opens a date field and saving
+// moves the subtask's due date in Missive (owner 2026-10-24).
+function duePill(t){
+  var label = 'due '+(t.due?md(t.due):'—');
+  if(!DATA.missive.can_change) return el('span',{cls:'pill pill-plain due',text:label});
+  var p = el('button',{cls:'pill pill-plain due edit',text:label+' ✎',title:'Change this subtask\'s due date in Missive'});
+  p.addEventListener('click',function(){
+    var f = el('span',{cls:'duebox'}), inp = el('input',{type:'date'}); inp.value = t.due || DATA.today;
+    var save = el('button',{cls:'b',text:'Save'}), cancel = el('button',{cls:'b',text:'Cancel'});
+    save.addEventListener('click',function(){ if(!inp.value || inp.value===t.due){ f.replaceWith(p); return; } setDue(t, inp.value, save); });
+    cancel.addEventListener('click',function(){ f.replaceWith(p); });
+    f.appendChild(inp); f.appendChild(save); f.appendChild(cancel); p.replaceWith(f); inp.focus();
+  });
+  return p;
+}
+function setDue(task, ymd, btn){
+  btn.disabled = true; btn.textContent = '…';
+  fetch(CFG.stateApi,{method:'POST',headers:{'X-PPS-Panel-Key':CFG.key,'Content-Type':'application/json'},credentials:'omit',body:JSON.stringify({task:task.id,due:ymd})})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if(!d.ok){ alert(d.error||'Could not change the due date.'); } load(LAST.ids, LAST.conv); })
+    .catch(function(){ alert('Could not reach the site.'); load(LAST.ids, LAST.conv); });
+}
+
 function setState(task, state, btn){
   btn.disabled = true; btn.textContent = '…';
   fetch(CFG.stateApi,{method:'POST',headers:{'X-PPS-Panel-Key':CFG.key,'Content-Type':'application/json'},credentials:'omit',body:JSON.stringify({task:task.id,state:state})})
@@ -926,7 +974,8 @@ function taskLine(t, mustShip, mismatch){
   if(!DATA.missive.connected){ return null; }
   if(!t){ box.appendChild(el('span',{cls:'st st-none',text:'No subtask'})); return box; }
   box.appendChild(el('span',{cls:'st st-'+t.state,text:STATE_WORD[t.state]||t.state}));
-  box.appendChild(document.createTextNode(' due '+md(t.due)));
+  box.appendChild(document.createTextNode(' '));
+  box.appendChild(duePill(t));
   if(t.started) box.appendChild(el('span',{cls:'muted',text:' · started '+md(t.started)}));
   if(mismatch) box.appendChild(el('span',{cls:'warn',text:' · ≠ start '+md(mustShip)}));
   if(DATA.missive.can_change){
@@ -1306,8 +1355,8 @@ function pps_mp_render_admin() {
        . '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">' . wp_nonce_field( 'pps_mp_missive', '_wpnonce', true, false )
        . '<input type="hidden" name="action" value="pps_mp_missive">'
        . '<p><input type="password" name="token" autocomplete="off" placeholder="' . esc_attr( $tok !== '' ? 'Saved — ends in …' . substr( $tok, -4 ) . ' (paste a new one to replace it)' : 'missive_pat-…' ) . '" style="width:100%;max-width:600px"></p>'
-       . '<p><label><input type="checkbox" name="allow_state" value="1"' . ( get_option( PPS_MP_ALLOW_OPTION, false ) ? ' checked' : '' ) . '> Let the panel change subtask state (Start / Done / Reopen buttons). '
-       . 'Off: the panel only reads. On: it changes the <em>state</em> of a subtask the site has paired with an order — nothing else.</label></p>'
+       . '<p><label><input type="checkbox" name="allow_state" value="1"' . ( get_option( PPS_MP_ALLOW_OPTION, false ) ? ' checked' : '' ) . '> Let the panel change subtask state and due date (Start / Done / Reopen buttons; click a due date to move it). '
+       . 'Off: the panel only reads. On: it changes the <em>state</em> or <em>due date</em> of a subtask the site has paired with an order — nothing else.</label></p>'
        . '<p><label><input type="checkbox" name="allow_create" value="1"' . ( get_option( PPS_MP_CREATE_OPTION, false ) ? ' checked' : '' ) . '> Let the panel create subtasks — one per job, in the order\'s own conversation, '
        . 'titled with the order, job, quantity, size and window, the Job Ticket as the description, due on the job\'s start date. A job never gets a second one.</label></p>'
        . '<p><label><input type="checkbox" name="allow_address" value="1"' . ( get_option( 'pps_missive_allow_address', 1 ) ? ' checked' : '' ) . '> Let the panel change an order\'s ship-to (on unless switched off). '
