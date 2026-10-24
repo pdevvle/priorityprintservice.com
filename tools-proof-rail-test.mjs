@@ -7,10 +7,13 @@
 //     explanation folded until clicked, and still open after a re-render;
 //   - the "What approving produces" box folded behind its own heading.
 // "Organize file-wide preflight info by failed, then by passed. Use the terms
-// passed and not passed." Pinned here:
-//   - a Not passed group first (worst first: fail, then warn, then a check that
-//     could not run), then a Passed group, folded; the section's chip says
-//     "N not passed" or "all passed"; the old state words are gone from it.
+// passed and not passed." Then: "a new category of preflight: unverified. This
+// will include the items that can't be checked on certain filetypes." Pinned:
+//   - Not passed first (fail, then warn), then Unverified (what this file type
+//     cannot answer), then Passed; the last two folded; the chip names "N not
+//     passed" and "N unverified", or says "all passed"; the old state words are
+//     gone; the reason Unverified shares is said once under its heading, seen
+//     while folded, and a row keeps only what it adds.
 // "The red ! icons should display tooltips or content when hovered." Pinned:
 //   - hovering a page heading's flag, or a thumbnail's, shows that page's
 //     findings — the same text the issues column shows — and leaving hides it;
@@ -26,9 +29,12 @@
 //
 // Needs the harness: node tools-proof-serve.mjs &
 // Run: node tools-proof-rail-test.mjs
-// PPS_PROOF_PATH points it at another build (how it was run against the
-// proofer before this change: 25 of the 28 checks it reaches there fail; the
-// three that pass are vacuous on a build with no flags to hover).
+// Last, the standalone link: ?size=WxH&pages=N sizes the booklet when no host
+// sent a job, a nonsense value is ignored, and a host's job is never resized.
+//
+// PPS_PROOF_PATH points it at another build. Against the first version of this
+// work (f26e53b: two groups, no size link) 19 of the 46 checks fail; against
+// the proofer before any of it, 25 of the 28 it could reach did.
 
 const PW = process.env.PPS_PLAYWRIGHT || '/opt/node22/lib/node_modules/playwright';
 const { chromium } = await import(PW + '/index.mjs');
@@ -78,32 +84,42 @@ const tip = page => page.evaluate(() => {
 });
 
 // ═══ the Preflight list ══════════════════════════════════════════════════
-console.log('\n── Preflight: condensed, not passed first, then passed ──');
+console.log('\n── Preflight: not passed, then unverified, then passed ──');
 {
   const { page, ctx } = await open('');
-  // No file: one check answers (page count), five cannot run on nothing.
+  // No file: one check answers (page count); five cannot run without a PDF.
   const real = await ev(page, () => {
     const wf = document.querySelector('#rail .acc');
     const groups = [...wf.querySelectorAll('.chk-group')].map(g => ({
       cls: g.className, head: g.querySelector('.chk-grouphead').textContent.replace('⌄', '').trim(),
+      note: (g.querySelector('.chk-groupnote') || {}).textContent || '',
+      noteShown: !!g.querySelector('.chk-groupnote') && g.querySelector('.chk-groupnote').offsetHeight > 0,
       rows: [...g.querySelectorAll('.chk-row')].map(r => ({
         label: r.querySelector('.chk-label').textContent, state: r.className.split(' ')[1],
-        visible: r.offsetHeight > 0, textShown: !r.querySelector('.chk-text').hidden })) }));
+        visible: r.offsetHeight > 0, control: !!r.querySelector('button.chk-sum'),
+        text: (r.querySelector('.chk-text') || {}).textContent || '',
+        textShown: !!r.querySelector('.chk-text') && !r.querySelector('.chk-text').hidden })) }));
     return { chip: wf.querySelector('.acchead .chip').textContent, groups,
              height: Math.round(wf.getBoundingClientRect().height),
              visible: wf.querySelector('.checklist').innerText };
   });
   const G = real.groups || [];
-  ok('the chip says how many did not pass', real.chip === '5 not passed', real.chip || JSON.stringify(real));
-  ok('Not passed comes first, then Passed', G.length === 2
-     && /^Not passed · 5$/.test(G[0].head) && /^Passed · 1$/.test(G[1].head),
+  const U = G.find(g => /unverified/.test(g.cls)) || { rows: [] };
+  ok('the chip says what could not be checked, and nothing failed', real.chip === '5 unverified', real.chip || JSON.stringify(real));
+  ok('Unverified, then Passed', G.length === 2
+     && /^Unverified · 5$/.test(G[0].head) && /^Passed · 1$/.test(G[1].head),
      G.map(g => g.head).join(' | '));
-  ok('a check that could not run is in Not passed; the one that answered is in Passed',
-     G.length === 2 && G[0].rows.every(r => r.state === 'unknown') && G[1].rows[0]?.state === 'pass'
+  ok('the checks that need a PDF are Unverified; the one that answered is in Passed',
+     G.length === 2 && /unverified/.test(G[0].cls) && G[0].rows.every(r => r.state === 'unknown') && G[1].rows[0]?.state === 'pass'
      && /Page count/.test(G[1].rows[0]?.label), JSON.stringify(G.map(g => g.rows.map(r => r.state))));
+  ok('the reason is said once, under the heading, and seen while folded',
+     /Send a PDF and this can be answered/.test(U.note) && U.noteShown
+     && U.rows.every(r => !/Nothing attached carries its own structure/.test(r.text)), U.note);
+  ok('a row with nothing to add is a plain line; one with more opens', U.rows.length === 5
+     && U.rows.filter(r => r.control).map(r => r.label).join() === 'Color'
+     && /CMYK/.test(U.rows.find(r => r.control)?.text || ''), JSON.stringify(U.rows.map(r => [r.label, r.control])));
+  ok('Unverified and Passed start folded', G.length === 2 && G.every(g => g.rows.every(r => !r.visible)));
   ok('one line per check: every explanation folded', G.length > 0 && G.every(g => g.rows.every(r => !r.textShown)));
-  ok('Passed starts folded; Not passed is shown', G.length === 2 && G[1].rows.every(r => !r.visible)
-     && G[0].rows.every(r => r.visible));
   ok('the old state words are gone', typeof real.visible === 'string' && !/\b(PROBLEM|NOT CHECKED|OK)\b/.test(real.visible)
      && !/all checks ran/.test(real.visible), String(real.visible || real.error).replace(/\s+/g, ' ').slice(0, 140));
   ok('the open section is short enough to see the pages under it', real.height < 380, real.height + 'px');
@@ -122,6 +138,7 @@ console.log('\n── Preflight: condensed, not passed first, then passed ──
     const wf = document.querySelector('#rail .acc');
     const out = { chip: wf.querySelector('.acchead .chip').textContent,
                   chipCls: wf.querySelector('.acchead .chip').className,
+                  heads: [...wf.querySelectorAll('.chk-grouphead')].map(h => h.textContent.replace('⌄', '').trim()),
                   order: [...wf.querySelectorAll('.chk-group')].map(g => [...g.querySelectorAll('.chk-label')].map(l => l.textContent[0]).join('')),
                   sr: [...wf.querySelectorAll('.chk-row')].map(r => r.querySelector('.chk-state').textContent) };
     window.runFileChecks = () => [ { id:'a', label:'A', state:'pass', text:'' }, { id:'e', label:'E', state:'pass', text:'' } ];
@@ -133,19 +150,26 @@ console.log('\n── Preflight: condensed, not passed first, then passed ──
     window.runFileChecks = keep; renderAll();
     return out;
   });
-  ok('worst first inside Not passed: failed, then warned, then could not run', (mixed.order || [])[0] === 'CFDB',
-     (mixed.order || [mixed.error]).join(' | '));
-  ok('and the passes after, in their own group', (mixed.order || [])[1] === 'AE');
-  ok('the chip carries the worst state\'s colour', mixed.chip === '4 not passed' && /\bfail\b/.test(mixed.chipCls),
+  ok('Not passed first, then Unverified, then Passed', (mixed.heads || []).join(' | ') === 'Not passed · 3 | Unverified · 1 | Passed · 2',
+     (mixed.heads || [mixed.error]).join(' | '));
+  ok('worst first inside Not passed: failed, then warned', (mixed.order || [])[0] === 'CFD', (mixed.order || []).join(' | '));
+  ok('a check that could not run is not counted as not passed', (mixed.order || [])[1] === 'B' && (mixed.order || [])[2] === 'AE');
+  ok('the chip names both, coloured by the worst', mixed.chip === '3 not passed · 1 unverified' && /\bfail\b/.test(mixed.chipCls),
      mixed.chip + ' / ' + mixed.chipCls);
-  ok('each dot says its state to a screen reader in the same two words',
-     (mixed.sr || []).join(',') === 'Not passed,Not passed,Not passed,Not passed,Passed,Passed', (mixed.sr || []).join(','));
-  ok('when everything passed it says so, and there is no Not passed group',
+  ok('each dot says its group to a screen reader',
+     (mixed.sr || []).join(',') === 'Not passed,Not passed,Not passed,Unverified,Passed,Passed', (mixed.sr || []).join(','));
+  ok('when everything passed it says so, and there is only a Passed group',
      mixed.allChip === 'all passed' && /\bpass\b/.test(mixed.allCls) && (mixed.allGroups || []).length === 1
-     && /passed/.test(mixed.allGroups[0]) && !/notpassed/.test(mixed.allGroups[0]), JSON.stringify(mixed));
+     && /\bpassed\b/.test(mixed.allGroups[0]) && !/notpassed|unverified/.test(mixed.allGroups[0]), JSON.stringify(mixed));
 
-  // Unfolding: an explanation, the Passed group, the deliverables.
+  // Unfolding: an explanation, the folded groups, the deliverables.
   const unfold = await ev(page, async () => {
+    const keep = window.runFileChecks;
+    window.runFileChecks = () => [
+      { id:'c', label:'C fails', state:'fail', text:'broken' },
+      { id:'b', label:'B unknown', state:'unknown', text:'could not run' },
+      { id:'a', label:'A passes', state:'pass', text:'fine' } ];
+    renderAll();
     const q = s => document.querySelector('#rail .acc ' + s);
     const row = () => q('.chk-group.notpassed .chk-row');
     row().querySelector('.chk-sum').click();
@@ -155,17 +179,22 @@ console.log('\n── Preflight: condensed, not passed first, then passed ──
     const survived = !row().querySelector('.chk-text').hidden;
     row().querySelector('.chk-sum').click();
     const closed = row().querySelector('.chk-text').hidden;
+    q('.chk-group.unverified .chk-grouphead').click();
+    const unverifiedShown = [...document.querySelectorAll('#rail .chk-group.unverified .chk-row')].every(r => r.offsetHeight > 0);
     q('.chk-group.passed .chk-grouphead').click();
     const passedShown = [...document.querySelectorAll('#rail .chk-group.passed .chk-row')].every(r => r.offsetHeight > 0);
     const delivBefore = document.getElementById('deliv').hidden;
     q('.delivtoggle').click();
     const d = document.getElementById('deliv');
-    return { opened, survived, closed, passedShown, delivBefore, delivAfter: !d.hidden && d.offsetHeight > 0,
-             delivText: /flattened at 300 DPI/.test(d.innerText), pkg: !!document.getElementById('pkgBtn') };
+    const out = { opened, survived, closed, unverifiedShown, passedShown, delivBefore, delivAfter: !d.hidden && d.offsetHeight > 0,
+                  delivText: /flattened at 300 DPI/.test(d.innerText), pkg: !!document.getElementById('pkgBtn') };
+    window.runFileChecks = keep; renderAll();
+    return out;
   });
   ok('clicking a check opens its explanation under it', unfold.opened, JSON.stringify(unfold));
   ok('and a re-render keeps it open', unfold.survived);
   ok('clicking again folds it', unfold.closed);
+  ok('the Unverified group unfolds from its heading', unfold.unverifiedShown);
   ok('the Passed group unfolds from its heading', unfold.passedShown);
   ok('"What approving produces" starts folded and opens from its heading',
      unfold.delivBefore && unfold.delivAfter && unfold.delivText && unfold.pkg, JSON.stringify(unfold));
@@ -312,6 +341,43 @@ console.log('\n── the "!" flags explain themselves ──');
     ok('the next tap elsewhere closes it', !(await tip(page)).on);
   } else ok('a flagged heading on a touch screen', false, 'no flag');
   await ctx.close();
+}
+
+// ═══ the standalone preview link ═════════════════════════════════════════
+// "A link that I can preview the proofer without going through the calc." The
+// page always opened on its own; the link now also sizes the booklet, so a
+// real file can be tried at its own size.
+console.log('\n── the standalone link sizes the booklet ──');
+{
+  const { page, ctx } = await open('?size=8.5x11&pages=12');
+  const s = await ev(page, () => {
+    const r = document.getElementById('sheet').getBoundingClientRect();
+    return { trim: MODEL.trim, pages: MODEL.pages.length, sel: document.getElementById('pageCount').value,
+             hosted: !!MODEL.hosted, aspect: +(r.width / r.height).toFixed(3),
+             want: +((8.5 + 2 * MODEL.bleed) / (11 + 2 * MODEL.bleed)).toFixed(3) };
+  });
+  ok('?size=8.5x11&pages=12 opens an 8.5 × 11, 12-page booklet', s.trim?.w === 8.5 && s.trim?.h === 11
+     && s.pages === 12 && s.sel === '12', JSON.stringify(s));
+  ok('and the sheet on screen has that shape', Math.abs(s.aspect - s.want) < 0.01, s.aspect + ' vs ' + s.want);
+  ok('it stays a standalone preview, not a customer job', s.hosted === false);
+  await ctx.close();
+  const { page: p2, ctx: c2 } = await open('?size=99x1&pages=7');
+  const bad = await ev(p2, () => ({ trim: MODEL.trim, pages: MODEL.pages.length }));
+  ok('a size or page count that makes no sense is ignored', bad.trim?.w === 5.5 && bad.trim?.h === 8.5 && bad.pages === 8,
+     JSON.stringify(bad));
+  await c2.close();
+  // a host's job always wins over the link
+  const ctx4 = await browser.newContext({ viewport: { width: 1440, height: 860 } });
+  const p4 = await ctx4.newPage();
+  p4.on('pageerror', e => errors.push(String(e && e.message || e)));
+  await p4.addInitScript(() => { window.PPS_LIB_BASE = '/vendor/';
+    window.PPS_PROOF_JOB = { calc:'saddle', trim:{ w:6, h:9 }, bleed:0.125, safety:0.125, pages:16 }; });
+  await p4.goto(PAGE + '?size=8.5x11&pages=12', { waitUntil: 'load' });
+  await p4.waitForFunction(() => typeof MODEL !== 'undefined' && MODEL.pages.length > 0, null, { timeout: 20000 });
+  const hosted = await ev(p4, () => ({ trim: MODEL.trim, pages: MODEL.pages.length }));
+  ok('a host\'s job is never resized by the link', hosted.trim?.w === 6 && hosted.trim?.h === 9 && hosted.pages === 16,
+     JSON.stringify(hosted));
+  await ctx4.close();
 }
 
 ok('no uncaught page errors', errors.length === 0, errors.slice(0, 3).join(' | '));

@@ -553,13 +553,15 @@ switch in the yellow strip. `pageCell()` builds both, so they cannot drift.
 `tools-proof-thumbs-test.mjs` is the gate. **The switch is temporary:** once the owner picks,
 delete the losing layout, the switch and its half of that suite.
 
-**The rail's Preflight is condensed, in two groups (2026-10-24, owner: "crowded").** One
-line per check — a state dot and its name — with the explanation folded until clicked. *Not
-passed* comes first (failed, then warned, then a check that could not run, which has a hollow
-dot), then *Passed*, folded. Those are the only two words the list uses: the chip reads
-"N not passed" or "all passed". So an image upload, which cannot answer the five structural
-checks, shows "5 not passed" — each one's explanation says it needs a PDF. The approve gate's
-own wording ("N problems / N to check") is unchanged. "What approving produces" folds away
+**The rail's Preflight is condensed, in three groups (2026-10-24, owner: "crowded").** One
+line per check — a state dot and its name — with the explanation folded until clicked.
+*Not passed* comes first (failed, then warned). *Unverified* follows: a check the file type
+cannot answer — an image has no fonts, colour spaces or layers — with a hollow dot (owner:
+"a new category of preflight: unverified"). Its shared reason (`NO_STRUCTURE`) is said once
+under the heading, folded or not, and a row keeps only what it adds. *Passed* comes last.
+Unverified and Passed start folded. The chip reads "N not passed · N unverified", or
+"all passed". The approve gate counts only Not passed (`jobFlags`, unchanged), and its
+wording ("N problems / N to check") is unchanged. "What approving produces" folds away
 too. **Every "!" explains itself**: hovering a flag on a page heading or a strip thumbnail
 shows that page's findings (`flagTip`, one tip fixed to the window). A tap shows it on a touch
 screen without opening the page, and keyboard focus on the heading shows it too.
@@ -981,6 +983,10 @@ Sequencing across lanes: **code before the content that depends on it**
     `proof-ui-draft.html` on this branch is PR #56's proofer; the four calculators above
     still have New Proof URL blank, so they open the built-in modal. Add `?thumbs=rail` to
     the preview URL to open the proofer in its draft thumbnail layout.
+  - https://pdevvle.github.io/priorityprintservice.com/proof-ui-draft.html — the proofer on
+    its own, no calculator: demo booklet, drop a file on a page or use its +. Add
+    `?size=8.5x11&pages=12` to size the booklet (ignored when a host sends a job), and
+    `&thumbs=rail` for the draft layout.
 - Each calculator has a build-stamp chip in the bottom-right corner. After a push, wait ~60 seconds for Pages to rebuild, then hard-refresh (Cmd/Ctrl+Shift+R) or use an Incognito window. If the chip still doesn't update, verify `.nojekyll` exists on `pps-pricing-config` root — that's the #1 cause of "my push didn't show up."
 - **Publish surface:** the `pages-public` branch is what Pages should serve — an orphan branch carrying only the nine calculators, `pps-theme/preview.html` and `.nojekyll`. Pages serves the *entire tree* of whatever branch it publishes from, so publishing `pps-pricing-config` also served every `.php` file as plain text (Pages doesn't execute PHP), plus `docs/MASTER_PRICING_LOGIC.md` and `CLAUDE.md`. Calculator changes get cherry-picked to `pages-public`; nothing else goes on it.
 - **Go private (deferred by owner 2026-08-01 until the build is finished).** When ready:
