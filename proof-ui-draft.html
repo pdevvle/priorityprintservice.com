@@ -361,11 +361,16 @@
   .issue.info .bang{background:var(--bp-faint)}
 
   /* ── filmstrip — every cell identical, whatever its label ── */
-  /* A 64-page booklet is 33 spread groups. Left to wrap freely that is seven
-     rows and roughly 500px — the page index would take more of the screen than
-     the page being proofed. Cap it and let it scroll instead. */
-  .strip{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;
-         max-height:228px;overflow-y:auto;flex-shrink:0}
+  .strip{display:flex;gap:10px;align-items:flex-start;flex-shrink:0}
+  .grp,.arrow{flex-shrink:0}
+  /* Under the page it is ONE row that scrolls sideways, at every width. It used
+     to wrap, capped at 228px: on a long booklet that was two and a half rows of
+     index between the customer and the page they are proofing, in a modal that
+     is short of height to begin with. A row costs one cell's height whatever the
+     page count; a mouse wheel scrolls it (stripWheel) and the selected page is
+     kept in view (keepInView). */
+  #stripBottom{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;padding-bottom:6px;
+               scrollbar-width:thin;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
   .grp{display:flex;border:1px solid var(--bp-line);border-radius:8px;overflow:hidden;background:var(--bp-surface)}
   .pg{width:84px;height:96px;padding:6px;font-size:9.5px;line-height:1.2;cursor:pointer;
       background:var(--bp-surface);border-right:1px solid var(--bp-line);position:relative;
@@ -430,10 +435,8 @@
   .chip.fail{background:var(--magenta);border-color:var(--magenta);color:#fff}
   .chip.warn{background:var(--yellow-tint);border-color:var(--yellow-line);color:var(--bp-warn)}
   .chip.pass{background:rgba(56,161,105,.12);border-color:var(--green);color:var(--green)}
-  .deliv{margin-top:14px;padding:12px 13px;border:1px solid var(--bp-line);border-radius:12px;
+  .deliv{margin-top:4px;padding:12px 13px;border:1px solid var(--bp-line);border-radius:12px;
          background:var(--bp-surface-2)}
-  .delivhead{font-family:var(--pps-display);font-size:10px;font-weight:700;letter-spacing:.08em;
-             text-transform:uppercase;color:var(--bp-faint);margin-bottom:9px}
   .delivrow{font-size:11.5px;line-height:1.5;color:var(--bp-faint)}
   .delivrow + .delivrow{margin-top:9px;padding-top:9px;border-top:1px solid var(--bp-line)}
   .delivrow strong{color:var(--bp-ink)}
@@ -441,16 +444,62 @@
   .origins li{margin-top:3px}
   .ofile{color:var(--bp-ink);font-weight:600}
   .ohash{font-variant-numeric:tabular-nums;font-size:10.5px}
-  .checklist{display:flex;flex-direction:column;gap:2px}
-  .chk-row{display:flex;gap:10px;align-items:flex-start;padding:9px 2px;border-top:1px solid var(--bp-line)}
-  .chk-row:first-child{border-top:none}
-  .chk-state{flex-shrink:0;width:78px;font-size:10px;font-weight:700;letter-spacing:.03em;
-             text-transform:uppercase;padding-top:2px;color:var(--bp-faint)}
-  .chk-row.fail .chk-state{color:var(--magenta)}
-  .chk-row.warn .chk-state{color:var(--bp-warn)}
-  .chk-row.pass .chk-state{color:var(--green)}
-  .chk-label{font-size:12.5px;font-weight:600;color:var(--bp-ink)}
-  .chk-text{margin:3px 0 0;font-size:11.5px;line-height:1.5;color:var(--bp-faint)}
+  /* Condensed: a group heading, then one line per check — a dot for its state
+     and its name. The explanation opens under the line on a click. The state
+     column this replaced (78px of "NOT CHECKED" on every row) was most of why
+     the panel read as a wall. */
+  .checklist{display:flex;flex-direction:column;gap:12px}
+  .chk-grouphead{display:flex;align-items:center;gap:6px;width:100%;margin:0 0 2px;padding:2px 2px 4px;
+                 background:none;border:0;font-family:var(--pps-display);font-size:10px;font-weight:700;
+                 letter-spacing:.08em;text-transform:uppercase;color:var(--bp-faint);text-align:left}
+  .chk-group.notpassed .chk-grouphead{color:var(--magenta)}
+  .chk-group.passed .chk-grouphead{color:var(--green);cursor:pointer}
+  .chk-group.passed .chk-grouphead:hover{color:var(--cyan)}
+  .chk-grouphead .caret{margin-left:auto;font-size:12px;transition:transform .18s}
+  .chk-group.open .chk-grouphead .caret{transform:rotate(180deg)}
+  .chk-group.passed:not(.open) .chk-row{display:none}
+  .chk-row{border-top:1px solid var(--bp-line)}
+  .chk-sum{display:flex;align-items:center;gap:9px;width:100%;padding:7px 2px;background:none;border:0;
+           cursor:pointer;font-family:inherit;text-align:left;color:var(--bp-ink)}
+  .chk-sum:hover .chk-label{color:var(--cyan)}
+  .chk-sum .caret{color:var(--bp-dim);font-size:12px;transition:transform .18s}
+  .chk-row.open .chk-sum .caret{transform:rotate(180deg)}
+  .chk-state{flex-shrink:0;width:9px;height:9px;border-radius:50%;background:var(--bp-faint)}
+  .chk-row.fail .chk-state{background:var(--magenta)}
+  .chk-row.warn .chk-state{background:var(--bp-warn)}
+  .chk-row.unknown .chk-state{background:transparent;box-shadow:inset 0 0 0 1.5px var(--bp-faint)}
+  .chk-row.pass .chk-state,.chk-row.na .chk-state{background:var(--green)}
+  .chk-label{flex:1;min-width:0;font-size:12.5px;font-weight:600;color:inherit;transition:color .15s}
+  .chk-text{margin:0 0 9px 18px;font-size:11.5px;line-height:1.5;color:var(--bp-faint)}
+  .delivtoggle{display:flex;align-items:center;width:100%;margin-top:12px;padding:10px 2px 6px;background:none;border:0;
+               border-top:1px solid var(--bp-line);cursor:pointer;font-family:var(--pps-display);font-size:10px;
+               font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--bp-faint);text-align:left}
+  .delivtoggle:hover{color:var(--cyan)}
+  .delivtoggle .caret{margin-left:auto;font-size:12px;transition:transform .18s}
+  .delivtoggle.open .caret{transform:rotate(180deg)}
+  /* read by a screen reader, not drawn */
+  .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+  /* ── the "!" flags explain themselves ── one floating tip, fixed to the
+     window because the rail scrolls and would clip anything hung off it */
+  [data-flag]{cursor:help}
+  .flagtip{position:fixed;z-index:40;width:280px;max-width:calc(100vw - 16px);box-sizing:border-box;
+           font-size:11.5px;line-height:1.5;background:var(--bp-surface);color:var(--bp-dim);
+           border:1px solid var(--bp-line);border-radius:10px;padding:10px 12px;
+           box-shadow:0 4px 6px rgba(16,24,40,.06), 0 12px 28px rgba(16,24,40,.18);
+           opacity:0;visibility:hidden;transform:translateY(-3px);pointer-events:none;
+           transition:opacity .14s ease,transform .14s ease,visibility .14s}
+  .flagtip.on{opacity:1;visibility:visible;transform:none}
+  .flagtip b{display:block;color:var(--bp-ink);font-weight:700;font-size:11.5px;margin-bottom:6px}
+  .flagtip ul{margin:0;padding:0;list-style:none}
+  .flagtip li{display:flex;gap:7px;color:var(--magenta)}
+  .flagtip li + li{margin-top:6px}
+  .flagtip li.warn{color:var(--bp-warn)}
+  .flagtip li.info{color:var(--bp-faint)}
+  .flagtip li .bang{width:15px;height:15px;font-size:10px}
+  .flagtip li.warn .bang{background:var(--bp-warn)}
+  .flagtip li.info .bang{background:var(--bp-faint)}
+  @media (prefers-reduced-motion:reduce){ .flagtip{transition:none;transform:none} }
   .behavior{display:flex;align-items:center;gap:10px;margin:4px 0 12px}
   .behavior select{padding:8px 11px;border:1px solid var(--bp-line);border-radius:10px;
                    background:var(--bp-surface);color:var(--bp-ink);font-size:13.5px;font-family:inherit;
@@ -513,11 +562,24 @@
   .keptline{color:var(--green);font-size:10.5px}
 
   .railstrip{padding:14px 16px 20px;overflow-y:auto;flex:1;min-height:0}
-  /* In the rail the panel itself scrolls, so the strip must not also cap
-     itself — that clipped a 64-page index to two and a half rows. It keeps
-     wrapping though: a tall narrow panel wants rows, and overflow:visible here
-     would cancel the sideways scrolling the bottom strip relies on. */
-  .railstrip .strip{max-height:none;overflow:visible;flex-wrap:wrap}
+  /* In the rail (3D mode) the panel itself scrolls, and a tall narrow panel
+     wants rows, so this strip wraps where the bottom one does not. */
+  .railstrip .strip{overflow:visible;flex-wrap:wrap}
+
+  /* ── DRAFT layout: thumbnails in the page headings (?thumbs=rail) ──
+     The alternative to the strip: each page's heading in the Artwork Edit rail
+     carries that page's thumbnail, so "Page: 1" and page 1's picture are one
+     thing, and the stage gets the strip's height back. Same cell, same
+     affordances (upload chip, drop target, dashed when it has no file); the
+     caption and the issue dot are dropped because the heading already says
+     both. Switched from the yellow strip, or with ?thumbs=rail on the URL. */
+  [data-thumbs="rail"] #stripBottom{display:none}
+  .pagehead{display:flex;align-items:center;gap:10px}
+  .pagehead .acchead{flex:1;min-width:0}
+  .pagehead.dropping{background:var(--cyan-tint);border-radius:8px}
+  .pg.mini{width:auto;height:auto;padding:3px;border:1px solid var(--bp-line);border-radius:8px;flex-shrink:0;margin:7px 0}
+  .pg.mini .thumb{margin-bottom:0;border-radius:4px}
+  .pg.mini .pgup{width:17px;height:17px;font-size:11px;bottom:1px;right:1px}
   .railstriphead{font-family:var(--pps-display);font-size:10px;font-weight:700;letter-spacing:.08em;
                  text-transform:uppercase;color:var(--bp-faint);margin-bottom:10px}
 
@@ -642,11 +704,7 @@
     .issues{width:100%;padding-top:0}
     .issue{font-size:11px}
 
-    /* one row that scrolls sideways, rather than a block that eats the screen */
-    #stripBottom{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;max-height:none;
-                 padding-bottom:6px;-webkit-overflow-scrolling:touch}
-    #stripRail{flex-wrap:wrap;overflow:visible;max-height:none}
-    .grp,.arrow{flex-shrink:0}
+    #stripRail{flex-wrap:wrap;overflow:visible}
 
     .rail{width:auto;border-left:none;border-top:1px solid var(--bp-line);min-height:0}
     .railhead{padding:11px 0 9px;margin:0 11px}
@@ -745,6 +803,14 @@
       <option value="48">48 pages</option>
       <option value="64">64 pages</option>
     </select>
+    <!-- Two layouts under comparison (owner, 2026-10-23). Prototype chrome, like
+         the skin toggle: it lives in the yellow strip, not in the product. No
+         separate label — a second one wraps this strip onto two lines on a
+         phone held sideways, and pushes close out of the top corner. -->
+    <select id="thumbsLayout" aria-label="Where the page thumbnails go">
+      <option value="strip" selected>Thumbnails: row under page</option>
+      <option value="rail">Thumbnails: in page headings (draft)</option>
+    </select>
     <button class="themebtn" id="themeBtn">Dark skin</button>
   </div>
 </div>
@@ -823,6 +889,9 @@
           customer's responsibility.</p>
         <div class="approverow">
           <button class="approve" id="approveBtn" disabled>APPROVE ART</button>
+          <!-- A paid proof is approved by staff, so there is nothing to approve
+               here — only to look, and then go back to the order. -->
+          <button class="approve" id="reviewDone" type="button" hidden>DONE</button>
         </div>
         <!-- Approving is tens of seconds of blocked main thread on a long
              booklet. Silence there reads as a hang, so the work reports itself.
@@ -870,6 +939,7 @@
 </div>
 
 <input type="file" id="filePick" accept="image/*,application/pdf" multiple hidden>
+<div class="flagtip" id="flagTip" role="tooltip"></div>
 
 <script>
 /* ─────────────────────────────────────────────────────────────
@@ -927,7 +997,13 @@ function validateJob(job){
   const w = Number(job.trim && job.trim.w), h = Number(job.trim && job.trim.h);
   if (!isFinite(w) || w <= 0) errs.push('trim width must be a positive number');
   if (!isFinite(h) || h <= 0) errs.push('trim height must be a positive number');
+  // The calculators snap every page count to their own list now (ppsSnapPages),
+  // so a count that is not a whole number, or is past any book anyone sells
+  // (the longest list, perfect bound's, stops at 350), did not come from a
+  // calculator. Refuse it rather than lay out 2,000 pages and hang the tab.
   if (!isFinite(n) || n < 4)  errs.push('page count must be at least 4');
+  else if (!Number.isInteger(n)) errs.push('page count must be a whole number');
+  else if (n > 1000)          errs.push('page count ' + n + ' is past any book this proofer lays out (1,000 pages)');
   else if (n % 2)             errs.push('page count must be even');
   else if (job.calc === 'saddle' && n % 4)
     errs.push('a saddle-stitched book folds in fours, so the page count must be a multiple of 4');
@@ -943,6 +1019,19 @@ function validateJob(job){
     if (job[k] == null) continue;
     if (job[k] !== 'color' && job[k] !== 'bw') errs.push(k + " must be 'color' or 'bw'");
   }
+  // Where a short file's blanks go — the customer's answer in the calculator.
+  // Absent means the calculator's own default, the end of the interior.
+  if (job.blankPlacement != null && job.blankPlacement !== 'covers' && job.blankPlacement !== 'end')
+    errs.push("blankPlacement must be 'covers' or 'end'");
+  // The proof option bought. 0 is the free online proof, which the customer
+  // approves here; anything above it is approved by staff. Refused rather than
+  // defaulted when unreadable: read as 0, a paid proof would ask the customer
+  // to take responsibility for what they paid us to check.
+  if (job.proof != null){
+    const p = Number(job.proof);
+    if (typeof job.proof === 'boolean' || !isFinite(p) || p < 0) errs.push('proof must be zero or a positive number');
+  }
+  if (job.staples != null && job.staples !== 1 && job.staples !== 2) errs.push('staples must be 1 or 2');
   return errs;
 }
 
@@ -960,6 +1049,10 @@ function applyJob(job){
   if (job.safety != null) MODEL.safety = Number(job.safety);
   MODEL.insideColor = job.insideColor === 'bw' ? 'bw' : 'color';
   MODEL.coverColor  = job.coverColor  === 'bw' ? 'bw' : 'color';
+  MODEL.blankPlacement = job.blankPlacement === 'covers' ? 'covers' : 'end';
+  MODEL.reconcile = null;                  // set by loadBook once the file is read
+  MODEL.proof   = Number(job.proof) || 0;
+  MODEL.staples = job.staples === 2 ? 2 : 1;
   recomputeDerived();
   rebuildModel(Number(job.pages));
   return [];
@@ -1016,15 +1109,24 @@ const BEHAVIORS = {
   fill:    { label:'Fill',    subs:[ { type:'grid', title:'Fill Anchor: which reference point for art', ...ANCHOR_GRID } ] },
   fit:     { label:'Fit',     subs:[ { type:'note',  note:'No options — the whole file is fitted inside the page, so paper may show at two edges and there will be no bleed.' } ] },
   stretch: { label:'Stretch', subs:[ { type:'note',  note:'No options — art is stretched to fill the page. Proportions will change.' } ] },
-  scale:   { label:'Scale',   subs:[ { type:'slider', key:'scale', title:'Size', min:50, max:200, step:0.5 },
+  // 10–300 %, the built-in modal's range. It was 50–200 here, which left a
+  // customer with a 4x-oversized file, or a small logo to enlarge, no way to
+  // get it onto the page on this surface when they could on the old one.
+  scale:   { label:'Scale',   subs:[ { type:'slider', key:'scale', title:'Size', min:10, max:300, step:0.5 },
                                      { type:'grid', title:'Scale Anchor: which reference point for art', ...ANCHOR_GRID } ] },
   rotate:  { label:'Rotate',  subs:[ { type:'pills', key:'rot', title:'Rotation',
-                                       pills:['0°','90°','180°','270°'] } ] }
+                                       pills:['0°','90°','180°','270°'] },
+                                     { type:'bookrot', title:'Every page, for the binding' } ] }
 };
 
 const state = { mode:'proof', selected:1, openPage:null, wholeOpen:true, perPage:{}, applyAll:false,
                 bookMode:'closed', spread:0, rot:{ x:-15, y:-25 },
-                zoom:'fit', lens:null };
+                zoom:'fit', lens:null,
+                // the Preflight list: which checks have their explanation open,
+                // whether the Passed group is unfolded, and the deliverables box
+                chkOpen:new Set(), passedOpen:false, delivOpen:false,
+                // what approving last said, redrawn by every rail render
+                approveNote:null, approveError:null, escapeOffered:false, escapeTaken:false };
 
 /* Undo: whole-map snapshots. Cheap at this size and impossible to get subtly
    wrong, which matters more here than the memory would. */
@@ -1160,6 +1262,7 @@ function rebuildModel(count){
   state.selected = 1; state.openPage = null; state.wholeOpen = true;
   state.spread = 0; state.bookMode = 'closed';
   srcCache.clear(); uploads.clear(); cache.clear(); history.length = 0;
+  resetHiRes();                       // every call site runs after boot, past its const
 }
 
 /* ── the composition engine ───────────────────────────────────
@@ -1173,18 +1276,49 @@ function txKey(n){
   // read the stamp without forcing a placeholder to be drawn just to key a cache
   return n + '|' + t.behavior + '|' + t.anchor + '|' + t.scale + '|' + t.rot + '|' + ((uploads.get(n)||{}).stamp || 0);
 }
-function composePage(n, W, H){
+/* `own` = the caller gets a canvas nobody else holds, and may free it. The print
+   path frees every 300 DPI sheet as soon as it is encoded (and the screen's
+   second pass frees the one it replaces); handing either of them the cached
+   canvas let them zero a cache entry that the next approval then read back as
+   a 0 x 0 page — approval failed on any job with a blank page the customer had
+   looked at (found in review, 2026-09-28). It also kept 18 MB sheets in a cache
+   meant for thumbnails. */
+function composePage(n, W, H, own){
   const key = txKey(n) + '|' + W + 'x' + H;
-  const hit = cache.get(key);
+  const hit = own ? null : cache.get(key);
   if (hit) return hit;
 
-  const t = state.perPage[n], src = SRCget(n);
+  const src = SRCget(n);
+  const g = placeArt(n, W, H, src);
   const c = document.createElement('canvas');
   c.width = W; c.height = H;
   const ctx = c.getContext('2d');
   ctx.imageSmoothingQuality = 'high';
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, W, H);
+
+  ctx.save();
+  ctx.translate(g.dx + g.drawW/2, g.dy + g.drawH/2);
+  if (g.steps) ctx.rotate(g.steps * Math.PI / 2);
+  ctx.drawImage(src.el, g.quarter ? -g.drawH/2 : -g.drawW/2, g.quarter ? -g.drawW/2 : -g.drawH/2,
+                        g.quarter ? g.drawH : g.drawW,       g.quarter ? g.drawW : g.drawH);
+  ctx.restore();
+
+  const out = { canvas:c, place:{ x:g.dx, y:g.dy, w:g.drawW, h:g.drawH }, effDpi:g.effDpi,
+                W, H, steps:g.steps, quarter:g.quarter };
+  if (own) return out;
+  if (cache.size > 220) cache.clear();
+  cache.set(key, out);
+  return out;
+}
+
+/* Where page n's art lands on a W x H sheet, and how big. The ONE place the
+   placement maths lives: the on-screen proof (composePage) and the print file
+   (renderPrintPage) both take their geometry from here, so they can only differ
+   in the pixels they draw from — never in where those pixels go. Two copies of
+   this maths is exactly how order 87032 printed a crop the customer never saw. */
+function placeArt(n, W, H, src){
+  const t = state.perPage[n];
 
   // Rotation first, so every later measurement is of what actually lands.
   const steps = ['0°','90°','180°','270°'].indexOf(t.rot);
@@ -1219,20 +1353,13 @@ function composePage(n, W, H){
   const ay = /Top/.test(a)  ? 0 : /Bottom/.test(a) ? 1 : 0.5;
   const dx = (W - drawW) * ax, dy = (H - drawH) * ay;
 
-  ctx.save();
-  ctx.translate(dx + drawW/2, dy + drawH/2);
-  if (steps) ctx.rotate(steps * Math.PI / 2);
-  ctx.drawImage(src.el, quarter ? -drawH/2 : -drawW/2, quarter ? -drawW/2 : -drawH/2,
-                        quarter ? drawH : drawW,       quarter ? drawW : drawH);
-  ctx.restore();
-
   // Effective resolution of what was actually placed — the honest number, not
-  // the file's nominal DPI.
+  // the file's nominal DPI. Measured against the SCREEN raster on purpose: it
+  // answers "is the placement stretching this art thin?", which must not change
+  // just because the print path renders the same art again at press resolution.
   const effDpi = Math.round(sw / (drawW / pxPerIn));
-  const out = { canvas:c, place:{ x:dx, y:dy, w:drawW, h:drawH }, effDpi, W, H, steps, quarter };
-  if (cache.size > 220) cache.clear();
-  cache.set(key, out);
-  return out;
+  return { behavior:t.behavior, steps, quarter, sw, sh, inW, inH, pxPerIn,
+           drawW, drawH, dx, dy, effDpi };
 }
 
 /* Issues, measured rather than scripted. */
@@ -1309,6 +1436,14 @@ function analyze(n){
      it. Reported alone, and at error level, so approving a book with holes in
      it takes the deliberate second click the checkpoint asks for. */
   if (MODEL.hosted && !uploads.has(n)){
+    // A blank the calculator added to make up a short file is not a hole the
+    // customer forgot: they were told, and chose where it goes. Still flagged —
+    // it prints blank and the approval should say they saw that — but as what
+    // it is, and not as an error telling them to upload something.
+    const rc = reconcileNow();
+    if (rc && rc.type === 'padded' && rc.blanksNow.includes(n)){
+      return Object.assign([{ kind:'added', level:'warn', text:addedText(rc) }], { marks:[] });
+    }
     return Object.assign([{ kind:'noart', level:'error', text:ISSUE_TEXT.noart }], { marks:[] });
   }
   // Measured at a fixed working size — the geometry is scale-independent, so
@@ -1424,15 +1559,17 @@ function renderStage(){
       '<div class="g" style="inset:0;border:2px dashed #ef4444"></div>' +
       '<div class="g" style="top:'+bt+';left:'+bl+';right:'+bl+';bottom:'+bt+';border:2px dashed #fff;filter:drop-shadow(0 0 1px #000)"></div>' +
       '<div class="g" style="top:'+st2+';left:'+sl+';right:'+sl+';bottom:'+st2+';border:2px dashed '+css('--green')+'"></div>' +
-      '<div class="g" style="'+(spineLeft?'left:'+bl:'right:'+bl)+';top:'+bt+';bottom:'+bt+';width:3px;background:#3b82f6"></div>') +
+      spineHtml(state.selected, spineLeft, bl)) +
     // A margin warning that only appears as a sentence makes the customer hunt
     // for the offending line. Ring it instead.
     (guidesOff ? '' : '<div class="markwrap">' + (analyze(state.selected).marks || []).map(m =>
       '<div class="typemark'+(m.level === 'cut' ? ' cut' : '')+'" style="left:'+(m.x*100)+'%;top:'+(m.y*100)+
       '%;width:'+(m.w*100)+'%;height:'+(m.h*100)+'%"></div>').join('') + '</div>');
   sheet.insertBefore(r.canvas, sheet.firstChild);
+  r.canvas.dataset.art = 'screen';
   r.canvas.style.filter = greyFilterFor(state.selected);
   attachSheetHandlers(sheet, r);
+  scheduleHiRes(state.selected);
   syncZoomReadout();
 }
 
@@ -1448,6 +1585,71 @@ function syncZoomReadout(){
   const pct = Math.round(shown / (BLEED_W * 96) * 100);
   document.getElementById('zoomVal').textContent = pct + '%';
   if (state.zoom === 'fit') document.getElementById('zoom').value = Math.min(200, Math.max(25, pct));
+}
+
+/* ── the second pass: what you inspect is what prints ─────────
+   The surface paints first from the 150 DPI screen raster, which is quick. It
+   is not what prints: the print file is rendered from the source at 300 DPI
+   (renderPrintPage), and a customer approving "exactly what you see" should be
+   looking at those pixels, especially through the magnifier. So once the page
+   has settled, it is rendered again by the print path itself and swapped in —
+   the built-in modal's two-pass proof (fast, then 300 DPI) with the print
+   renderer, not a copy of it, doing the second pass. A slider drag or a page
+   flip in the meantime cancels it; a failure leaves the quick render up, and
+   approval re-renders every page and reports anything it cannot do. */
+const hiRes = { key:null, r:null, timer:0, seq:0 };
+const HIRES_DELAY = 250;
+/* Forget the held render. A new job must never be shown a press render made
+   for the page before it: the proofer boots on the demo booklet, and a demo
+   page 1 rendered before the host's job arrived was swapped straight back in
+   over the customer's blank page 1 — same page number, same trim, no upload
+   stamp to tell them apart (found in review, 2026-09-28). */
+function resetHiRes(){
+  clearTimeout(hiRes.timer);
+  hiRes.seq++;
+  if (hiRes.r) hiRes.r.canvas.width = 0;
+  hiRes.key = null; hiRes.r = null;
+}
+function scheduleHiRes(n){
+  clearTimeout(hiRes.timer);
+  const seq = ++hiRes.seq;
+  // Only the customer's own art has more to show at press resolution. A page
+  // with nothing on it is the same white (or demo placeholder) either way.
+  if (!uploads.has(n)) return;
+  const key = txKey(n) + '|' + MODEL.trim.w + 'x' + MODEL.trim.h + '|' + MODEL.bleed + '|' + (MODEL.hosted ? 'h' : 'd');
+  if (hiRes.key === key && hiRes.r){ swapInHiRes(n, hiRes.r); return; }
+  hiRes.timer = setTimeout(async () => {
+    let r;
+    try { r = await renderPrintPage(n); }
+    catch (e){ return; }
+    if (seq !== hiRes.seq){ r.canvas.width = 0; return; }       // superseded while rendering
+    if (hiRes.r) hiRes.r.canvas.width = 0;                      // one page at press size is plenty
+    hiRes.key = key; hiRes.r = r;
+    swapInHiRes(n, r);
+  }, HIRES_DELAY);
+}
+function swapInHiRes(n, r){
+  if (state.mode === 'book' || state.selected !== n) return;
+  const sheet = document.getElementById('sheet');
+  const cur = sheet && sheet.querySelector('canvas[data-art]');
+  if (!cur) return;
+  r.canvas.dataset.art = 'print';
+  r.canvas.style.filter = greyFilterFor(n);
+  if (cur !== r.canvas) sheet.replaceChild(r.canvas, cur);
+  // The magnifier samples whatever r it was handed; hand it the press pixels.
+  attachSheetHandlers(sheet, r);
+}
+
+/* The stapled edge as overlay markup: the bar, and a tick per staple, from the
+   same spineGuide() the preview JPEGs and the magnifier draw. */
+function spineHtml(n, spineLeft, bl){
+  const g = spineGuide(n);
+  const pcY = v => (v / BLEED_H * 100) + '%';
+  const side = spineLeft ? 'left:' + bl : 'right:' + bl;
+  return '<div class="g spine" style="' + side + ';top:' + pcY(g.y0) + ';height:' + pcY(g.y1 - g.y0) +
+         ';width:3px;background:#3b82f6"></div>' +
+    g.staples.map(y => '<div class="g staple" style="' + (spineLeft ? 'left:calc(' + bl + ' - 3.5px)' : 'right:calc(' + bl + ' - 3.5px)') +
+         ';top:calc(' + pcY(y) + ' - 2.5px);width:10px;height:5px;background:#1e40af"></div>').join('');
 }
 
 /* Magnifier: the lens shows the SAME composition at 3x, so it can never
@@ -1522,6 +1724,10 @@ function showLens(sheet, r, fx, fy, px, py){
     box(MODEL.bleed, MODEL.bleed, BLEED_W-MODEL.bleed, BLEED_H-MODEL.bleed, '#111', [7,5]);
     const s = MODEL.bleed + MODEL.safety;
     box(s, s, BLEED_W-s, BLEED_H-s, '#38a169', [7,5]);
+    // The stapled edge too: close to the fold is exactly where people use the
+    // magnifier, and the surface underneath shows it.
+    const k = LENS / winW;
+    drawSpine(ctx, r.W / BLEED_W * k, r.H / BLEED_H * k, sx * k, sy * k, state.selected, 3 * LENS_Z);
   }
   wrap.appendChild(lc);
   sheet.appendChild(wrap);
@@ -1697,6 +1903,15 @@ const NOTE_PROOF =
 const NOTE_BOOK =
   'Finished-product mockup, trimmed as it will be in the bindery. This is <strong>not</strong> the print surface — ' +
   'bleed, trim and safety are only shown on the Proof view, and artwork cannot be approved from here.';
+// The calculator modal's own wording for the two paid options.
+const NOTE_STAFF =
+  'You chose a <strong>Professional Digital Proof</strong>. One of our trained prepress technicians will manually ' +
+  'review your upload for issues and bring your art up to standards before sending you a digital proof for approval ' +
+  '(emailed). Nothing needs approving here — this view is for your reference.';
+const NOTE_HARDCOPY =
+  'You chose a <strong>Hardcopy Proof</strong>. A hardcopy proof will be dispatched for your approval prior to going to ' +
+  'print. You\'ll have an opportunity to review and alter your order after receiving the proof. Nothing needs ' +
+  'approving here — this view is for your reference.';
 function renderNote(){
   const book = state.mode === 'book';
   // the closing sentence names the control that is actually on screen
@@ -1704,9 +1919,9 @@ function renderNote(){
     ? ' Drag the cover to turn the book.'
     : ' Use &#8249; &#8250; or the arrow keys to step through spreads.';
   // Only the text, never the box: the agreement checkbox lives in there too.
-  document.getElementById('noteText').innerHTML = book ? NOTE_BOOK + tail : NOTE_PROOF;
+  document.getElementById('noteText').innerHTML = book ? NOTE_BOOK + tail
+    : reviewOnly() ? (MODEL.proof >= 3 ? NOTE_HARDCOPY : NOTE_STAFF) : NOTE_PROOF;
 }
-
 function renderIssues(){
   const el = document.getElementById('issuePanel');
   if (state.mode === 'book'){ el.innerHTML = ''; return; }
@@ -1722,52 +1937,174 @@ function renderIssues(){
     .join('');
 }
 
+/* ── page thumbnails: two layouts under comparison ─────────────
+   'strip' — one row under the stage (the default).
+   'rail'  — DRAFT: in each page's heading in the Artwork Edit rail.
+   3D mode is the same in both: the rail holds a wrapping strip. */
+let thumbLayout = 'strip';
+try { if (new URLSearchParams(location.search).get('thumbs') === 'rail') thumbLayout = 'rail'; } catch (e) {}
+function thumbsInRail(){ return thumbLayout === 'rail' && state.mode !== 'book'; }
+function setThumbLayout(v){
+  thumbLayout = v === 'rail' ? 'rail' : 'strip';
+  document.documentElement.setAttribute('data-thumbs', thumbLayout);
+  const sel = document.getElementById('thumbsLayout');
+  if (sel) sel.value = thumbLayout;
+}
+
+/* One page cell, the same in every place a page is shown as a thumbnail —
+   so the upload chip, the drop target and the "no file yet" dashing cannot
+   behave differently depending on which layout you are looking at.
+   mini: the rail-heading version, which drops the caption and the issue dot
+   because the heading beside it already carries both. */
+function pageCell(n, mini){
+  const p = MODEL.pages.find(q => q.n === n);
+  // Same size as the strip's, so both layouts share one cached composition;
+  // CSS draws the mini one smaller.
+  const thumb = composePage(n, 132, Math.round(132 * BLEED_H / BLEED_W)).canvas.toDataURL('image/png');
+  const up = uploads.get(n);
+  const d = document.createElement('div');
+  d.className = 'pg' + (mini ? ' mini' : '') + (isSel(n) ? ' sel' : '') + (up ? ' hasart' : '');
+  d.title = up ? up.label : 'No file on this page yet — drop one here';
+  let thumbStyle = 'background-image:url('+thumb+');filter:'+greyFilterFor(n);
+  let badge = '';
+  if (mini){
+    const tw = 48, th = Math.max(28, Math.min(80, Math.round(tw * BLEED_H / BLEED_W)));
+    thumbStyle += ';width:'+tw+'px;height:'+th+'px';
+  } else {
+    const issues = analyze(n);
+    const worst = issues.some(i => i.level === 'error') ? 'error' : issues.length ? 'warn' : '';
+    badge = (worst ? '<span class="dot'+(worst === 'warn' ? ' warn' : '')+'" data-flag data-page="'+n+'">!</span>' : '');
+  }
+  d.innerHTML = '<div class="thumb" style="'+thumbStyle+'"></div>' +
+                (mini ? '' : '<div class="cap"><span class="n">P'+n+'</span>' + (p.name ? '<br>'+p.name : '') + '</div>') +
+                badge +
+                '<button class="pgup" title="' + (up ? 'Replace the file on page ' : 'Add a file to page ') + n +
+                '">' + (up ? '↻' : '+') + '</button>' +
+                (mini ? '' : '<span class="dropcue">Drop here</span>');
+  d.onclick = () => {
+    state.selected = n; state.openPage = n;
+    // in the rail it opens that page's section, which puts the file-level
+    // review away — the same rule its heading follows
+    if (mini) state.wholeOpen = false;
+    if (state.mode === 'book') bookGoToPage(n);
+    renderAll();
+  };
+  // The upload chip must not also select the page underneath it.
+  d.querySelector('.pgup').onclick = e => { e.stopPropagation(); pickFileFor(n); };
+  // Dropping onto a tile says which page the file belongs to — the thing
+  // that goes wrong when a whole document is handed over in one lump.
+  dropTarget(d, n, d);
+  return d;
+}
+function dropTarget(el, n, lit){
+  el.ondragover  = e => { e.preventDefault(); e.stopPropagation(); lit.classList.add('dropping'); };
+  el.ondragleave = () => lit.classList.remove('dropping');
+  el.ondrop = e => {
+    e.preventDefault(); e.stopPropagation(); lit.classList.remove('dropping');
+    loadArtSequence(n, e.dataTransfer.files);
+  };
+}
+
+/* Every render rebuilds the cells, so the scroll position is carried across
+   by hand, and the selected page is brought into view only when the selection
+   has actually moved — re-rendering for a magnifier toggle must not yank a
+   strip the customer has just scrolled. sig says what counts as a move: for
+   the strip a change of mode or layout does too, since it was emptied while
+   out of sight and has lost its place. */
+const lastInView = {};
+function keepInView(box, el, axis, key, sig){
+  if (!box || !el || lastInView[key] === sig) return;
+  lastInView[key] = sig;
+  const b = box.getBoundingClientRect(), r = el.getBoundingClientRect();
+  if (axis === 'x'){
+    if (r.left < b.left) box.scrollLeft -= (b.left - r.left) + 12;
+    else if (r.right > b.right) box.scrollLeft += (r.right - b.right) + 12;
+  } else {
+    if (r.top < b.top) box.scrollTop -= (b.top - r.top) + 8;
+    else if (r.bottom > b.bottom) box.scrollTop += (r.bottom - b.bottom) + 8;
+  }
+}
+
+/* A mouse has a vertical wheel and the strip scrolls sideways. At either end
+   the wheel is left to the page, so it cannot trap scrolling on a narrow
+   screen where the page itself scrolls. */
+function stripWheel(e){
+  const s = e.currentTarget;
+  if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;   // a sideways gesture already works
+  const max = s.scrollWidth - s.clientWidth;
+  if (max <= 0) return;
+  if ((e.deltaY < 0 && s.scrollLeft <= 0) || (e.deltaY > 0 && s.scrollLeft >= max - 1)) return;
+  s.scrollLeft += e.deltaY * (e.deltaMode === 1 ? 16 : 1);
+  e.preventDefault();
+}
+
+/* ── the "!" flags explain themselves ──────────────────────────
+   A red "!" on a page heading or a thumbnail said something on that page
+   needed a look, but not what (owner, 2026-10-24). Hover it — tap it on a
+   touch screen, or tab to its heading — and it lists that page's findings,
+   the same ones the issues column shows beside the open page. One tip for
+   every flag, fixed to the window: the rail scrolls, and would clip a tip
+   hung off the heading. */
+const flagTip = document.getElementById('flagTip');
+let flagFor = null, lastPointer = 'mouse';
+function showFlagTip(el){
+  const n = Number(el.dataset.page);
+  const issues = n ? analyze(n) : [];
+  if (!issues.length){ hideFlagTip(); return; }
+  const p = MODEL.pages.find(q => q.n === n);
+  flagTip.innerHTML = '<b></b><ul></ul>';
+  flagTip.firstChild.textContent = 'Page ' + n + (p && p.name ? ' (' + p.name + ')' : '');
+  issues.forEach(i => {
+    const li = document.createElement('li');
+    li.className = i.level === 'warn' ? 'warn' : i.level === 'info' ? 'info' : '';
+    // the issues column's own markup for the same text
+    li.innerHTML = '<span class="bang">!</span><span>' + i.text + '</span>';
+    flagTip.lastChild.appendChild(li);
+  });
+  flagFor = el;
+  flagTip.classList.add('on');
+  placeFlagTip();
+}
+/* Under the flag, or above it near the bottom of the window. Also run on any
+   scroll, so the tip follows its flag rather than vanishing mid-gesture — and
+   goes once the flag itself is out of sight (scrolled under the rail's edge). */
+function placeFlagTip(){
+  const el = flagFor;
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  const at = el.isConnected && document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  if (!at || !(at === el || el.contains(at))){ hideFlagTip(); return; }
+  const w = flagTip.offsetWidth, h = flagTip.offsetHeight;
+  let top = r.bottom + 8;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 8);
+  flagTip.style.left = Math.round(Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w + 8))) + 'px';
+  flagTip.style.top = Math.round(top) + 'px';
+}
+function hideFlagTip(){ flagFor = null; flagTip.classList.remove('on'); }
+
 /* ── filmstrip: identical cells, rendered into whichever container is
-   active — bottom of the stage in Proof, the right panel in 3D ───── */
+   active — bottom of the stage in Proof, the right panel in 3D, and
+   nowhere in the draft rail layout, whose cells live in the page headings ── */
 function renderStrip(){
+  hideFlagTip();
   const book = state.mode === 'book';
   const target = document.getElementById(book ? 'stripRail' : 'stripBottom');
   const other  = document.getElementById(book ? 'stripBottom' : 'stripRail');
   other.innerHTML = '';
+  if (thumbsInRail()){ target.innerHTML = ''; return; }
+  const scroller = book ? document.getElementById('railStripWrap') : target;
+  const keepX = scroller.scrollLeft, keepY = scroller.scrollTop;
   target.innerHTML = '';
 
   MODEL.groups.forEach((g, gi) => {
     if (gi > 0 && !book){ const a = document.createElement('div'); a.className='arrow'; a.textContent='›'; target.appendChild(a); }
     const grp = document.createElement('div'); grp.className = 'grp';
-    g.pages.forEach(n => {
-      const p = MODEL.pages.find(q => q.n === n);
-      const issues = analyze(n);
-      const worst = issues.some(i => i.level === 'error') ? 'error' : issues.length ? 'warn' : '';
-      const thumb = composePage(n, 132, Math.round(132 * BLEED_H / BLEED_W)).canvas.toDataURL('image/png');
-      const up = uploads.get(n);
-      const d = document.createElement('div');
-      d.className = 'pg' + (isSel(n) ? ' sel' : '') + (up ? ' hasart' : '');
-      d.title = up ? up.label : 'No file on this page yet — drop one here';
-      d.innerHTML = '<div class="thumb" style="background-image:url('+thumb+');filter:'+greyFilterFor(n)+'"></div>' +
-                    '<div class="cap"><span class="n">P'+n+'</span>' + (p.name ? '<br>'+p.name : '') + '</div>' +
-                    (worst ? '<span class="dot'+(worst === 'warn' ? ' warn' : '')+'">!</span>' : '') +
-                    '<button class="pgup" title="' + (up ? 'Replace the file on page ' : 'Add a file to page ') + n +
-                    '">' + (up ? '↻' : '+') + '</button>' +
-                    '<span class="dropcue">Drop here</span>';
-      d.onclick = () => {
-        state.selected = n; state.openPage = n;
-        if (state.mode === 'book') bookGoToPage(n);
-        renderAll();
-      };
-      // The upload chip must not also select the page underneath it.
-      d.querySelector('.pgup').onclick = e => { e.stopPropagation(); pickFileFor(n); };
-      // Dropping onto a tile says which page the file belongs to — the thing
-      // that goes wrong when a whole document is handed over in one lump.
-      d.ondragover  = e => { e.preventDefault(); e.stopPropagation(); d.classList.add('dropping'); };
-      d.ondragleave = () => d.classList.remove('dropping');
-      d.ondrop = e => {
-        e.preventDefault(); e.stopPropagation(); d.classList.remove('dropping');
-        loadArtSequence(n, e.dataTransfer.files);
-      };
-      grp.appendChild(d);
-    });
+    g.pages.forEach(n => grp.appendChild(pageCell(n, false)));
     target.appendChild(grp);
   });
+  scroller.scrollLeft = keepX; scroller.scrollTop = keepY;
+  keepInView(scroller, target.querySelector('.pg.sel'), book ? 'y' : 'x', book ? 'rail3d' : 'strip',
+             state.mode + '|' + thumbLayout + '|' + state.selected);
 }
 function isSel(n){
   if (state.mode !== 'book') return n === state.selected;
@@ -1777,33 +2114,73 @@ function isSel(n){
 
 /* ── right rail ─────────────────────────────────────────────── */
 function renderRail(){
+  hideFlagTip();                 // the flag it was pointing at is about to go
   const rail = document.getElementById('rail');
+  const keepY = rail.scrollTop;
   rail.innerHTML = '';
+  const withThumbs = thumbsInRail();
 
+  /* Preflight, condensed (owner, 2026-10-24: "crowded"). Two groups in the
+     order they matter — Not passed, then Passed — one line per check, and the
+     explanation opens on a click. Passed starts folded: a list of things that
+     are fine is the part nobody needs to read first. "Not passed" covers
+     anything short of a pass, worst first; a check that could not run (an
+     image has no structure to inspect) is in it, marked by a hollow dot, and
+     its explanation says why. */
   const checks = runFileChecks();
-  const worstFile = checks.some(c => c.state === 'fail') ? 'fail'
-                  : checks.some(c => c.state === 'warn') ? 'warn'
-                  : checks.some(c => c.state === 'unknown') ? 'unknown' : 'pass';
+  const passed = c => c.state === 'pass' || c.state === 'na';
+  const RANK = { fail:0, warn:1, unknown:2 };
+  const notPassed = checks.filter(c => !passed(c)).sort((a, b) => (RANK[a.state] ?? 3) - (RANK[b.state] ?? 3));
+  const okChecks  = checks.filter(passed);
+  const worstFile = notPassed.length ? notPassed[0].state : 'pass';
+  const row = c => {
+    const open = state.chkOpen.has(c.id);
+    return '<div class="chk-row ' + c.state + (open ? ' open' : '') + '" data-chk="' + c.id + '">' +
+      '<button class="chk-sum" aria-expanded="' + open + '">' +
+        '<span class="chk-state"><span class="sr">' + (passed(c) ? 'Passed' : 'Not passed') + '</span></span>' +
+        '<span class="chk-label">' + c.label + '</span><span class="caret">⌄</span></button>' +
+      '<p class="chk-text"' + (open ? '' : ' hidden') + '>' + c.text + '</p></div>';
+  };
   const wf = document.createElement('div');
   wf.className = 'acc' + (state.wholeOpen ? ' open' : '');
   wf.innerHTML = '<button class="acchead"><span>Preflight</span>' +
-      '<span class="chip ' + worstFile + '">' + (
-        worstFile === 'fail' ? checks.filter(c=>c.state==='fail').length + ' problem' + (checks.filter(c=>c.state==='fail').length===1?'':'s')
-      : worstFile === 'warn' ? checks.filter(c=>c.state==='warn').length + ' to check'
-      : worstFile === 'unknown' ? checks.filter(c=>c.state==='unknown').length + ' not checked'
-      : 'all checks ran') + '</span><span class="caret">⌄</span></button>' +
+      '<span class="chip ' + worstFile + '">' +
+        (notPassed.length ? notPassed.length + ' not passed' : 'all passed') +
+      '</span><span class="caret">⌄</span></button>' +
     '<div class="accbody"><div class="checklist">' +
-      checks.map(c => '<div class="chk-row ' + c.state + '">' +
-        '<span class="chk-state">' + STATE_LABEL[c.state] + '</span>' +
-        '<div><span class="chk-label">' + c.label + '</span>' +
-        '<p class="chk-text">' + c.text + '</p></div></div>').join('') +
-    '</div>' + deliverablesHtml() + '</div>';
+      (notPassed.length ? '<div class="chk-group notpassed open">' +
+        '<div class="chk-grouphead">Not passed · ' + notPassed.length + '</div>' +
+        notPassed.map(row).join('') + '</div>' : '') +
+      (okChecks.length ? '<div class="chk-group passed' + (state.passedOpen ? ' open' : '') + '">' +
+        '<button class="chk-grouphead" aria-expanded="' + state.passedOpen + '">Passed · ' + okChecks.length +
+        '<span class="caret">⌄</span></button>' +
+        okChecks.map(row).join('') + '</div>' : '') +
+    '</div>' +
+    '<button class="delivtoggle' + (state.delivOpen ? ' open' : '') + '" aria-expanded="' + state.delivOpen + '">' +
+      'What approving produces<span class="caret">⌄</span></button>' +
+    deliverablesHtml() + '</div>';
   wf.querySelector('.acchead').onclick = () => {
     state.wholeOpen = !state.wholeOpen;
     if (state.wholeOpen) state.openPage = null;     // same rule, the other way round
     renderAll();
   };
+  // These only open and close text, so they re-render the rail alone: a full
+  // renderAll would recompose the stage for nothing.
+  wf.querySelectorAll('.chk-sum').forEach(b => b.onclick = () => {
+    const id = b.parentNode.dataset.chk;
+    state.chkOpen.has(id) ? state.chkOpen.delete(id) : state.chkOpen.add(id);
+    renderRail();
+  });
+  const pg = wf.querySelector('.chk-group.passed .chk-grouphead');
+  if (pg) pg.onclick = () => { state.passedOpen = !state.passedOpen; renderRail(); };
+  wf.querySelector('.delivtoggle').onclick = () => { state.delivOpen = !state.delivOpen; renderRail(); };
+  const dv = wf.querySelector('#deliv');
+  if (dv) dv.hidden = !state.delivOpen;
   rail.appendChild(wf);
+  // the approval note is set as text, never as markup: it can carry a message
+  // from an exception
+  if (state.approveNote != null) document.getElementById('pkgNote').textContent = state.approveNote;
+  renderApprovalOutcome();
 
   MODEL.pages.forEach(p => {
     const open = state.openPage === p.n;
@@ -1812,9 +2189,24 @@ function renderRail(){
     const acc = document.createElement('div');
     acc.className = 'acc' + (open ? ' open' : '');
     const title = 'Page: ' + p.n + (p.name ? ' (' + p.name + ')' : '');
-    const bang = issues.length ? '<span class="bang"'+(issues.every(i=>i.level==='warn') ? ' style="background:var(--bp-warn)"' : '')+'>!</span>' : '';
+    // data-flag: hovering (or tapping) it shows this page's findings (flagTip)
+    // .sr: the findings, read with the heading, for anyone who cannot hover
+    const bang = issues.length ? '<span class="bang" data-flag data-page="' + p.n + '"' +
+      (issues.every(i=>i.level==='warn') ? ' style="background:var(--bp-warn)"' : '') + '>!<span class="sr"> ' +
+      issues.length + (issues.length === 1 ? ' finding: ' : ' findings: ') +
+      issues.map(i => String(i.text).replace(/<[^>]*>/g, '')).join('; ') + '</span></span>' : '';
     acc.innerHTML = '<button class="acchead"><span>'+title+'</span>'+bang+'<span class="caret">⌄</span></button>' +
                     '<div class="accbody"></div>';
+    // Draft layout: the heading carries the page's own cell. A wrapper rather
+    // than a child of the button, because the cell has a button of its own.
+    if (withThumbs){
+      const head = document.createElement('div');
+      head.className = 'pagehead';
+      const cell = pageCell(p.n, true);
+      acc.insertBefore(head, acc.firstChild);
+      head.append(cell, acc.querySelector('.acchead'));
+      dropTarget(head, p.n, head);
+    }
     acc.querySelector('.acchead').onclick = () => {
       state.openPage = open ? null : p.n;
       // one section at a time: opening a page puts the file-level review away,
@@ -1860,6 +2252,12 @@ function renderRail(){
     }
     rail.appendChild(acc);
   });
+  rail.scrollTop = keepY;
+  // Only a page someone picked (its section is the open one). Page 1 is
+  // "selected" from the start, and scrolling to it on open — or on switching
+  // to this layout — would carry the Preflight section off the top unasked.
+  if (withThumbs && state.openPage === state.selected)
+    keepInView(rail, rail.querySelector('.pg.mini.sel'), 'y', 'railhead', thumbLayout + '|' + state.selected);
 }
 
 /* One control, every behaviour. While it is ticked, this page IS the document:
@@ -1909,6 +2307,29 @@ function subOption(n, sub){
   box.className = 'subbox';
 
   if (sub.type === 'note'){ box.innerHTML = '<p class="subnote">'+sub.note+'</p>'; return box; }
+
+  /* Landscape art in a portrait book. Facing pages are stapled on opposite
+     edges, so "the top of the art goes to the spine" is 270° on a recto (odd
+     page, stapled left) and 90° on a verso — one angle for every page gets half
+     the book upside down. The built-in modal's Rotate menu has had these two
+     ("Head to spine", "Foot to spine") since the booklet calculator shipped;
+     same angles, same assumption that the art arrives head-up. */
+  if (sub.type === 'bookrot'){
+    if (MODEL.pages.length < 2){ box.hidden = true; return box; }
+    box.innerHTML = '<span class="subtitle">'+sub.title+'</span>';
+    const pills = document.createElement('div');
+    pills.className = 'pills';
+    [['spine', 'Head to spine'], ['edge', 'Foot to spine']].forEach(([mode, label]) => {
+      const b = document.createElement('button');
+      b.className = 'pill' + (bookRotMode() === mode ? ' on' : '');
+      b.textContent = label;
+      b.dataset.bookrot = mode;
+      b.onclick = () => { pushHistory(); rotateBook(mode); };
+      pills.appendChild(b);
+    });
+    box.appendChild(pills);
+    return box;
+  }
 
   box.innerHTML = '<span class="subtitle">'+sub.title+'</span>';
 
@@ -1985,6 +2406,35 @@ function subOption(n, sub){
   });
   box.appendChild(pills);
   return box;
+}
+
+function bookRotSteps(mode, n){
+  const recto = n % 2 === 1;
+  return mode === 'spine' ? (recto ? 3 : 1) : (recto ? 1 : 3);
+}
+function rotateBook(mode){
+  // The pages now differ by design, so "keep every page matched" has to let go
+  // — left on, the next change would copy one page's angle over all of them.
+  state.applyAll = false;
+  MODEL.pages.forEach(p => {
+    const t = state.perPage[p.n];
+    t.rot = ['0°','90°','180°','270°'][bookRotSteps(mode, p.n)];
+    // Rotate IS crop-with-an-angle, centred; switching a centred crop over puts
+    // the angle where its own controls can show it, with the art exactly where
+    // it was. A crop anchored anywhere else stays a crop — Rotate would re-centre
+    // it. Fit, fill and scale keep their sizing; the angle applies to them all
+    // the same, as it does in the modal.
+    if (t.behavior === 'crop' && (t.anchor || 'Center') === 'Center') t.behavior = 'rotate';
+  });
+  renderAll();
+}
+/* Which of the two the book is currently in, if either — so the pill can say so. */
+function bookRotMode(){
+  for (const mode of ['spine', 'edge']){
+    if (MODEL.pages.every(p => ['0°','90°','180°','270°'].indexOf(state.perPage[p.n].rot) === bookRotSteps(mode, p.n)))
+      return mode;
+  }
+  return null;
 }
 
 /* Repaint only the surface while a slider is being dragged — a full renderAll
@@ -2151,16 +2601,43 @@ async function readPdfStructure(bytes){
 /* Render each page, and take its type from the text layer rather than from the
    pixels. This is the same information pdf.js gives any viewer; the margin
    check simply consumes it. */
-async function ingestPdf(file, startPage){
+/* `plan`, when given, decides which of the file's pages go where: it is called
+   with the file's page count and returns [pageIndex, bookPage] pairs. That is
+   how a whole-book upload keeps its back cover last (reconcilePlan). Without
+   it the file fills forward from startPage, which is what a drop on a tile
+   means. */
+async function ingestPdf(file, startPage, plan){
   await ensureLibs();
   const origin = await originOf(file);
   const buf = await file.arrayBuffer();
+  // The file's own bytes, kept with every page taken from it. The screen raster
+  // below is 150 DPI and is ONLY for the screen: the print file re-renders the
+  // page from these bytes at the size it lands at (renderPrintPage). Its own
+  // copy, because pdf.js may detach the buffer it is handed.
+  const srcBytes = new Uint8Array(buf.slice(0));
   const struct = await readPdfStructure(new Uint8Array(buf.slice(0)));
   const doc = await window.pdfjsLib.getDocument({ data:new Uint8Array(buf.slice(0)) }).promise;
+  // Layers switched OFF in the file. pdf.js honours the off state, so the proof
+  // and a print re-rendered here both leave them out — but a downstream engine
+  // that drops /OCProperties would print them. So a file carrying any is never
+  // shipped as-is (untouchedOriginal), and the layers check names them.
+  let ocOff = [];
+  try {
+    const oc = await doc.getOptionalContentConfig();
+    const groups = oc && oc.getGroups ? oc.getGroups() : null;
+    if (groups) for (const id of Object.keys(groups)){
+      const g = groups[id];
+      if (g && g.visible === false) ocOff.push(g.name || id);
+    }
+  } catch (e){ ocOff = null; }            // null = could not tell, which is not "none"
 
   const room = MODEL.pages.length - startPage + 1;
-  const count = Math.min(doc.numPages, room);
-  for (let i = 1; i <= count; i++){
+  let jobs = [];
+  if (plan) jobs = plan(doc.numPages).filter(([k, n]) => k >= 0 && k < doc.numPages && n >= 1 && n <= MODEL.pages.length);
+  else for (let k = 0; k < Math.min(doc.numPages, room); k++) jobs.push([k, startPage + k]);
+  const count = jobs.length;
+  for (const [k, target] of jobs){
+    const i = k + 1;
     const page = await doc.getPage(i);
     const scale = PDF_RENDER_DPI / PT;
     const vp = page.getViewport({ scale });
@@ -2186,9 +2663,15 @@ async function ingestPdf(file, startPage){
     // viewport, which pdf.js takes from the CropBox. The TrimBox is a different
     // fact about the file and is kept for the built-to-spec check; using it
     // here would place every page 4-5% small.
-    uploads.set(startPage + i - 1, {
+    uploads.set(target, {
       el:c, w:c.width, h:c.height, text,
-      inW:c.width/PDF_RENDER_DPI, inH:c.height/PDF_RENDER_DPI,
+      // The viewport's own size, not the canvas's rounded-up pixel count: at
+      // 150 DPI a 5.75" page is 862.5 px, and sizing from 863 would make the
+      // 300 DPI print render land 1 px wide — a 0.06% resample across every
+      // pixel of the page, which is enough to grey a QR code's edges.
+      inW:vp.width/PDF_RENDER_DPI, inH:vp.height/PDF_RENDER_DPI,
+      pdfSrc:{ bytes:srcBytes, pageIndex:i - 1, rotate:page.rotate || 0, numPages:doc.numPages,
+               ocOff, name:file.name },
       origin,
       label:file.name + (doc.numPages > 1 ? ' · p' + i : ''),
       stamp:Date.now() + i,
@@ -2197,7 +2680,7 @@ async function ingestPdf(file, startPage){
   }
   cache.clear();
   renderAll();
-  if (doc.numPages > room){
+  if (!plan && doc.numPages > room){
     alert(file.name + ' has ' + doc.numPages + ' pages but only ' + room +
           ' fit from page ' + startPage + '. The remaining ' + (doc.numPages - room) + ' were not placed.');
   }
@@ -2235,17 +2718,193 @@ async function loadArtSequence(startPage, fileList){
   const placing = files.slice(0, room);
   for (let i = 0; i < placing.length; i++) await loadArt(startPage + i, placing[i]);
 }
+
+/* ── when the file and the order disagree about page count ─────
+   A port of the calculator's own reconciliation (the displayPages memo in
+   calc-preview-test.html), because the customer has already been told there
+   what will happen and chosen where the blanks go. Covers stay covers: the
+   file's first page is the front and its LAST page is the back, whatever the
+   count. Filling forward from page 1 instead — what this surface did until
+   2026-09-28 — put a 10-page file's back cover on page 10 of a 12-page book
+   and left the real back blank, and dropped the back cover of a file that ran
+   long. Short: blanks go at the end of the interior, or (placement 'covers')
+   on the inside covers first and then backwards from the end. Long: the
+   interior pages that do not fit are left out, from the end.
+
+   Returns map[bookPage - 1] = index into the file's pages, or null for blank. */
+function reconcilePlan(raw, target, placement){
+  const map = new Array(target).fill(null);
+  if (raw <= 0 || target <= 0) return { map, info:null };
+  const where = placement === 'covers' ? 'covers' : 'end';
+  if (raw === 1 || target === 1){
+    map[0] = 0;
+    const blanks = []; for (let n = 2; n <= target; n++) blanks.push(n);
+    return { map, info: raw === target ? null
+      : raw < target ? { type:'padded', raw, target, count:target - raw, placement:where, blanks, dropped:[] }
+      :                { type:'trimmed', raw, target, count:raw - target, blanks:[], dropped:range(2, raw) } };
+  }
+  const need = target - 2, have = raw - 2;
+  const interior = new Array(need).fill(null);          // file indices; null = blank
+  let info = null;
+  if (have === need){
+    for (let i = 0; i < need; i++) interior[i] = i + 1;
+  } else if (have < need){
+    const n = need - have;
+    const blank = new Array(need).fill(false);
+    if (where === 'covers'){
+      // Inside front cover, then inside back, then backwards from the end —
+      // a blank there reads as intentional; one mid-signature reads as a mistake.
+      let left = n;
+      for (const idx of [0, need - 1]) if (left > 0 && idx >= 0 && !blank[idx]){ blank[idx] = true; left--; }
+      for (let i = need - 1; i >= 0 && left > 0; i--) if (!blank[i]){ blank[i] = true; left--; }
+    } else {
+      for (let i = have; i < need; i++) blank[i] = true;
+    }
+    let k = 1;
+    for (let i = 0; i < need; i++) if (!blank[i]) interior[i] = k++;
+    info = { type:'padded', raw, target, count:n, placement:where, dropped:[] };
+  } else {
+    for (let i = 0; i < need; i++) interior[i] = i + 1;
+    // file pages (1-based) that do not make it into the book
+    info = { type:'trimmed', raw, target, count:have - need, blanks:[], dropped:range(need + 2, raw - 1) };
+  }
+  map[0] = 0;
+  for (let i = 0; i < need; i++) map[i + 1] = interior[i];
+  map[target - 1] = raw - 1;
+  if (info && info.type === 'padded') info.blanks = map.map((v, i) => v === null ? i + 1 : 0).filter(Boolean);
+  return { map, info };
+}
+function range(a, b){ const out = []; for (let i = a; i <= b; i++) out.push(i); return out; }
+// [5,6,7,8,11] -> "5–8, 11"
+function fmtRun(list){
+  const out = [];
+  for (let i = 0; i < list.length; i++){
+    let j = i;
+    while (j + 1 < list.length && list[j + 1] === list[j] + 1) j++;
+    out.push(j > i ? list[i] + '–' + list[j] : String(list[i]));
+    i = j;
+  }
+  return out.join(', ');
+}
+
+/* The host's whole-file artwork. One PDF or a set of images (one per page, in
+   name order) is a BOOK and is reconciled against the order like the
+   calculator does; anything else — several PDFs, a mix — is not a shape the
+   calculator accepts either, so it simply fills forward. A drop on a tile is
+   not this: that is loadArtSequence, filling from where it landed. */
+async function loadBook(fileList){
+  const isPdf = f => /pdf$/i.test(f.type || '') || /\.pdf$/i.test(f.name || '');
+  // The calculator's own order (extractImagePages): numeric, and nothing else,
+  // so two names that differ only in case sort the same way on both surfaces.
+  const files = [...(fileList || [])].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { numeric:true }));
+  if (!files.length) return;
+  const target = MODEL.pages.length;
+  if (files.length === 1 && isPdf(files[0])){
+    try {
+      await ingestPdf(files[0], 1, numPages => {
+        const p = reconcilePlan(numPages, target, MODEL.blankPlacement);
+        MODEL.reconcile = p.info;
+        invalidateFlags();
+        return p.map.map((k, i) => k === null ? null : [k, i + 1]).filter(Boolean);
+      });
+    } catch (err){
+      alert(unreadableMsg(files[0]) + '\n\n(' + (err && err.message ? err.message : err) + ')');
+    }
+    stampReconcile();
+    return;
+  }
+  if (files.some(isPdf)) return loadArtSequence(1, files);
+  const p = reconcilePlan(files.length, target, MODEL.blankPlacement);
+  MODEL.reconcile = p.info;
+  invalidateFlags();
+  for (let i = 0; i < p.map.length; i++) if (p.map[i] !== null) await loadArt(i + 1, files[p.map[i]]);
+  stampReconcile();
+}
+
+/* Art turned the other way from the book. The calculator (processFiles) turns
+   EVERY page 90° clockwise when the file's first page and the book disagree on
+   orientation, each by more than half an inch — so a landscape file for a
+   portrait booklet opens sideways-correct instead of cropped to a strip. This
+   surface opened those unrotated: a different proof from the one the customer
+   had just been shown (found in review, 2026-09-28). Same rule, same 90°, only
+   for whole-file art (the calculator seeds it on upload, and page slots keep
+   what the upload set). One deliberate difference: the page is measured as it
+   renders, so a page carrying /Rotate is judged by how it looks; the calculator
+   reads the unrotated view box and would turn such a page a second time. */
+function seedOrientation(){
+  const u = uploads.get(1);
+  if (!u || !(u.inW > 0) || !(u.inH > 0)) return false;
+  const w = MODEL.trim.w, h = MODEL.trim.h;
+  const mismatch = Math.abs(u.inW - u.inH) > 0.5 && Math.abs(w - h) > 0.5 && (u.inH > u.inW) !== (h > w);
+  if (!mismatch) return false;
+  MODEL.pages.forEach(p => { state.perPage[p.n] = { behavior:'rotate', anchor:'Center', scale:100, rot:'90°' }; });
+  cache.clear();
+  renderAll();
+  return true;
+}
+
+/* Which pages the reconciled file landed on, by the upload stamp each got, so
+   reconcileNow() can tell when the customer has since replaced it. */
+function stampReconcile(){
+  const rc = MODEL.reconcile;
+  if (!rc) return;
+  rc.stamps = {};
+  MODEL.pages.forEach(p => { const u = uploads.get(p.n); if (u) rc.stamps[p.n] = u.stamp; });
+}
+/* The reconciliation as it stands NOW. It describes the host's file as it was
+   first placed; inside the proofer the customer can then give an added blank
+   its own art, or drop a whole new file over the book. A warning that pages
+   are blank after they were filled, or about a file no longer on any page,
+   would put a claim in front of the acknowledgment gate that is not true.
+   Returns null when nothing from that file is left in the book; otherwise the
+   record plus `blanksNow`, the added blanks still empty. */
+function reconcileNow(){
+  const rc = MODEL.reconcile;
+  if (!rc) return null;
+  if (rc.stamps){
+    const live = Object.keys(rc.stamps).some(n => (uploads.get(Number(n)) || {}).stamp === rc.stamps[n]);
+    if (!live) return null;
+  }
+  return { ...rc, blanksNow: rc.type === 'padded' ? rc.blanks.filter(n => !uploads.has(n)) : [] };
+}
+/* The sentence for a page left blank by reconciliation. A one- or two-page file
+   has no interior to arrange, so where the customer asked the blanks to go does
+   not apply — say what actually happens instead, as the calculator does. */
+function addedText(rc){
+  const pages = rc.raw + ' page' + (rc.raw === 1 ? '' : 's');
+  const what = rc.raw === 1 ? 'only the front cover has art and every other page prints blank'
+             : rc.raw === 2 ? 'your two pages are the covers and every page between them prints blank'
+             : 'blank pages were added — at ' + (rc.placement === 'covers' ? 'the inside covers first'
+                 : 'the end of the book, before the back cover') + ', as chosen when you ordered';
+  return 'Heads up: this page prints blank. Your file has ' + pages + ' and the booklet has ' + rc.target +
+         ', so ' + what + '. Upload art for it here if you would rather it was not blank.';
+}
+/* Which pages of the book are the file's covers, in words, for the page-count
+   check and the manifest. */
+function coversText(rc){
+  return rc.raw === 1 ? 'Your one page is the front cover.' : 'Your first and last pages stay the front and back covers.';
+}
+/* A file that cannot be shown is refused BY NAME, in the calculators' words
+   (ppsUnreadableImageMsg, 2026-09-30): a blank page with no explanation is how
+   one side of order 87285 went to production missing. */
+function unreadableMsg(file, n){
+  return 'We couldn\'t open "' + ((file && file.name) || 'that file') + '"' +
+         (n ? ' for page ' + n : '') + ', so it was NOT added.\n\n' +
+         'Please export it again as a PDF, JPG or PNG. If it keeps failing, place your order and email the file to us.';
+}
 async function loadArt(n, file){
   if (/pdf$/i.test(file.type) || /\.pdf$/i.test(file.name)){
     try { await ingestPdf(file, n); }
     catch (err){
-      alert('That PDF could not be read: ' + (err && err.message ? err.message : err) +
-            '\n\nNothing has been attached to page ' + n + '.');
+      alert(unreadableMsg(file, n) + '\n\n(' + (err && err.message ? err.message : err) + ')');
     }
     return;
   }
-  if (!/^image\//.test(file.type)){
-    alert('That is not an image this prototype can show.');
+  // By type OR by name, as the calculators accept them: phones hand over HEIC
+  // and some JPEGs with no type at all. The decoder below is the real test.
+  if (!/^image\//.test(file.type || '') && !/\.(png|jpe?g|gif|webp|bmp|tiff?|heic|heif)$/i.test(file.name || '')){
+    alert(unreadableMsg(file, n));
     return;
   }
   const origin = await originOf(file);
@@ -2262,7 +2921,7 @@ async function loadArt(n, file){
       renderAll();
       resolve();
     };
-    img.onerror = () => { URL.revokeObjectURL(url); alert('That image could not be read.'); resolve(); };
+    img.onerror = () => { URL.revokeObjectURL(url); alert(unreadableMsg(file, n)); resolve(); };
     img.src = url;
   });
 }
@@ -2271,8 +2930,9 @@ async function loadArt(n, file){
    The checks a trade shop runs before it puts a job on a press, each in one of
    five states. "unknown" is a first-class result and not a quiet pass: most of
    these can only be answered by a file that carries its own structure, and
-   saying so is the difference between a preflight and a reassurance. */
-const STATE_LABEL = { pass:'OK', warn:'Check', fail:'Problem', unknown:'Not checked', na:'—' };
+   saying so is the difference between a preflight and a reassurance. The rail
+   lists them in two groups, Not passed and Passed (renderRail); an "unknown"
+   sits in Not passed with a hollow dot, and its text says why. */
 
 function fileFacts(){
   const all = [...uploads.values()];
@@ -2283,6 +2943,10 @@ function fileFacts(){
     notEmbedded: [...new Set(pdfs.flatMap(u => u.pdf.notEmbedded))],
     spots:       [...new Set(pdfs.flatMap(u => u.pdf.spots || []))],
     layers:      pdfs.some(u => u.pdf.hasOptionalContent),
+    // Layers switched OFF, by name (from pdf.js at ingest). null on a page means
+    // the file has layers pdf.js could not read, which is not the same as none.
+    hiddenLayers: [...new Set(pdfs.flatMap(u => (u.pdfSrc && u.pdfSrc.ocOff) || []))],
+    layersUnread: pdfs.some(u => u.pdf.hasOptionalContent && u.pdfSrc && u.pdfSrc.ocOff === null),
     interactive: pdfs.some(u => u.pdf.hasAcroForm || u.pdf.hasAnnots),
   };
 }
@@ -2290,7 +2954,17 @@ const NO_STRUCTURE = 'Nothing attached carries its own structure — a flat imag
 
 const FILE_CHECKS = [
   { id:'pages', label:'Page count for this binding', run(){
-      const c = MODEL.pages.length;
+      const c = MODEL.pages.length, rc = reconcileNow();
+      const had = rc ? 'Your file has ' + rc.raw + ' page' + (rc.raw === 1 ? '' : 's') + ' and the booklet has ' + c : '';
+      // The calculator warns about both of these; so does this, because the
+      // acknowledgment should cover the customer having seen them.
+      if (rc && rc.type === 'padded' && rc.blanksNow.length) return { state:'warn', text:had + '. ' +
+        rc.blanksNow.length + ' page' + (rc.blanksNow.length === 1 ? ' prints' : 's print') + ' blank to make up the difference (page' +
+        (rc.blanksNow.length === 1 ? ' ' : 's ') + rc.blanksNow.join(', ') + '). ' + coversText(rc) };
+      if (rc && rc.type === 'padded') return { state:'pass', text:had + '. The pages added to make up the difference have all been given art here.' };
+      if (rc && rc.type === 'trimmed') return { state:'warn', text:had + ', so ' + rc.count + ' will not print: page' +
+        (rc.dropped.length === 1 ? ' ' : 's ') + fmtRun(rc.dropped) + ' of your file. Your last page is still the back cover. ' +
+        'Order more pages, or send a file that matches, to include them.' };
       return c % 4 === 0
         ? { state:'pass', text:c + ' pages. Saddle stitch is folded sheets, so the count has to be a multiple of four, and this is.' }
         : { state:'fail', text:c + ' pages. Saddle stitch needs a multiple of four; blank pages will be inserted to make up the difference.' };
@@ -2351,8 +3025,20 @@ const FILE_CHECKS = [
     }},
   { id:'layers', label:'Hidden layers', run(f){
       if (!f.pdfs.length) return { state:'unknown', text:NO_STRUCTURE };
+      /* Only a layer switched OFF is a finding — the calculator's rule
+         (ppsAnalyzePdfRisks). Layers that are all on are an ordinary export
+         from InDesign or Illustrator; flagging every one of them fed the
+         acknowledgment gate with noise. A hidden one matters because this
+         proof leaves it out, and so does our print file, but a downstream
+         engine that ignores the file's layer settings would print it. */
+      if (f.hiddenLayers.length) return { state:'warn', text:'Hidden layer' +
+        (f.hiddenLayers.length === 1 ? '' : 's') + ' in the file: ' + f.hiddenLayers.join(', ') +
+        '. ' + (f.hiddenLayers.length === 1 ? 'It is' : 'They are') + ' switched off, so ' +
+        (f.hiddenLayers.length === 1 ? 'it is' : 'they are') + ' not in this proof and will not print. If ' +
+        (f.hiddenLayers.length === 1 ? 'it holds' : 'any holds') + ' artwork you want, turn it on and export again.' };
+      if (f.layersUnread) return { state:'warn', text:'This file has layers and their settings could not be read, so this proof cannot say whether any are hidden. Check it shows everything you expect.' };
       return f.layers
-        ? { state:'warn', text:'This file has optional-content layers. What prints is whatever was visible when it was saved, which is not always what the designer last looked at. Check the proof against what you expect to see.' }
+        ? { state:'pass', text:'The file has layers, and every one is visible — what you see is what prints.' }
         : { state:'pass', text:'No optional-content layers.' };
     }},
   { id:'interactive', label:'Interactive content', run(f){
@@ -2425,7 +3111,7 @@ async function pkgProgress(text, done, total){
 
 /* Guides drawn on the preview only. The print file carries none — they are a
    proofing aid, and baking them in would print them. */
-function drawGuides(ctx, W, H){
+function drawGuides(ctx, W, H, n){
   const b = MODEL.bleed / BLEED_W * W, bT = MODEL.bleed / BLEED_H * H;
   const sX = (MODEL.bleed + MODEL.safety) / BLEED_W * W;
   const sY = (MODEL.bleed + MODEL.safety) / BLEED_H * H;
@@ -2438,6 +3124,39 @@ function drawGuides(ctx, W, H){
   ctx.setLineDash([W/90, W/90]);
   ctx.strokeStyle = 'rgba(40,160,60,.9)';                  // safety
   ctx.strokeRect(sX, sY, W - sX*2, H - sY*2);
+  // The stapled edge and where the stitches land — the built-in modal's
+  // previews have always carried these, and they are what prepress checks a
+  // cover against when something sits close to the fold.
+  if (n != null) drawSpine(ctx, W / BLEED_W, H / BLEED_H, 0, 0, n, Math.max(3, W / 300));
+  ctx.restore();
+}
+
+/* The bound edge of page n on the bleed sheet, in inches. Odd pages (the cover
+   and every recto) are stapled on the left, even pages on the right — the same
+   rule the proof surface and the modal's drawGuides use. The bar runs inside
+   the trim line, stopping 2% short of each end; the staples sit at the middle,
+   or at a third and two thirds when the job has two. */
+function spineGuide(n){
+  const left = n % 2 === 1;
+  const y0 = MODEL.bleed + BLEED_H * 0.02;
+  const len = BLEED_H - MODEL.bleed * 2 - BLEED_H * 0.04;
+  const fr = MODEL.staples === 2 ? [0.33, 0.67] : [0.5];
+  return { left, x: left ? MODEL.bleed : BLEED_W - MODEL.bleed, y0, y1: y0 + len,
+           staples: fr.map(f => y0 + len * f) };
+}
+/* Draws spineGuide(n) through a scale (px per inch) and an offset, so the
+   preview JPEG and the magnifier — which sees a window of the page — share it. */
+function drawSpine(ctx, kx, ky, ox, oy, n, barPx){
+  const g = spineGuide(n);
+  const X = v => v * kx - ox, Y = v => v * ky - oy;
+  const x = g.left ? X(g.x) : X(g.x) - barPx;
+  ctx.save();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#3b82f6';
+  ctx.fillRect(x, Y(g.y0), barPx, Y(g.y1) - Y(g.y0));
+  const tickW = Math.max(barPx * 2.6, 0.09 * kx), tickH = Math.max(barPx * 1.3, 0.035 * ky);
+  ctx.fillStyle = '#1e40af';
+  g.staples.forEach(sy => ctx.fillRect(x + barPx / 2 - tickW / 2, Y(sy) - tickH / 2, tickW, tickH));
   ctx.restore();
 }
 
@@ -2445,10 +3164,185 @@ function canvasToBlob(canvas, type, quality){
   return new Promise(res => canvas.toBlob(res, type, quality));
 }
 
-/* One page of the print file, at press resolution. */
-function renderPrintPage(n){
+/* ── One page of the print file, at press resolution ─────────────────────────
+   Until 2026-09-28 this was composePage(n, 300 DPI) — the same function as the
+   screen, drawing the same 150 DPI raster the screen uses, enlarged 2x into the
+   print canvas. The file said 300 DPI and carried 150: a QR code at order
+   87171's module size came out 23% mid-grey on every page.
+
+   Now the geometry still comes from placeArt(), exactly as the screen's does —
+   where the art lands and how big cannot differ between proof and print — but
+   the PIXELS come from the source:
+     - a PDF page is rendered again from its own bytes, already rotated, at
+       precisely the size it occupies on the sheet, and dropped on whole pixels.
+       At 100% crop that is a 1:1 copy with no resampling at all.
+     - a bitmap is rotated on a canvas (no JPEG round trip) and placed on whole
+       pixels at its placed size.
+     - an unsupplied page is the same white / placeholder the screen shows.
+   A PDF page that cannot be re-rendered REFUSES the approval, naming the page,
+   rather than quietly shipping the screen raster: a soft print file that looks
+   approved is the failure this replaces. */
+
+// Canvas ceilings: past roughly these, browsers hand back a BLANK canvas rather
+// than an error (mobile Safari is the tightest), so the render degrades its
+// scale instead of trusting the allocation — and says so in the manifest.
+const PRINT_MAX_SIDE = 16000;
+const PRINT_MAX_AREA = 60e6;
+
+const printDocs = new Map();                       // bytes -> pdf.js document, per package
+async function printDocFor(bytes){
+  let p = printDocs.get(bytes);
+  if (!p){ p = window.pdfjsLib.getDocument({ data:bytes.slice() }).promise; printDocs.set(bytes, p); }
+  return p;
+}
+/* Renders in flight from printDocs right now. Approve, the rail's "Build proof
+   package" and the screen's second pass all render from these documents, and
+   nothing stops them overlapping; a build that finishes must not destroy a
+   document another is still rendering from, or that one fails "could not be
+   rendered" — an approval lost to a button press (review, 2026-09-28). The map
+   is emptied BEFORE anything is destroyed, so a render that starts meanwhile
+   opens a fresh document rather than one about to go. */
+let printDocUsers = 0;
+async function releasePrintDocs(){
+  if (printDocUsers > 0) return;               // someone is still rendering
+  const docs = [...printDocs.values()];
+  printDocs.clear();
+  for (const p of docs){ try { (await p).destroy(); } catch {} }
+}
+
+/* Exact quarter-turn of a pixel grid. translate-to-centre + rotate lands every
+   odd-sized image on half pixels; these offsets keep pixel centres on pixel
+   centres, so a rotated page is a permutation, not a resample. */
+function rotateCanvasExact(img, steps, w, h){
+  const s = ((steps % 4) + 4) % 4;
+  const c = document.createElement('canvas');
+  c.width = s % 2 ? h : w; c.height = s % 2 ? w : h;
+  const x = c.getContext('2d');
+  if (s === 1){ x.translate(h, 0); x.rotate(Math.PI / 2); }
+  if (s === 2){ x.translate(w, h); x.rotate(Math.PI); }
+  if (s === 3){ x.translate(0, w); x.rotate(-Math.PI / 2); }
+  x.drawImage(img, 0, 0, w, h);
+  return c;
+}
+
+/* ── The customer's own file, untouched ──────────────────────────────────────
+   When the proof the customer approved IS their file — every page exactly as
+   supplied, nothing moved, nothing scaled, nothing added — the print file is
+   that file, byte for byte. No render, no JPEG, vectors and fonts intact.
+
+   Stricter than the modal on purpose. The modal ships its raw file when the art
+   is within 0.25" of the bleed sheet, which means its proof (cropped to the
+   sheet) and its print file (the file as supplied) can differ in framing by up
+   to a quarter inch. Here the proof must be an exact identity of the file, or
+   the file is not shipped as-is: anything else gets the 300 DPI render, which
+   matches the proof by construction (tools-proof-print-fidelity-test.mjs).
+
+   Returns { bytes, name } when it applies, else { why } — the first reason it
+   does not, which the manifest records so prepress can see why a PDF that
+   looked press-ready was rendered. */
+const UNTOUCHED_EPS = 0.01;                     // inches; PDF export rounding, no more
+function untouchedOriginal(pages){
+  const first = uploads.get(pages[0]);
+  if (!first || !first.pdfSrc) return { why:'page 1 is not from a PDF' };
+  const s0 = first.pdfSrc;
+  if (s0.numPages !== pages.length)
+    return { why:'the PDF has ' + s0.numPages + ' page' + (s0.numPages === 1 ? '' : 's') + ', the book ' + pages.length };
+  if (s0.ocOff === null) return { why:'its layers could not be read' };
+  if (s0.ocOff.length) return { why:'it has hidden layers (' + s0.ocOff.join(', ') + ')' };
+  const pdfInfo = first.pdf || {};
+  if (pdfInfo.hasAcroForm) return { why:'it has form fields, which would not survive downstream' };
+  if (pdfInfo.hasAnnots)   return { why:'it has annotations, which would not survive downstream' };
+  const near = (a, b) => Math.abs(a - b) <= UNTOUCHED_EPS;
+  for (const n of pages){
+    const u = uploads.get(n);
+    if (!u || !u.pdfSrc) return { why:'page ' + n + (u ? ' is a bitmap' : ' has no artwork') };
+    if (u.pdfSrc.bytes !== s0.bytes) return { why:'page ' + n + ' was supplied separately' };
+    if (u.pdfSrc.pageIndex !== n - 1) return { why:'page ' + n + ' is not the file\'s page ' + n };
+    if (u.pdfSrc.rotate) return { why:'page ' + n + ' carries its own /Rotate' };
+    const t = state.perPage[n] || {};
+    // 'rotate' at 0° places exactly as crop does (placeArt's default branch).
+    const asSupplied = (t.behavior === 'crop' || t.behavior === 'rotate'
+                        || t.behavior === 'scale' && Number(t.scale) === 100)
+                       && (t.rot || '0°') === '0°';
+    if (!asSupplied) return { why:'page ' + n + ' was changed (' + (t.behavior || 'crop')
+                              + (t.behavior === 'scale' ? ' ' + t.scale + '%' : '') + ', ' + (t.rot || '0°') + ')' };
+    if (!near(u.inW, BLEED_W) || !near(u.inH, BLEED_H))
+      return { why:'page ' + n + ' is ' + u.inW.toFixed(3) + '" x ' + u.inH.toFixed(3)
+               + '", not the ' + BLEED_W + '" x ' + BLEED_H + '" bleed sheet' };
+    const pg = pdfInfo.pages && pdfInfo.pages[n - 1];
+    if (pg && pg.media && (!near(pg.media.w, BLEED_W) || !near(pg.media.h, BLEED_H)))
+      return { why:'page ' + n + '\'s MediaBox is not the bleed sheet' };
+  }
+  return { bytes:s0.bytes, name:s0.name };
+}
+
+async function renderPrintPage(n){
   const W = Math.round(BLEED_W * PRINT_DPI), H = Math.round(BLEED_H * PRINT_DPI);
-  return composePage(n, W, H);
+  const src = SRCget(n);
+
+  // No artwork: white on a hosted job, the demo standalone — whatever the
+  // screen shows. Nothing to lose resolution on.
+  if (!uploads.has(n)){
+    const r = composePage(n, W, H, true);        // its own canvas: callers free it
+    return { ...r, source:{ kind:'blank', label:src.label } };
+  }
+
+  const g = placeArt(n, W, H, src);
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, W, H);
+
+  const dx = Math.round(g.dx), dy = Math.round(g.dy);
+  const dw = Math.max(1, Math.round(g.drawW)), dh = Math.max(1, Math.round(g.drawH));
+  let source;
+
+  if (src.pdfSrc){
+    let art, dpi, capped = false;
+    printDocUsers++;
+    try {
+      const doc = await printDocFor(src.pdfSrc.bytes);
+      const pg  = await doc.getPage(src.pdfSrc.pageIndex + 1);
+      const rotation = (((pg.rotate || 0) + g.steps * 90) % 360 + 360) % 360;
+      const base = pg.getViewport({ scale:1, rotation });            // rotated size, in points
+      const sx = dw / base.width, sy = dh / base.height;
+      // Uniform modes land with sx == sy; stretch alone is non-uniform, and is
+      // rendered at the larger of the two then drawn to the placed box.
+      let scale = g.behavior === 'stretch' ? Math.max(sx, sy) : sx;
+      const shrink = Math.min(1,
+        PRINT_MAX_SIDE / Math.max(base.width * scale, base.height * scale),
+        Math.sqrt(PRINT_MAX_AREA / Math.max(1, base.width * scale * base.height * scale)));
+      if (shrink < 1){ scale *= shrink; capped = true; }
+      const vp = pg.getViewport({ scale, rotation });
+      art = document.createElement('canvas');
+      art.width = Math.max(1, Math.round(vp.width)); art.height = Math.max(1, Math.round(vp.height));
+      const ax = art.getContext('2d');
+      ax.fillStyle = '#fff'; ax.fillRect(0, 0, art.width, art.height);
+      await pg.render({ canvasContext:ax, viewport:vp }).promise;
+      // Pixels per inch of the ART as it lands — the honest print resolution.
+      dpi = Math.round((art.width / dw) * g.pxPerIn);
+    } catch (err){
+      throw new Error('page ' + n + ' could not be rendered at print resolution from "' + src.label +
+                      '" (' + (err && err.message ? err.message : err) + '). Nothing was approved.');
+    } finally { printDocUsers--; }
+    // 1:1 when the render already matches the placed box — no resample at all.
+    if (art.width === dw && art.height === dh) ctx.drawImage(art, dx, dy);
+    else ctx.drawImage(art, dx, dy, dw, dh);
+    source = { kind:'pdf', label:src.label, page:src.pdfSrc.pageIndex + 1, dpi, capped,
+               oneToOne: art.width === dw && art.height === dh };
+    art.width = 0; art.height = 0;
+  } else {
+    const iw = src.el.naturalWidth || src.w, ih = src.el.naturalHeight || src.h;
+    const rot = g.steps ? rotateCanvasExact(src.el, g.steps, iw, ih) : src.el;
+    ctx.drawImage(rot, dx, dy, dw, dh);
+    source = { kind:'bitmap', label:src.label, dpi:g.effDpi };
+    if (rot !== src.el){ rot.width = 0; rot.height = 0; }
+  }
+
+  return { canvas:c, place:{ x:dx, y:dy, w:dw, h:dh }, effDpi:g.effDpi, W, H,
+           steps:g.steps, quarter:g.quarter, source };
 }
 
 async function buildPackage(){
@@ -2468,29 +3362,58 @@ async function buildPackage(){
   // ── 1. the print file ──
   const pdf = await PDFDocument.create();
   const perPage = [];
+  const original = untouchedOriginal(pages);
   let i = 0;
-  for (const n of pages){
-    await tick('Rendering page ' + (++i) + ' of ' + pages.length + ' at ' + PRINT_DPI + ' DPI');
-    const r = renderPrintPage(n);
-    // JPEG rather than PNG: a flattened photographic page as PNG runs to tens of
-    // megabytes a page, and at 300 DPI q0.94 the difference is not printable.
-    const blob  = await canvasToBlob(r.canvas, 'image/jpeg', 0.94);
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    const img   = await pdf.embedJpg(bytes);
-    // PDF units are points; the page is the bleed size, so trimming happens in
-    // the bindery exactly where the trim guide sits on screen.
-    const pg = pdf.addPage([BLEED_W * 72, BLEED_H * 72]);
-    pg.drawImage(img, { x:0, y:0, width:BLEED_W * 72, height:BLEED_H * 72 });
-    const mk = checkMargins(n, r);
-    perPage.push({ n, effDpi:r.effDpi, t:Object.assign({}, state.perPage[n]),
-                   src:SRCget(n).label || 'placeholder', margins:mk });
+  if (original.bytes){
+    // The approved proof is an exact identity of the customer's file: ship it.
+    // Still walk every page, so the manifest records margins and the progress
+    // bar stays determinate.
+    const W = Math.round(BLEED_W * PRINT_DPI), H = Math.round(BLEED_H * PRINT_DPI);
+    for (const n of pages){
+      await tick('Page ' + (++i) + ' of ' + pages.length + ' — your file, exactly as supplied');
+      const g = placeArt(n, W, H, SRCget(n));
+      const r = { place:{ x:g.dx, y:g.dy, w:g.drawW, h:g.drawH }, W, H, steps:g.steps, quarter:g.quarter };
+      perPage.push({ n, effDpi:g.effDpi, t:Object.assign({}, state.perPage[n]),
+                     src:SRCget(n).label || 'placeholder', margins:checkMargins(n, r),
+                     print:{ kind:'original', label:original.name, page:n } });
+    }
+  }
+  try {
+    for (const n of (original.bytes ? [] : pages)){
+      await tick('Rendering page ' + (++i) + ' of ' + pages.length + ' at ' + PRINT_DPI + ' DPI');
+      const r = await renderPrintPage(n);
+      // JPEG rather than PNG: a flattened photographic page as PNG runs to tens of
+      // megabytes a page, and at 300 DPI q0.94 the difference is not printable.
+      const blob  = await canvasToBlob(r.canvas, 'image/jpeg', 0.94);
+      r.canvas.width = 0; r.canvas.height = 0;      // ~18 MB each; every kind owns its canvas
+      // toBlob hands back null, not an error, when the canvas is empty or the
+      // browser is out of canvas memory. Name it, rather than fail on .arrayBuffer.
+      if (!blob) throw new Error('page ' + n + ' could not be encoded at print resolution ' +
+                                 '(this browser ran out of canvas memory). Nothing was approved.');
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const img   = await pdf.embedJpg(bytes);
+      // PDF units are points; the page is the bleed size, so trimming happens in
+      // the bindery exactly where the trim guide sits on screen.
+      const pg = pdf.addPage([BLEED_W * 72, BLEED_H * 72]);
+      pg.drawImage(img, { x:0, y:0, width:BLEED_W * 72, height:BLEED_H * 72 });
+      const mk = checkMargins(n, r);
+      perPage.push({ n, effDpi:r.effDpi, t:Object.assign({}, state.perPage[n]),
+                     src:SRCget(n).label || 'placeholder', margins:mk, print:r.source });
+    }
+  } finally {
+    await releasePrintDocs();                       // on success and on failure alike
   }
   await tick('Assembling the print file…');
-  const pdfBytes = await pdf.save();
+  // Shipped as-is, PRINT_READY.pdf IS the customer's file, so the approval hash
+  // binds to exactly the bytes they uploaded. It stays named PRINT_READY.pdf so
+  // the host, Drive and the imposition tool treat it like any other print file.
+  const pdfBytes = original.bytes ? original.bytes : await pdf.save();
   const printBlob = new Blob([pdfBytes], { type:'application/pdf' });
   const printHash = await sha256Hex(new Uint8Array(pdfBytes));
   files.push({ name:'PRINT_READY.pdf', blob:printBlob,
-               note:'flattened at ' + PRINT_DPI + ' DPI · ' + pages.length + ' pages · no guides' });
+               note: original.bytes
+                 ? 'your file exactly as supplied · ' + pages.length + ' pages · untouched'
+                 : 'rendered from source at ' + PRINT_DPI + ' DPI · ' + pages.length + ' pages · no guides' });
 
   // ── 2. preview JPEGs, guides drawn on ──
   const PW = 900, PH = Math.round(PW * BLEED_H / BLEED_W);
@@ -2503,10 +3426,10 @@ async function buildPackage(){
     const ctx = c.getContext('2d');
     ctx.drawImage(r.canvas, 0, 0);
     if (pageIsGrey(n)) bakeGreyscale(ctx, PW, PH);
-    drawGuides(ctx, PW, PH);
+    drawGuides(ctx, PW, PH, n);
     files.push({ name:'PREVIEW_p' + String(n).padStart(2,'0') + '.jpg',
                  blob:await canvasToBlob(c, 'image/jpeg', 0.88),
-                 note:(pageIsGrey(n) ? 'greyscale, as approved on screen · ' : '') + 'with bleed / trim / safety guides' });
+                 note:(pageIsGrey(n) ? 'greyscale, as approved on screen · ' : '') + 'with bleed / trim / safety / stapled-edge guides' });
   }
 
   // ── 3. the manifest ──
@@ -2531,16 +3454,66 @@ async function buildPackage(){
   L.push('PRINT FILE');
   L.push('  PRINT_READY.pdf');
   L.push('  SHA-256      ' + printHash);
-  L.push('  ' + fmtBytes(pdfBytes.length) + ' at ' + PRINT_DPI + ' DPI');
+  if (original.bytes){
+    L.push('  ' + fmtBytes(pdfBytes.length) + ' — the customer\'s file "' + original.name + '", byte for byte');
+    L.push('  UNTOUCHED: every page was approved exactly as supplied, so nothing was');
+    L.push('  rendered, rasterised or re-encoded. Vectors and fonts are the originals.');
+  } else {
+    L.push('  ' + fmtBytes(pdfBytes.length) + ' at ' + PRINT_DPI + ' DPI');
+    L.push('  not shipped untouched: ' + original.why);
+  }
   L.push('  This hash binds the approval to these exact bytes.');
+  L.push('');
+  // What each page of the print file was actually made from. Before 2026-09-28
+  // every page here was the 150 DPI screen raster enlarged, and the only record
+  // of resolution was the constant above — so it has to be checkable per page.
+  L.push('PRINT SOURCE');
+  perPage.forEach(r => {
+    const s = r.print || {};
+    if (s.kind === 'original'){
+      L.push('  page ' + r.n + '  "' + s.label + '" page ' + s.page + ', untouched');
+    } else if (s.kind === 'pdf'){
+      L.push('  page ' + r.n + '  re-rendered from "' + s.label + '" page ' + s.page + ' at ' + s.dpi + ' DPI'
+             + (s.oneToOne ? ', placed 1:1 on whole pixels' : '')
+             + (s.capped ? ' — CAPPED by this browser\'s canvas limit' : ''));
+    } else if (s.kind === 'bitmap'){
+      L.push('  page ' + r.n + '  bitmap "' + s.label + '" at ' + s.dpi + ' DPI as placed (its own pixels; not re-renderable)');
+    } else {
+      L.push('  page ' + r.n + '  ' + (s.label || 'no artwork'));
+    }
+  });
   L.push('');
   // Named explicitly rather than left to be inferred from eight "src=no artwork
   // supplied" lines further down: a blank page in a printed booklet is the kind
   // of thing production must be able to see at a glance was intended.
-  const blanks = pages.filter(n => !uploads.has(n));
-  if (blanks.length){
+  // Split: a blank added to make up a short file was announced and placed by
+  // the customer's choice; one with nothing supplied is a hole. Production
+  // should be able to tell which is which.
+  const rc = reconcileNow();
+  const added  = rc ? rc.blanksNow : [];
+  const blanks = pages.filter(n => !uploads.has(n) && !added.includes(n));
+  if (rc){
+    L.push('PAGE COUNT');
+    L.push('  the file has ' + rc.raw + ' page' + (rc.raw === 1 ? '' : 's') + '; the booklet has ' + rc.target + '. '
+           + (rc.raw === 1 ? 'Its one page = front cover.' : 'First page = front cover, last page = back cover.'));
+    if (rc.type === 'padded'){
+      L.push('  ' + rc.count + ' blank page' + (rc.count === 1 ? '' : 's') + ' added '
+             + (rc.raw < 3 ? (rc.raw === 1 ? '(every page after the front cover)' : '(every page between the covers)')
+                : 'at ' + (rc.placement === 'covers' ? 'the inside covers first' : 'the end of the interior') + ' (customer\'s choice)')
+             + ': page' + (rc.blanks.length === 1 ? ' ' : 's ') + rc.blanks.join(', ')
+             + (added.length < rc.blanks.length ? ' — since given art in the proofer: '
+                + rc.blanks.filter(n => !added.includes(n)).join(', ') : ''));
+    } else {
+      L.push('  NOT PRINTED: page' + (rc.dropped.length === 1 ? ' ' : 's ') + fmtRun(rc.dropped)
+             + ' of the file (' + rc.count + ' interior page' + (rc.count === 1 ? '' : 's') + ' beyond the order)');
+    }
+    L.push('');
+  }
+  if (added.length || blanks.length){
     L.push('BLANK PAGES');
-    L.push('  page' + (blanks.length === 1 ? ' ' : 's ') + blanks.join(', ')
+    if (added.length) L.push('  page' + (added.length === 1 ? ' ' : 's ') + added.join(', ')
+           + ' — added to make up a short file; these print blank');
+    if (blanks.length) L.push('  page' + (blanks.length === 1 ? ' ' : 's ') + blanks.join(', ')
            + ' — no artwork was supplied; these print blank');
     L.push('');
   }
@@ -2597,8 +3570,10 @@ async function buildPackage(){
   }
   L.push('  terms        proof accepted as final; errors in approved artwork are the customer\'s');
   L.push('');
-  L.push('Every page above was composed by the same function that drew the proof');
-  L.push('on screen. The print file is that composition at ' + PRINT_DPI + ' DPI.');
+  L.push('Every page above was placed by the same function that placed the proof on');
+  L.push('screen (placeArt), so position, size, crop and rotation cannot differ. The');
+  L.push('print file draws that placement at ' + PRINT_DPI + ' DPI from the source named');
+  L.push('under PRINT SOURCE — the customer\'s PDF re-rendered, not the screen image.');
   files.push({ name:'MANIFEST.txt', blob:new Blob([L.join('\n')], { type:'text/plain' }),
                note:'transforms, effective DPI, margins, hashes' });
 
@@ -2620,8 +3595,8 @@ function renderPackage(pkg){
 
 function deliverablesHtml(){
   const origins = deliverables();
+  // Its heading is the toggle above it in the rail, which folds it away.
   return '<div class="deliv" id="deliv">' +
-    '<div class="delivhead">What approving produces</div>' +
     '<div class="delivrow"><strong>The print file.</strong> Every page flattened at 300 DPI exactly as you see it ' +
       'here — the transforms baked in, nothing left to interpret. This is what goes on the press, because it is ' +
       'what you approved.</div>' +
@@ -2642,8 +3617,8 @@ function deliverablesHtml(){
     // becomes the fixed bottom bar.
     '<div class="pkgrow">' +
       '<button class="pkgbtn" id="pkgBtn">Build proof package</button>' +
-      '<span class="pkgnote" id="pkgNote">Same composition the proof view uses. ' +
-        'Rebuild after any change &mdash; a package is only valid for the state it was built from.</span>' +
+      '<span class="pkgnote" id="pkgNote">' + (state.approveNote != null ? '' : 'Same composition the proof view uses. ' +
+        'Rebuild after any change &mdash; a package is only valid for the state it was built from.') + '</span>' +
     '</div><div class="pkgout" id="pkgOut" hidden></div>' +
     '</div>';
 }
@@ -2763,12 +3738,32 @@ function jobFlags(){
   return _flagCache;
 }
 
+/* A paid proof (staff digital or hardcopy) is approved by prepress, never here.
+   The built-in modal has always shown those customers their art and no Approve,
+   and the add-to-cart gate applies to the free proof only. */
+function reviewOnly(){ return MODEL.proof > 0; }
+
 function renderApproval(){
   const book = state.mode === 'book';
   const agree = document.getElementById('agree');
   const wrap  = document.getElementById('approveWrap');
   const ackBx = document.getElementById('ackBox');
   const ack   = document.getElementById('ackIssues');
+
+  const review = reviewOnly();
+  document.getElementById('approveBtn').hidden = review;
+  document.getElementById('reviewDone').hidden = !review;
+  document.getElementById('liability').hidden = review;
+  agree.closest('.agree').hidden = review;
+  if (review){
+    agree.checked = false; ack.checked = false;
+    ackBx.hidden = true;
+    document.getElementById('approveBtn').disabled = true;
+    document.getElementById('note').classList.remove('agreed');
+    wrap.classList.remove('locked');
+    wrap.title = '';
+    return;
+  }
 
   agree.disabled = book;
   wrap.classList.toggle('locked', book);
@@ -2957,7 +3952,15 @@ window.addEventListener('message', async ev => {
     const errs = bootJob(m.job);
     if (errs.length) return;
     try {
-      if (m.files && m.files.length) await loadArtSequence(1, Array.from(m.files));
+      // A job with per-page uploads is not reconciled, in the calculator either:
+      // its page grid is already the book's length, and the whole file filled
+      // it from page 1. Without them the file IS the book, covers and all.
+      const hasSlots = (m.slots || []).some(s => s && s.file);
+      if (m.files && m.files.length){
+        if (hasSlots) await loadArtSequence(1, Array.from(m.files));
+        else await loadBook(Array.from(m.files));
+        seedOrientation();
+      }
       // Per-page replacements, placed after the sequence so they win where they
       // overlap. A customer who uploaded pages individually used to be handed an
       // empty proof: the host forwarded its whole-file list and nothing else, so
@@ -2987,15 +3990,38 @@ window.addEventListener('message', async ev => {
    placed. */
 let approveFailures = 0;
 
+/* What approving last said — its note, a failure, the escape hatch — is kept in
+   state and drawn by the rail, not written into the panel once. The panel is
+   rebuilt on every rail render, and the escape hatch used to be appended to it
+   and so vanished at the next one; it was also out of sight whenever a page's
+   section was open, and once "What approving produces" folded (2026-10-24) it
+   was out of sight always. A failure now unfolds it (revealApprovalOutcome). */
 function approvalNote(msg){
+  state.approveNote = msg || '';
   const el = document.getElementById('pkgNote');
-  if (el) el.textContent = msg || '';
+  if (el) el.textContent = state.approveNote;
+}
+function renderApprovalOutcome(){
+  const out = document.getElementById('pkgOut');
+  if (!out || !(state.approveError || state.escapeOffered)) return;
+  out.hidden = false;
+  out.replaceChildren();
+  if (state.approveError){
+    const e = document.createElement('div');
+    e.className = 'pkgerr';
+    e.textContent = state.approveError;
+    out.appendChild(e);
+  }
+  if (state.escapeOffered) out.appendChild(escapeBox());
+}
+function revealApprovalOutcome(){
+  state.wholeOpen = true; state.openPage = null; state.delivOpen = true;
+  renderRail();
+  const out = document.getElementById('pkgOut');
+  if (out && out.scrollIntoView) out.scrollIntoView({ block:'nearest' });
 }
 
-function offerEscapeHatch(){
-  const out = document.getElementById('pkgOut');
-  if (!out || document.getElementById('proofEscape')) return;
-  out.hidden = false;
+function escapeBox(){
   const box = document.createElement('div');
   box.id = 'proofEscape';
   box.style.cssText = 'margin-top:10px;padding:12px 14px;border:1px solid var(--yellow-line);'
@@ -3009,18 +4035,24 @@ function offerEscapeHatch(){
   b.className = 'pkgbtn';
   b.id = 'proofEscapeBtn';
   b.textContent = 'Continue and have prepress check my file';
+  b.disabled = !!state.escapeTaken;
   b.onclick = () => {
     post({ type:'pps-proof:escape',
            reason:'approval failed ' + approveFailures + ' times',
            attempts:approveFailures });
+    state.escapeTaken = true;
     approvalNote('Sent to prepress. You can close this and finish your order.');
     b.disabled = true;
   };
   box.append(p, b);
-  out.appendChild(box);
+  return box;
 }
 
+document.getElementById('reviewDone').onclick = () => post({ type:'pps-proof:close' });
 document.getElementById('approveBtn').onclick = async () => {
+  // Hidden on a paid proof, and refused here too: a hidden button can still be
+  // clicked by script, and approval is the one message the host trusts.
+  if (reviewOnly()) return;
   const btn = document.getElementById('approveBtn');
   btn.disabled = true;
   const wasLabel = btn.textContent;
@@ -3044,8 +4076,9 @@ document.getElementById('approveBtn').onclick = async () => {
 
   try {
     const pkg = await buildPackage();
-    renderPackage(pkg);
     approveFailures = 0;
+    state.approveError = null; state.escapeOffered = false;
+    renderPackage(pkg);
     btn.textContent = '✓ APPROVED';
     btn.classList.remove('nudge');
     btn.classList.add('done');
@@ -3062,23 +4095,17 @@ document.getElementById('approveBtn').onclick = async () => {
     btn.disabled = false;
     btn.textContent = wasLabel;
     btn.classList.remove('done');
-    const out = document.getElementById('pkgOut');
-    if (out){
-      out.hidden = false;
-      const e = document.createElement('div');
-      e.className = 'pkgerr';
-      // Where it got to is most of the diagnosis — "at: Rendering page 5 of 8"
-      // turns a support call into a look at page 5.
-      e.textContent = 'We could not prepare your proof: ' + (err && err.message ? err.message : err)
-                    + (lastStep ? '  (stopped at: ' + lastStep + ')' : '');
-      out.replaceChildren(e);
-    }
+    // Where it got to is most of the diagnosis — "at: Rendering page 5 of 8"
+    // turns a support call into a look at page 5.
+    state.approveError = 'We could not prepare your proof: ' + (err && err.message ? err.message : err)
+                       + (lastStep ? '  (stopped at: ' + lastStep + ')' : '');
     approvalNote('');
     post({ type:'pps-proof:approve-failed',
            attempts: approveFailures,
            step: lastStep,
            message: String(err && err.message || err) });
-    if (approveFailures >= 2) offerEscapeHatch();
+    if (approveFailures >= 2) state.escapeOffered = true;
+    revealApprovalOutcome();
   } finally {
     onPkgProgress = null;
     if (prog) prog.hidden = true;
@@ -3108,6 +4135,41 @@ themeBtn.onclick = () => {
 // Attribute only at boot: the first render happens below, once the model
 // exists. Calling renderAll here would run the rail against an empty page map.
 applyTheme(!!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches));
+
+// The thumbnail layout follows the same rule: attribute now, render later.
+setThumbLayout(thumbLayout);
+document.getElementById('thumbsLayout').onchange = e => { setThumbLayout(e.target.value); renderAll(); };
+document.getElementById('stripBottom').addEventListener('wheel', stripWheel, { passive: false });
+
+// The flags' tip. A touch screen has no hover, so a tap on a flag answers it
+// (and does not also open the page beneath it); the next tap anywhere closes
+// it. Capture phase, so that tap never reaches the heading's own handler.
+document.addEventListener('pointerdown', e => { lastPointer = e.pointerType || 'mouse'; }, true);
+document.addEventListener('mouseover', e => {
+  if (lastPointer === 'touch') return;
+  const f = e.target.closest && e.target.closest('[data-flag]');
+  if (f && f !== flagFor) showFlagTip(f);
+});
+document.addEventListener('mouseout', e => {
+  const f = e.target.closest && e.target.closest('[data-flag]');
+  if (f && f === flagFor && !(e.relatedTarget && f.contains(e.relatedTarget))) hideFlagTip();
+});
+document.addEventListener('click', e => {
+  const f = e.target.closest && e.target.closest('[data-flag]');
+  if (f && lastPointer === 'touch'){
+    e.preventDefault(); e.stopPropagation();
+    if (flagFor === f) hideFlagTip(); else showFlagTip(f);
+    return;
+  }
+  if (!f && flagFor) hideFlagTip();
+}, true);
+document.addEventListener('focusin', e => {
+  const t = e.target, f = t && t.querySelector && t.querySelector(':scope > [data-flag]');
+  if (f && t.matches(':focus-visible')) showFlagTip(f);
+});
+document.addEventListener('focusout', () => { if (flagFor) hideFlagTip(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && flagFor) hideFlagTip(); });
+window.addEventListener('scroll', placeFlagTip, true);
 
 /* ── boot ──────────────────────────────────────────────────────
    Two ways in, one code path after.

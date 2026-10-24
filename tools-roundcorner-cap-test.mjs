@@ -49,7 +49,7 @@ const ok = (label, cond, detail) => {
 };
 
 const browser = await chromium.launch({
-  executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+  executablePath: process.env.PPS_CHROME || '/opt/pw-browsers/chromium',
   args: ['--no-sandbox'],
 });
 const page = await browser.newPage({ viewport: { width: 1500, height: 1100 } });
