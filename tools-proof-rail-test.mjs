@@ -244,7 +244,7 @@ console.log('\n── a failed approval is seen, folded box or not ──');
 // ═══ the flags ═══════════════════════════════════════════════════════════
 console.log('\n── the "!" flags explain themselves ──');
 {
-  const { page, ctx } = await open('?thumbs=rail');
+  const { page, ctx } = await open('');
   await flagPages(page);
   await page.evaluate(() => { state.wholeOpen = false; renderAll(); });
   await page.waitForTimeout(200);
@@ -297,23 +297,28 @@ console.log('\n── the "!" flags explain themselves ──');
   await ctx.close();
 }
 {
-  // the strip's flag, and the keyboard, in the default layout
+  // the 3D strip's flag, and the keyboard
   const { page, ctx } = await open('');
   await flagPages(page);
-  const dot = await page.$('#stripBottom .pg .dot[data-page="5"]');
-  ok('a thumbnail\'s flag in the strip is one too', !!dot);
+  await ev(page, () => [...document.querySelectorAll('#modes button')].find(b => b.dataset.mode === 'book').click());
+  await page.waitForTimeout(500);
+  const dot = await page.$('#stripRail .pg .dot[data-page="5"]');
+  ok('a thumbnail\'s flag in the 3D strip is one too', !!dot);
   if (dot){
     await dot.hover(); await page.waitForTimeout(250);
     const t = await tip(page);
-    ok('hovering it shows page 5\'s findings, above the strip', t.on && /^Page 5\b/.test(t.head) && t.items.length > 0
-       && t.top < (await dot.boundingBox()).y, JSON.stringify(t).slice(0, 160));
+    ok('hovering it shows page 5\'s findings, inside the window', t.on && /^Page 5\b/.test(t.head) && t.items.length > 0
+       && t.left >= 0 && t.right <= 1440, JSON.stringify(t).slice(0, 160));
     await page.mouse.move(300, 400); await page.waitForTimeout(200);
   }
+  await ev(page, () => [...document.querySelectorAll('#modes button')].find(b => b.dataset.mode === 'proof').click());
+  await page.waitForTimeout(400);
+  // the heading's own button comes after its thumbnail's upload chip
   const kb = await ev(page, async () => {
     state.wholeOpen = false; state.openPage = null; renderAll();
     await new Promise(r => setTimeout(r, 150));
     const heads = [...document.querySelectorAll('#rail .acc')];
-    heads.find(a => /Page: 2(\D|$)/.test(a.textContent)).querySelector('.acchead').focus();
+    heads.find(a => /Page: 3(\D|$)/.test(a.textContent)).querySelector('.pg.mini .pgup').focus();
     return true;
   });
   await page.keyboard.press('Tab'); await page.waitForTimeout(200);
@@ -325,7 +330,7 @@ console.log('\n── the "!" flags explain themselves ──');
 }
 {
   // a touch screen has no hover
-  const { page, ctx } = await open('?thumbs=rail', { viewport: { width: 834, height: 1112 }, hasTouch: true, isMobile: true });
+  const { page, ctx } = await open('', { viewport: { width: 834, height: 1112 }, hasTouch: true, isMobile: true });
   await flagPages(page);
   await page.evaluate(() => { state.wholeOpen = false; renderAll(); });
   await page.waitForTimeout(200);

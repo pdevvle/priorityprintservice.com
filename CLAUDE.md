@@ -72,7 +72,7 @@ The repository owner does NOT use Claude Code locally and has no intention of in
 | `tools-slot-upload-test.mjs` | Building a booklet a page at a time, on the compiled saddle AND coupon-book builds: three single-page PDFs land on three different slots and accumulate, a multi-page PDF on a slot still replaces the whole book. `PPS_CALC_PAGE` points it at another build — how the pre-fix one was run to confirm it fails there (it does, 5 checks). |
 | `tools-proof-size-check-test.mjs` | The "Built to the ordered size" preflight across six shapes. It warned on every correctly-bled file, because a print file with bleed is trim + 2 × bleed and most tools write no TrimBox — and the check's own no-TrimBox branch could never fire, since pdf-lib answers `getTrimBox()` with the MediaBox when there is none. A check that warns on good files is worse than no check: it feeds the acknowledgment gate, so it teaches people to tick past it. The allowance is only where the page stands in for a missing TrimBox; a declared TrimBox still has to match exactly. |
 | `tools-proof-progress-test.mjs`, `tools-proof-blank-pages-test.mjs` | The two staging findings of 2026-09-13. The first records every value the approve readout ever holds via MutationObserver, so a progress bar that is updated but never *painted* fails exactly as a missing one would; it also pins that a failure names the step it stopped at. The second pins that an unsupplied page on a hosted job is blank, flagged and in the manifest — and that standalone still draws the demo booklet. |
-| `tools-proof-ui-draft-test.mjs`, `-preflight-`, `-mobile-`, `-style-`, `tools-proof-embed-test.mjs`, `tools-proof-integration-test.mjs` | The proofer's original six suites: engine, PDF preflight, touch layout, **design parity**, the host seam, and the calculator round trip. Five more were added 2026-09-13 (slots, progress, blank pages, size check, prepress flag) and six on 2026-09-28 for modal parity (`print-fidelity`, `reconcile`, `paid`, `spine`, `transforms`, `screen-res`) `handoff` on 2026-09-30 for `docs/PROOFER_SINCE_HANDOFF.md`, `thumbs` on 2026-10-23 for the page thumbnails (one sideways row under the stage; the draft rail-heading layout), and `rail` on 2026-10-24 for the condensed Preflight list and the "!" flags' tooltips; `docs/PROOFER_BRIEF.md` §1.2 lists them all with the run recipe. Run every live suite after any proofer change. Every browser suite launches `PPS_CHROME`, else `/opt/pw-browsers/chromium` (the sandbox's stable link; the old hard-coded `chromium-1194` path no longer exists). The style suite reads the palette out of `calc-preview-test.html` rather than copying it, so the two documents cannot drift apart, and it fails any rule whose `var()` does not resolve — which is how a whole panel once rendered unstyled without anyone noticing. |
+| `tools-proof-ui-draft-test.mjs`, `-preflight-`, `-mobile-`, `-style-`, `tools-proof-embed-test.mjs`, `tools-proof-integration-test.mjs` | The proofer's original six suites: engine, PDF preflight, touch layout, **design parity**, the host seam, and the calculator round trip. Five more were added 2026-09-13 (slots, progress, blank pages, size check, prepress flag) and six on 2026-09-28 for modal parity (`print-fidelity`, `reconcile`, `paid`, `spine`, `transforms`, `screen-res`) `handoff` on 2026-09-30 for `docs/PROOFER_SINCE_HANDOFF.md`, `thumbs` on 2026-10-23 for the page thumbnails (in the page headings since 2026-10-25), and `rail` on 2026-10-24 for the condensed Preflight list and the "!" flags' tooltips; `docs/PROOFER_BRIEF.md` §1.2 lists them all with the run recipe. Run every live suite after any proofer change. Every browser suite launches `PPS_CHROME`, else `/opt/pw-browsers/chromium` (the sandbox's stable link; the old hard-coded `chromium-1194` path no longer exists). The style suite reads the palette out of `calc-preview-test.html` rather than copying it, so the two documents cannot drift apart, and it fails any rule whose `var()` does not resolve — which is how a whole panel once rendered unstyled without anyone noticing. |
 | `pps-theme/` | Custom WordPress theme replacing Astra Pro — owns site chrome, typography, color tokens, WooCommerce shell. Stays out of the calculator plugin's way. `pps-theme/preview.html` is a Pages-served standalone preview of the header. |
 | `designer/` | **Spike.** Print-first layout editor (Vite + React + TS) — the document *is* a product; press-PDF export with CMYK, bleed/trim boxes and subset font embedding. Unlike the calculators this is a real build, not a single inline-Babel HTML. `dist/` is committed for Pages. **Read `docs/DESIGNER_SPIKE.md` before touching it** — it records what's proven vs faked and the next steps in order. Run `cd designer && npm test` after any change to `src/export/pdf.ts`. |
 
@@ -544,14 +544,14 @@ The switch is an admin knob rather than a constant because production's
 `pps-calculators.php` is far enough ahead of git that adding a `PPS_CONFIG` key
 there would mean surgery on a file that cannot be safely redeployed.
 
-**Page thumbnails — two layouts, one of them a draft (2026-10-23).** Under the stage the
-thumbnails are one row that scrolls sideways at every width (they used to wrap, up to 228px,
-into the view). The owner asked for a draft alternative to compare: each page's thumbnail in
-its heading in the Artwork Edit rail, and no strip. It is chosen by `?thumbs=rail` on the
-proofer's URL — so a New Proof URL ending in `?thumbs=rail` tries it on a site — or by the
-switch in the yellow strip. `pageCell()` builds both, so they cannot drift.
-`tools-proof-thumbs-test.mjs` is the gate. **The switch is temporary:** once the owner picks,
-delete the losing layout, the switch and its half of that suite.
+**Page thumbnails live in the page headings (owner's pick, 2026-10-25).** Each page's
+heading in the Artwork Edit rail carries that page's thumbnail, with its upload chip and drop
+target, and nothing sits under the stage. For two days there were two layouts: a sideways row
+under the stage (the strip used to wrap, up to 228px, into the view), and these headings as a
+draft behind `?thumbs=rail` and a switch in the yellow strip. The owner chose the headings, so
+the row, the switch and `?thumbs=` are gone; an old `?thumbs=` link is ignored. 3D keeps a
+wrapping strip in the rail, grouped by spread. `pageCell()` builds both kinds of cell, so
+they cannot drift. `tools-proof-thumbs-test.mjs` is the gate.
 
 **The rail's Preflight is condensed, in three groups (2026-10-24, owner: "crowded").** One
 line per check — a state dot and its name — with the explanation folded until clicked.
@@ -569,8 +569,7 @@ A failed approval writes into that folded box, so a failure now unfolds it and o
 Preflight. Its message and, after two, the escape hatch are kept in `state` and redrawn on
 every rail render (`renderApprovalOutcome`). Before, both were appended to the panel once, so
 an open page section hid them and the next re-render wiped them, and the escape hatch could
-not be seen when it mattered. `tools-proof-rail-test.mjs` is the gate. All of this applies in
-both thumbnail layouts — the rail is shared.
+not be seen when it mattered. `tools-proof-rail-test.mjs` is the gate.
 
 ### Why it is framed rather than ported
 
@@ -981,12 +980,10 @@ Sequencing across lanes: **code before the content that depends on it**
     `<script>` in `<head>` setting `proofUrl`; published 2026-10-23, latest `e27c571`). Named
     outside `calc-*` on purpose so the deploy watcher can never take it for a calculator.
     `proof-ui-draft.html` on this branch is PR #56's proofer; the four calculators above
-    still have New Proof URL blank, so they open the built-in modal. Add `?thumbs=rail` to
-    the preview URL to open the proofer in its draft thumbnail layout.
+    still have New Proof URL blank, so they open the built-in modal.
   - https://pdevvle.github.io/priorityprintservice.com/proof-ui-draft.html — the proofer on
     its own, no calculator: demo booklet, drop a file on a page or use its +. Add
-    `?size=8.5x11&pages=12` to size the booklet (ignored when a host sends a job), and
-    `&thumbs=rail` for the draft layout.
+    `?size=8.5x11&pages=12` to size the booklet (ignored when a host sends a job).
 - Each calculator has a build-stamp chip in the bottom-right corner. After a push, wait ~60 seconds for Pages to rebuild, then hard-refresh (Cmd/Ctrl+Shift+R) or use an Incognito window. If the chip still doesn't update, verify `.nojekyll` exists on `pps-pricing-config` root — that's the #1 cause of "my push didn't show up."
 - **Publish surface:** the `pages-public` branch is what Pages should serve — an orphan branch carrying only the nine calculators, `pps-theme/preview.html` and `.nojekyll`. Pages serves the *entire tree* of whatever branch it publishes from, so publishing `pps-pricing-config` also served every `.php` file as plain text (Pages doesn't execute PHP), plus `docs/MASTER_PRICING_LOGIC.md` and `CLAUDE.md`. Calculator changes get cherry-picked to `pages-public`; nothing else goes on it.
 - **Go private (deferred by owner 2026-08-01 until the build is finished).** When ready:

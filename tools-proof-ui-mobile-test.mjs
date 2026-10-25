@@ -96,21 +96,17 @@ for (const d of DEVICES){
     window.scrollTo(0,0); await new Promise(r=>setTimeout(r,150));
     return ok;}));
 
-  // 6. the filmstrip becomes one scrolling row rather than a wall
+  // 6. the page thumbnails sit in the page headings, below the art
+  // (owner's pick, 2026-10-25; there used to be a scrolling row under the art)
   if (d.w<=900){
-    ck(d.name+': filmstrip is a single scrolling row', await p.evaluate(()=>{
-      const s=document.getElementById('stripBottom');
-      const cs=getComputedStyle(s);
-      const tops=[...s.querySelectorAll('.pg')].map(e=>Math.round(e.getBoundingClientRect().top));
-      return cs.flexWrap==='nowrap' && cs.overflowX==='auto' && new Set(tops).size===1;}));
-    ck(d.name+': all 8 pages are reachable by scrolling that row', await p.evaluate(async ()=>{
-      const s=document.getElementById('stripBottom');
-      s.scrollLeft=s.scrollWidth; await new Promise(r=>setTimeout(r,150));
-      const last=[...s.querySelectorAll('.pg')].pop().getBoundingClientRect();
-      const sr=s.getBoundingClientRect();
-      const ok=last.right<=sr.right+2;
-      s.scrollLeft=0;
-      return document.querySelectorAll('#stripBottom .pg').length===8 && ok;}));
+    ck(d.name+': every page heading carries its thumbnail, inside the screen', await p.evaluate(()=>{
+      const cells=[...document.querySelectorAll('#rail .pagehead .pg.mini')];
+      return cells.length===8 && cells.every(c=>{const r=c.getBoundingClientRect(); return r.width>20 && r.right<=window.innerWidth+1;})
+          && !document.getElementById('stripBottom');}));
+    ck(d.name+': a page thumbnail is thumb-sized, and its upload chip too', await p.evaluate(()=>{
+      const c=document.querySelector('#rail .pagehead .pg.mini'), u=c.querySelector('.pgup');
+      const r=c.getBoundingClientRect(), ur=u.getBoundingClientRect();
+      return r.height>=40 && ur.width>=16 && ur.height>=16;}));
     ck(d.name+': the art stays on screen while the controls scroll', await p.evaluate(async ()=>{
       const sw=document.querySelector('.stagewrap');
       if(window.innerHeight<=560){

@@ -145,9 +145,9 @@ console.log('\n── approving returns the package to the host ──');
   // ── the press simulation, on every surface the customer looks at ──
   const grey = await page.evaluate(async () => {
     const filt = () => document.querySelector('#sheet canvas').style.filter;
-    const thumb = n => [...document.querySelectorAll('#stripBottom .pg')]
-      .find(e => new RegExp('P' + n + '(\\D|$)').test(e.querySelector('.n').textContent))
-      .querySelector('.thumb').style.filter;
+    // page n's thumbnail, in its heading in the rail
+    const thumb = n => [...document.querySelectorAll('#rail .acc')][n]
+      .querySelector('.pagehead .pg.mini .thumb').style.filter;
     state.selected = 1; renderAll(); const p1 = filt();
     state.selected = 3; renderAll(); const p3 = filt();
     return { p1, p3, t1: thumb(1), t3: thumb(3), t12: thumb(12),
