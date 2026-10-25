@@ -34,9 +34,33 @@ const attach = (opts) => p.evaluate(async (o)=>{
       pg.drawText('EDGE', {x:0.18*72, y:1.5*72, size:16, font, color:rgb(0.1,0.1,0.1)});
     }
     if (o.annots){
-      pg.node.set(PDFName.of('Annots'), doc.context.obj([
-        doc.context.obj({ Type:'Annot', Subtype:'Text', Rect:[10,10,30,30] })
-      ]));
+      // 'bare': a comment with no appearance — nothing to draw, so nothing prints.
+      // 'stamp': a stamp with an appearance, which the imposition tool draws into
+      // the page and this proof's print render shows.
+      const list = [doc.context.obj({ Type:'Annot', Subtype:'Text', Rect:[10,10,30,30] })];
+      if (o.annots === 'stamp'){
+        const ap = doc.context.register(doc.context.stream('0 0 0 rg 0 0 72 36 re f', { Type:'XObject', Subtype:'Form', BBox:[0,0,72,36] }));
+        list.push(doc.context.register(doc.context.obj({ Type:'Annot', Subtype:'Stamp', Rect:[100,100,172,136], F:4, AP:doc.context.obj({ N:ap }) })));
+      }
+      pg.node.set(PDFName.of('Annots'), doc.context.obj(list));
+    }
+    if (o.formFont){
+      // Art placed as a Form XObject (InDesign, Illustrator), using a font that is
+      // only named, and a spot colour — both inside the form, not on the page.
+      const ctx = doc.context;
+      const fd = ctx.register(ctx.obj({ Type:'FontDescriptor', FontName:'ArialMT', Flags:32, FontBBox:[-665,-325,2000,1006],
+                                        ItalicAngle:0, Ascent:905, Descent:-212, CapHeight:716, StemV:80 }));
+      const arial = ctx.register(ctx.obj({ Type:'Font', Subtype:'TrueType', BaseFont:'ArialMT', FirstChar:32, LastChar:126,
+                                           Widths:Array(95).fill(600), FontDescriptor:fd, Encoding:'WinAnsiEncoding' }));
+      const tint = ctx.register(ctx.obj({ FunctionType:2, Domain:[0,1], C0:[0,0,0,0], C1:[0,0.8,0.6,0], N:1 }));
+      const sep = ctx.register(ctx.obj([PDFName.of('Separation'), PDFName.of('PANTONE 286 C'), PDFName.of('DeviceCMYK'), tint]));
+      const form = ctx.register(ctx.stream('q /CS1 cs 1 scn 36 36 100 60 re f Q BT /F1 20 Tf 0 g 40 200 Td (Placed) Tj ET',
+        { Type:'XObject', Subtype:'Form', BBox:[0,0,bw,bh], Resources:ctx.obj({ Font:ctx.obj({ F1:arial }), ColorSpace:ctx.obj({ CS1:sep }) }) }));
+      const res = pg.node.get(PDFName.of('Resources'));
+      res.set(PDFName.of('XObject'), ctx.obj({ Fx0:form }));
+      const prev = pg.node.get(PDFName.of('Contents'));
+      const items = prev instanceof PDFArray ? prev.asArray() : prev ? [prev] : [];
+      pg.node.set(PDFName.of('Contents'), ctx.obj([...items, ctx.register(ctx.stream('q /Fx0 Do Q'))]));
     }
     if (o.spot){
       const res = pg.node.get(PDFName.of('Resources'));
@@ -110,7 +134,9 @@ await reset();
 await attach({name:'helv', at:1});
 await p.waitForTimeout(400);
 const c1 = await checks();
-ck('a standard-14 font is reported as not embedded', c1.fonts==='fail', JSON.stringify(c1));
+// The imposition tool's rule (fontNotes), which the proofer defers to: a
+// standard-14 face every RIP carries is a note, not a failure.
+ck('a standard-14 font that is not embedded passes, because every press carries it', c1.fonts==='pass', JSON.stringify(c1));
 ck('and it names the face', /Helvetica/.test(await textOf('fonts')), await textOf('fonts'));
 ck('a page built to the ordered size passes', c1.size==='pass', await textOf('size'));
 ck('no spot colors, no layers, no interactive content',
@@ -150,9 +176,26 @@ await p.waitForTimeout(400);
 ck('layers that are all visible are not a finding', (await checks()).layers==='pass', await textOf('layers'));
 
 await reset();
-await attach({name:'annotated', at:1, annots:true});
+await attach({name:'annotated', at:1, annots:'bare'});
 await p.waitForTimeout(400);
-ck('annotations are flagged', (await checks()).interactive==='warn', await textOf('interactive'));
+ck('a comment with nothing to draw is not a finding (nothing prints)', (await checks()).interactive==='pass', await textOf('interactive'));
+await reset();
+await attach({name:'stamped', at:1, annots:'stamp'});
+await p.waitForTimeout(400);
+ck('a stamp with an appearance is flagged', (await checks()).interactive==='warn', await textOf('interactive'));
+ck('and it says it PRINTS — the imposition tool draws it into the page', /1 stamp/.test(await textOf('interactive')) &&
+   /prints exactly as shown/.test(await textOf('interactive')) && !/do not print/.test(await textOf('interactive')), await textOf('interactive'));
+
+// Fonts and inks inside placed artwork (a Form XObject): read the imposition
+// tool's way, through forms and inherited resources. Until 2026-10-25 the proofer
+// read page resources only, passed both, and shipped the file untouched to a tool
+// that refuses it.
+await reset();
+await attach({name:'placed', at:1, formFont:true});
+await p.waitForTimeout(400);
+const cF = await checks();
+ck('a named-only font inside placed artwork fails and is named', cF.fonts==='fail' && /ArialMT/.test(await textOf('fonts')), await textOf('fonts'));
+ck('a spot colour inside placed artwork is named', cF.spots==='warn' && /PANTONE 286 C/.test(await textOf('spots')), await textOf('spots'));
 
 // ── unknown is a first-class state ──
 await reset();

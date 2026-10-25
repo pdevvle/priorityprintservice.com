@@ -1072,6 +1072,12 @@ function bakeGreyscale(ctx, w, h){
    default placement sits comfortably clear of both — a warning only appears
    once a transform has actually stretched the pixels too thin. */
 const DPI_WARN = 120, DPI_BAD = 90;
+/* An uploaded IMAGE is held to the imposition tool's figure: below 200 DPI at the
+   size it prints, "it prints soft; 300 is the target" (rasterNote, v1.61). For an
+   image the effective DPI is its own pixels per inch, the same quantity it
+   measures. A PDF page's figure is measured against the 150 DPI screen raster —
+   a stretch ratio, not the art's resolution — so PDFs keep DPI_WARN above. */
+const IMAGE_DPI_SOFT = 200;
 
 const ANCHORS = [
   'Top Left',    'Top',    'Top Right',
@@ -1355,7 +1361,8 @@ const ISSUE_TEXT = {
   tight: 'Heads up: {n} run{s} of type sit{s3} inside the safety margin, as close as {gap}" to the trim. Trimming varies by about a sixteenth of an inch, so type this close can end up touching the edge.',
   bleed: "Issue: Art doesn't fill bleed area. Ensure that you're including at least " + MODEL.bleed + '" bleed, or scale the art to fill the area without getting text or other elements too close to the trim (safety margin).',
   lowres: 'Issue: at this size the art works out to {dpi} DPI. Below about ' + DPI_BAD + ' DPI it will look soft or pixelated in print. Use a larger file or reduce the scale.',
-  softres: 'Heads up: at this size the art works out to {dpi} DPI. 300 DPI is ideal; below about ' + DPI_WARN + ' DPI, fine detail and small type start to soften.'
+  softres: 'Heads up: at this size the art works out to {dpi} DPI. 300 DPI is ideal; below about ' + DPI_WARN + ' DPI, fine detail and small type start to soften.',
+  softimg: 'Heads up: at this size the image works out to {dpi} DPI. Below ' + IMAGE_DPI_SOFT + ' DPI it prints soft; 300 DPI is the target. Use a larger file, or scale it down.'
 };
 /* Map a box in source pixels through the same placement the composition used,
    rotation included, and return it as a fraction of the page. Deriving it from
@@ -1439,8 +1446,11 @@ function analyze(n){
   if (p.x > eps || p.y > eps || p.x + p.w < r.W - eps || p.y + p.h < r.H - eps){
     out.push({ kind:'bleed', level:'error', text:ISSUE_TEXT.bleed });
   }
+  const image = uploads.has(n) && !SRCget(n).pdfSrc;
   if (r.effDpi < DPI_BAD){
     out.push({ kind:'lowres', level:'error', text:ISSUE_TEXT.lowres.replace('{dpi}', r.effDpi) });
+  } else if (image && r.effDpi < IMAGE_DPI_SOFT){
+    out.push({ kind:'softres', level:'warn', text:ISSUE_TEXT.softimg.replace('{dpi}', r.effDpi) });
   } else if (r.effDpi < DPI_WARN){
     out.push({ kind:'softres', level:'warn', text:ISSUE_TEXT.softres.replace('{dpi}', r.effDpi) });
   }
@@ -1536,7 +1546,8 @@ function renderStage(){
   const sl = pc(MODEL.bleed+MODEL.safety, BLEED_W), st2 = pc(MODEL.bleed+MODEL.safety, BLEED_H);
   const spineLeft = state.selected % 2 === 1;
 
-  const bad = r.effDpi < DPI_BAD, soft = r.effDpi < DPI_WARN;
+  const image = uploads.has(state.selected) && !SRCget(state.selected).pdfSrc;
+  const bad = r.effDpi < DPI_BAD, soft = r.effDpi < (image ? IMAGE_DPI_SOFT : DPI_WARN);
   sheet.style.cssText = 'width:'+W+'px;height:'+H+'px';
   sheet.innerHTML =
     '<div class="badge'+(soft ? ' warn' : '')+'">'+r.effDpi+' DPI'+(bad ? ' · too low' : soft ? ' · soft' : '')+'</div>' +
@@ -2479,20 +2490,203 @@ async function originOf(file){
 const PT = 72;                      // PDF units per inch
 const PDF_RENDER_DPI = 150;         // enough for the proof and the magnifier
 
-/* Structure, read from the file's own dictionaries rather than inferred. */
+/* ── PDF facts, read the imposition tool's way (2026-10-25) ─────────────────
+   The next program to open the customer's file is the imposition tool
+   (imposition-tool.html, branch claude/imposition-tool-google-drive-185wyl), and it
+   is the more developed reader: it follows Form XObjects, inherited resources and
+   inherited boxes, and visits every object in the file. Where the two disagree it
+   decides (owner, 2026-10-25). So the functions between the markers are its own,
+   copied verbatim from v1.61 (223cc0f), and tools-proof-imposition-sync-test.mjs
+   hashes each one against the imposition tool's and fails when either side changes
+   alone. docs/PROOFER_IMPOSITION_SYNC.md says why. */
+let PL = null;                      // the imposition tool's name for window.PDFLib, set on first read
+/* pps-imposition-copy:begin — v1.61 (223cc0f); edit there, not here */
+function asDict(o) {
+  if (o && typeof o.lookup === "function") return o;
+  if (o && o.dict && typeof o.dict.lookup === "function") return o.dict;
+  return null;
+}
+function pageResources(node) {
+  try { if (typeof node.Resources === "function") { const r = asDict(node.Resources()); if (r) return r; } } catch (e) {}
+  try { if (typeof node.getInheritableAttribute === "function") { const r = asDict(node.getInheritableAttribute(PL.PDFName.of("Resources"))); if (r) return r; } } catch (e) {}
+  try { return asDict(node.lookup(PL.PDFName.of("Resources"))); } catch (e) { return null; }
+}
+function getPageBox(page, name) {
+  try {
+    // Inheritable: a CropBox/TrimBox/BleedBox set on the /Pages node applies to
+    // every page under it (Quark and some print drivers write them there).
+    // A direct read missed those entirely — measured: an inherited 6×4 CropBox
+    // on an 8.5×11 MediaBox imposed as the full 8.5×11, slug area and all.
+    let v = typeof page.node.getInheritableAttribute === "function"
+      ? page.node.getInheritableAttribute(PL.PDFName.of(name))
+      : page.node.get(PL.PDFName.of(name));
+    if (!v) return null;
+    v = page.node.context.lookup(v);
+    if (!v || typeof v.lookup !== "function" || (v.size ? v.size() : 0) !== 4) return null;
+    const n = i => { const el = v.lookup(i); return el && typeof el.asNumber === "function" ? el.asNumber() : null; };
+    const nums = [n(0), n(1), n(2), n(3)];
+    if (nums.some(x => x === null || !isFinite(x))) return null;
+    const [x0, y0, x1, y1] = nums;
+    return { x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) };
+  } catch (e) { return null; }
+}
+const STD14 = /^(Helvetica|Times|Courier|Symbol|ZapfDingbats)/;
+function inspectFonts(doc) {
+  const seen = new Set(), missing = new Map(), std = new Set();
+  const visitRes = (res, depth) => {
+    if (!res || depth > 4) return;
+    const fonts = asDict(res.lookup ? res.lookup(PL.PDFName.of("Font")) : null);
+    if (fonts) for (const [, v] of fonts.entries()) {
+      const key = v && v.toString ? v.toString() : String(v);
+      if (seen.has(key)) continue; seen.add(key);
+      const f = asDict(res.context.lookup(v)); if (!f) continue;
+      let fd = null, sub = f.lookup(PL.PDFName.of("Subtype"));
+      let base = f.lookup(PL.PDFName.of("BaseFont")); base = base && base.decodeText ? base.decodeText() : (base ? String(base).replace(/^\//, "") : "?");
+      if (sub && String(sub) === "/Type0") {
+        const desc = f.context.lookup(f.get(PL.PDFName.of("DescendantFonts")));
+        const d0 = desc && desc.lookup ? asDict(desc.lookup(0)) : null;
+        fd = d0 ? asDict(d0.context.lookup(d0.get(PL.PDFName.of("FontDescriptor")))) : null;
+      } else if (sub && String(sub) === "/Type3") {
+        continue;                                    // glyphs are inline procedures — always "embedded"
+      } else {
+        fd = asDict(f.context.lookup(f.get(PL.PDFName.of("FontDescriptor"))));
+      }
+      const embedded = !!(fd && (fd.has(PL.PDFName.of("FontFile")) || fd.has(PL.PDFName.of("FontFile2")) || fd.has(PL.PDFName.of("FontFile3"))));
+      if (embedded) continue;
+      const name = String(base).replace(/^[A-Z]{6}\+/, "");
+      if (STD14.test(name)) std.add(name); else missing.set(name, true);
+    }
+    const xo = asDict(res.lookup ? res.lookup(PL.PDFName.of("XObject")) : null);
+    if (xo) for (const [, v] of xo.entries()) {
+      const key = "x" + (v && v.toString ? v.toString() : String(v));
+      if (seen.has(key)) continue; seen.add(key);
+      const st = res.context.lookup(v);
+      const d = st && st.dict ? st.dict : null;
+      if (d && String(d.lookup(PL.PDFName.of("Subtype"))) === "/Form") visitRes(asDict(d.context.lookup(d.get(PL.PDFName.of("Resources")))), depth + 1);
+    }
+  };
+  for (const pg of doc.getPages()) { try { visitRes(pageResources(pg.node), 0); } catch (e) { /* best-effort */ } }
+  return { missing: [...missing.keys()], std: [...std] };
+}
+/* pps-imposition-copy:end */
+
+/* What the imposition tool's load would find in this file, without changing it.
+   Its loadPdf() refuses an encrypted file and a damaged content stream, then
+   pressSafety() rewrites the graphics states, measures the images and fonts a RIP
+   chokes on, names the spot colours and draws every visible annotation into the
+   page. This mirrors those passes read-only (v1.61, same rules, same order) so the
+   proofer can tell the customer what the press will do, and so untouchedOriginal()
+   only hands the imposition tool bytes it will take as they are. */
+function pressFacts(doc){
+  const ctx = doc.context, N = k => PL.PDFName.of(k);
+  const out = { encrypted: !!doc.isEncrypted, damaged: [], spots: [], overprint: 0, transfer: 0, maskRisk: 0,
+                images: { jpx: 0, jbig2: 0, deep: 0 }, openType: 0,
+                annots: { drawn: 0, kinds: {}, links: 0, hidden: 0, noAppearance: 0 } };
+  // repairPageContents(): a compressed content stream that will not decompress.
+  // (An encrypted file's streams cannot be read without decrypting, and it is
+  // refused before this pass anyway.)
+  if (!out.encrypted) doc.getPages().forEach((page, i) => {
+    try {
+      const ref = page.node.get(N('Contents'));
+      if (!ref) return;
+      const val = ctx.lookup(ref);
+      for (const it of (val instanceof PL.PDFArray ? val.asArray() : [ref])){
+        const st = ctx.lookup(it);
+        if (!(st instanceof PL.PDFRawStream) || !st.dict.get(N('Filter'))) continue;
+        if (!st.contents || st.contents.length === 0) continue;   // an empty stream is a blank page, imposed blank
+        try { PL.decodePDFRawStream(st).decode(); } catch (e){ out.damaged.push(i + 1); break; }
+      }
+    } catch (e){ /* unreadable here is reported by the imposition tool itself */ }
+  });
+  // pressSafety()'s walk: every ExtGState, image, font descriptor and colour space reachable.
+  const seen = new Set(), gsDicts = [], images = [], fontDescs = [], spots = new Set();
+  const visit = obj => {
+    if (!obj || seen.has(obj)) return; seen.add(obj);
+    if (obj instanceof PL.PDFStream){
+      if (String(obj.dict.get(N('Subtype')) || '') === '/Image') images.push(obj.dict);
+      visit(obj.dict); return;
+    }
+    if (obj instanceof PL.PDFArray){
+      const a = obj.asArray();
+      const head = a.length ? String(a[0]) : '';
+      const nameOf = x => { const v = ctx.lookup(x); return v && v.decodeText ? v.decodeText() : String(v).replace(/^\//, ''); };
+      if (head === '/Separation' && a.length > 1){ const nm = nameOf(a[1]); if (nm !== 'All' && nm !== 'None') spots.add(nm); }
+      if (head === '/DeviceN' && a.length > 1){ const names = ctx.lookup(a[1]); if (names instanceof PL.PDFArray) names.asArray().forEach(n => { const nm = nameOf(n); if (nm !== 'All' && nm !== 'None' && !/^(Cyan|Magenta|Yellow|Black)$/.test(nm)) spots.add(nm); }); }
+      for (const el of a) visit(el instanceof PL.PDFRef ? ctx.lookup(el) : el); return;
+    }
+    if (!(obj instanceof PL.PDFDict)) return;
+    const type = String(obj.get(N('Type')) || '');
+    if ((type === '/ExtGState' || obj.has(N('OP')) || obj.has(N('op')) || obj.has(N('TR')) || obj.has(N('TR2')) || obj.has(N('SMask'))) && !gsDicts.includes(obj)) gsDicts.push(obj);
+    if (type === '/FontDescriptor') fontDescs.push(obj);
+    for (const [k, v] of obj.entries()){
+      const val = v instanceof PL.PDFRef ? ctx.lookup(v) : v;
+      if (k.toString() === '/ExtGState' && val instanceof PL.PDFDict){ for (const [, gv] of val.entries()){ const g = gv instanceof PL.PDFRef ? ctx.lookup(gv) : gv; if (g instanceof PL.PDFDict && !gsDicts.includes(g)) gsDicts.push(g); } }
+      visit(val);
+    }
+  };
+  try { for (const [, obj] of ctx.enumerateIndirectObjects()) visit(obj); } catch (e){}
+  out.spots = [...spots];
+  for (const g of gsDicts){
+    if (['OP', 'op'].some(k => { const v = g.get(N(k)); return v && String(v) === 'true'; })) out.overprint++;
+    for (const k of ['TR', 'TR2']){ const v = g.get(N(k)); if (v && !/^\/(Identity|Default)$/.test(String(v))) out.transfer++; }
+    const sm = g.get(N('SMask')); const smd = sm instanceof PL.PDFRef ? ctx.lookup(sm) : sm;
+    if (smd instanceof PL.PDFDict && !(smd instanceof PL.PDFStream)){
+      const tr = smd.get(N('TR')); const bc = smd.get(N('BC'));
+      const bcv = bc instanceof PL.PDFRef ? ctx.lookup(bc) : bc;
+      const bcNonZero = bcv instanceof PL.PDFArray && bcv.asArray().some(x => { const n = ctx.lookup(x); return n && n.asNumber && Math.abs(n.asNumber()) > 1e-6; });
+      if ((tr && String(tr) !== '/Identity') || bcNonZero) out.maskRisk++;
+    }
+  }
+  for (const d of images){
+    const f = d.get(N('Filter')); const fv = f instanceof PL.PDFRef ? ctx.lookup(f) : f;
+    const filters = fv instanceof PL.PDFArray ? fv.asArray().map(String) : fv ? [String(fv)] : [];
+    if (filters.includes('/JPXDecode')) out.images.jpx++;
+    if (filters.includes('/JBIG2Decode')) out.images.jbig2++;
+    const bpc = d.get(N('BitsPerComponent')); if (bpc && bpc.asNumber && bpc.asNumber() === 16) out.images.deep++;
+  }
+  for (const fd of fontDescs){
+    const ff3 = fd.get(N('FontFile3')); const st = ff3 instanceof PL.PDFRef ? ctx.lookup(ff3) : null;
+    if (st instanceof PL.PDFStream && String(st.dict.get(N('Subtype')) || '') === '/OpenType') out.openType++;
+  }
+  // pressSafety() §6: which annotations it draws into the page. A link or a popup
+  // never; a hidden one (Hidden / NoView) never; otherwise one with an appearance.
+  doc.getPages().forEach(pg => {
+    try {
+      const annRef = pg.node.get(N('Annots')); const anns = annRef ? ctx.lookup(annRef) : null;
+      if (!(anns instanceof PL.PDFArray)) return;
+      anns.asArray().forEach(aRef => {
+        const a = aRef instanceof PL.PDFRef ? ctx.lookup(aRef) : aRef;
+        if (!(a instanceof PL.PDFDict)) return;
+        const sub = String(a.get(N('Subtype')) || '').slice(1);
+        if (sub === 'Link'){ out.annots.links++; return; }
+        if (sub === 'Popup') return;
+        const fl = a.get(N('F')); const flags = fl && fl.asNumber ? fl.asNumber() : 0;
+        if (flags & 2 || flags & 32){ out.annots.hidden++; return; }
+        const ap = a.get(N('AP')); const apd = ap instanceof PL.PDFRef ? ctx.lookup(ap) : ap;
+        let nRef = apd instanceof PL.PDFDict ? apd.get(N('N')) : null;
+        let nObj = nRef instanceof PL.PDFRef ? ctx.lookup(nRef) : nRef;
+        if (nObj instanceof PL.PDFDict && !(nObj instanceof PL.PDFStream)){
+          const as = a.get(N('AS')); const pick = as ? nObj.get(as) : (nObj.entries()[0] || [])[1];
+          nRef = pick; nObj = pick instanceof PL.PDFRef ? ctx.lookup(pick) : pick;
+        }
+        const rect = ctx.lookup(a.get(N('Rect')));
+        const bb = nObj instanceof PL.PDFStream ? ctx.lookup(nObj.dict.get(N('BBox'))) : null;
+        if (!(nObj instanceof PL.PDFStream) || !(nRef instanceof PL.PDFRef) || !(rect instanceof PL.PDFArray) || rect.size() !== 4
+            || !(bb instanceof PL.PDFArray) || bb.size() !== 4){ out.annots.noAppearance++; return; }
+        out.annots.drawn++;
+        out.annots.kinds[sub || '?'] = (out.annots.kinds[sub || '?'] || 0) + 1;
+      });
+    } catch (e){}
+  });
+  return out;
+}
+
+/* Structure, read from the file's own dictionaries rather than inferred — by the
+   imposition tool's readers above, so the two cannot disagree about a font or an ink. */
 async function readPdfStructure(bytes){
-  const { PDFDocument, PDFName, PDFDict, PDFArray } = window.PDFLib;
+  PL = window.PDFLib;
+  const { PDFDocument, PDFName } = PL;
   const doc = await PDFDocument.load(bytes, { ignoreEncryption:true, updateMetadata:false });
-  const ctx = doc.context;
-  // pdf-lib's typed lookup throws when a key is simply absent, which is the
-  // normal case for half of these. Dereference untyped and check the shape.
-  const deref = (v) => { try { const r = ctx.lookup(v); return (r === undefined) ? null : r; } catch(e){ return null; } };
-  const dictOf = (v) => { const r = deref(v); return (r && r instanceof PDFDict) ? r : null; };
-  // PDF names escape anything awkward as #XX, so "PANTONE 185 C" arrives as
-  // PANTONE#20185#20C. Decode it, or the customer reads their own ink back as
-  // machine noise.
-  const nameOf = (v) => ((v && v.asString) ? v.asString() : (v == null ? '' : String(v)))
-    .replace(/#([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
   const box = (fn) => { try { const b = fn(); return b ? { w:b.width/PT, h:b.height/PT } : null; } catch(e){ return null; } };
 
   const pages = doc.getPages().map(pg => ({
@@ -2501,70 +2695,19 @@ async function readPdfStructure(bytes){
     bleed: box(() => pg.getBleedBox()),
   }));
 
-  /* A font is embedded when its descriptor carries the program itself
-     (FontFile / FontFile2 / FontFile3). Type3 fonts define their glyphs inline
-     and need no descriptor, so they are never "missing". Subset prefixes like
-     ABCDEF+ are stripped so one face is reported once. */
-  const notEmbedded = new Set();
-  const inspectFont = (fd, depth) => {
-    if (!fd || depth > 3) return;
-    const sub = nameOf(fd.get(PDFName.of('Subtype')));
-    if (sub === '/Type3') return;
-    if (sub === '/Type0'){
-      const kids = deref(fd.get(PDFName.of('DescendantFonts')));
-      if (kids && kids instanceof PDFArray){
-        for (let i = 0; i < kids.size(); i++) inspectFont(dictOf(kids.get(i)), depth + 1);
-      }
-      return;
-    }
-    const desc = dictOf(fd.get(PDFName.of('FontDescriptor')));
-    const embedded = !!(desc && (desc.get(PDFName.of('FontFile')) ||
-                                desc.get(PDFName.of('FontFile2')) ||
-                                desc.get(PDFName.of('FontFile3'))));
-    if (!embedded){
-      notEmbedded.add(nameOf(fd.get(PDFName.of('BaseFont')))
-        .replace(/^\//, '').replace(/^[A-Z]{6}\+/, '') || 'unnamed font');
-    }
-  };
-  doc.getPages().forEach(pg => {
-    const res = dictOf(pg.node.get(PDFName.of('Resources')));
-    const fonts = res ? dictOf(res.get(PDFName.of('Font'))) : null;
-    if (!fonts) return;
-    fonts.entries().forEach(([, ref]) => inspectFont(dictOf(ref), 0));
-  });
-
-  /* Spot colors. A Separation or DeviceN colorant is an ink of its own; on a
-     four-color press it gets converted, and the customer's Pantone does not
-     come back. Worth naming rather than discovering on the sheet. */
-  const spots = new Set();
-  doc.getPages().forEach(pg => {
-    const res = dictOf(pg.node.get(PDFName.of('Resources')));
-    const csDict = res ? dictOf(res.get(PDFName.of('ColorSpace'))) : null;
-    if (!csDict) return;
-    csDict.entries().forEach(([, ref]) => {
-      const arr = deref(ref);
-      if (!arr || !(arr instanceof PDFArray) || arr.size() < 2) return;
-      const family = nameOf(deref(arr.get(0)));
-      if (family === '/Separation'){
-        spots.add(nameOf(deref(arr.get(1))).replace(/^\//, '') || 'unnamed');
-      } else if (family === '/DeviceN'){
-        const names = deref(arr.get(1));
-        if (names && names instanceof PDFArray){
-          for (let i = 0; i < names.size(); i++) spots.add(nameOf(deref(names.get(i))).replace(/^\//, ''));
-        } else spots.add('DeviceN');
-      }
-    });
-  });
+  /* Fonts by inspectFonts(): page resources, inherited resources and every Form
+     XObject below them, where InDesign and Illustrator put placed artwork. A face
+     that is only named is `missing`, unless it is one of the standard 14 every RIP
+     carries (`std`) — the imposition tool refuses the first and notes the second. */
+  let fonts = { missing: [], std: [] };
+  try { fonts = inspectFonts(doc); } catch (e){ /* inspection failure is not a verdict */ }
+  const press = pressFacts(doc);
 
   const cat = doc.catalog;
   const hasOptionalContent = !!cat.get(PDFName.of('OCProperties'));
   const hasAcroForm = !!cat.get(PDFName.of('AcroForm'));
-  const hasAnnots = doc.getPages().some(pg => {
-    const a = deref(pg.node.get(PDFName.of('Annots')));
-    return !!(a && a.size && a.size() > 0);
-  });
-
-  return { pages, notEmbedded:[...notEmbedded], spots:[...spots], hasOptionalContent, hasAcroForm, hasAnnots };
+  return { pages, notEmbedded:fonts.missing, std14:fonts.std, spots:press.spots, press,
+           hasOptionalContent, hasAcroForm, hasAnnots:press.annots.drawn + press.annots.links + press.annots.hidden + press.annots.noAppearance > 0 };
 }
 
 /* Render each page, and take its type from the text layer rather than from the
@@ -2587,9 +2730,10 @@ async function ingestPdf(file, startPage, plan){
   const struct = await readPdfStructure(new Uint8Array(buf.slice(0)));
   const doc = await window.pdfjsLib.getDocument({ data:new Uint8Array(buf.slice(0)) }).promise;
   // Layers switched OFF in the file. pdf.js honours the off state, so the proof
-  // and a print re-rendered here both leave them out — but a downstream engine
-  // that drops /OCProperties would print them. So a file carrying any is never
-  // shipped as-is (untouchedOriginal), and the layers check names them.
+  // and a print re-rendered here both leave them out, and the imposition tool
+  // carries the same settings onto the press sheet. The layers check names them
+  // so the customer knows they will not print; null means they could not be
+  // read, which keeps the file from shipping as-is (untouchedOriginal).
   let ocOff = [];
   try {
     const oc = await doc.getOptionalContentConfig();
@@ -2910,13 +3054,23 @@ function fileFacts(){
     pdfs, images: all.filter(u => !u.pdf),
     placeholders: MODEL.pages.length - uploads.size,
     notEmbedded: [...new Set(pdfs.flatMap(u => u.pdf.notEmbedded))],
+    std14:       [...new Set(pdfs.flatMap(u => u.pdf.std14 || []))],
     spots:       [...new Set(pdfs.flatMap(u => u.pdf.spots || []))],
     layers:      pdfs.some(u => u.pdf.hasOptionalContent),
     // Layers switched OFF, by name (from pdf.js at ingest). null on a page means
     // the file has layers pdf.js could not read, which is not the same as none.
     hiddenLayers: [...new Set(pdfs.flatMap(u => (u.pdfSrc && u.pdfSrc.ocOff) || []))],
     layersUnread: pdfs.some(u => u.pdf.hasOptionalContent && u.pdfSrc && u.pdfSrc.ocOff === null),
-    interactive: pdfs.some(u => u.pdf.hasAcroForm || u.pdf.hasAnnots),
+    // What the imposition tool draws into the page (pressSafety §6), summed over
+    // the distinct files; links and hidden comments it leaves out.
+    annots: [...new Map(pdfs.map(u => [u.pdfSrc ? u.pdfSrc.bytes : u, u.pdf.press])).values()]
+      .reduce((a, p) => {
+        if (!p) return a;
+        a.drawn += p.annots.drawn; a.links += p.annots.links;
+        a.hidden += p.annots.hidden + p.annots.noAppearance;
+        for (const [k, v] of Object.entries(p.annots.kinds)) a.kinds[k] = (a.kinds[k] || 0) + v;
+        return a;
+      }, { drawn:0, links:0, hidden:0, kinds:{} }),
   };
 }
 const NO_STRUCTURE = 'Nothing attached carries its own structure — a flat image is pixels and nothing else. Send a PDF and this can be answered.';
@@ -2953,7 +3107,7 @@ const FILE_CHECKS = [
       const bled = { w: want.w + MODEL.bleed * 2, h: want.h + MODEL.bleed * 2 };
       const matches = (t, s) => (Math.abs(t.w - s.w) < tol && Math.abs(t.h - s.h) < tol) ||
                                 (Math.abs(t.w - s.h) < tol && Math.abs(t.h - s.w) < tol);
-      let bledCount = 0, noTrim = 0;
+      let bledCount = 0, noTrim = 0, bledTrim = 0;
       f.pdfs.forEach(u => {
         const pg = u.pdf.pages[u.pdf.pageIndex] || {};
         const t = pg.trim || pg.media;
@@ -2966,6 +3120,10 @@ const FILE_CHECKS = [
         if (!declared) noTrim++;
         if (matches(t, want)) return;
         if (!declared && MODEL.bleed > 0 && matches(t, bled)) { bledCount++; return; }
+        /* A TrimBox drawn at the BLEED size: the document was built at trim +
+           bleed and the export wrote that as the trim. The imposition tool reads
+           it as the bleed size (detectTrim, its 1.53), so this does too. */
+        if (declared && MODEL.bleed > 0 && matches(t, bled)) { bledTrim++; return; }
         bad.push(u.label + ' is ' + t.w.toFixed(2) + '" \u00d7 ' + t.h.toFixed(2) + '"');
       });
       const sizes = want.w + '" \u00d7 ' + want.h + '" trimmed'
@@ -2974,14 +3132,27 @@ const FILE_CHECKS = [
         '. It will be scaled or cropped to fit, which is what the Art Behavior controls decide.' };
       if (bledCount) return { state:'pass', text:'Page size is the ordered ' + want.w + '" \u00d7 ' + want.h +
         '" plus ' + MODEL.bleed + '" bleed on every side, which is how a print file should arrive.' };
+      if (bledTrim) return { state:'pass', text:'The file marks its trim at ' + bled.w + '" \u00d7 ' + bled.h +
+        '", which is the ordered ' + want.w + '" \u00d7 ' + want.h + '" plus ' + MODEL.bleed +
+        '" bleed. It is read as that, the way the press reads it.' };
       return { state:'pass', text:'Trimmed size matches the ' + want.w + '" \u00d7 ' + want.h + '" ordered.' +
         (noTrim ? ' (' + noTrim + ' page' + (noTrim===1?'':'s') + ' carry no TrimBox, so the page size was used instead.)' : '') };
     }},
   { id:'fonts', label:'Fonts embedded', run(f){
       if (!f.pdfs.length) return { state:'unknown', text:NO_STRUCTURE };
-      return f.notEmbedded.length
-        ? { state:'fail', text:'Not embedded: ' + f.notEmbedded.join(', ') +
-            '. A font that is not in the file is substituted at the press, and the substitute reflows the type. Re-export with fonts embedded, or outline them.' }
+      /* The imposition tool's rule (fontNotes): a face that is only named is
+         refused — the press would substitute it and the type reflows — unless it
+         is one of the standard 14 every RIP carries, which is a note. Fonts are
+         read inside placed artwork (Form XObjects) as well as on the page. */
+      const std = f.std14.length ? ' ' + f.std14.join(', ') + (f.std14.length === 1 ? ' is' : ' are') +
+        ' not embedded either, but ' + (f.std14.length === 1 ? 'it is one' : 'they are') +
+        ' of the standard fonts every press carries, so ' + (f.std14.length === 1 ? 'it prints' : 'they print') +
+        ' in that face.' : '';
+      if (f.notEmbedded.length) return { state:'fail', text:'Not embedded: ' + f.notEmbedded.join(', ') +
+            '. A font that is not in the file is substituted at the press, and the substitute reflows the type. Re-export with fonts embedded, or outline them.' + std };
+      return f.std14.length
+        ? { state:'pass', text:'Every font is carried inside the file except ' + f.std14.join(', ') +
+            ', one of the standard fonts every press has, so ' + (f.std14.length === 1 ? 'it prints' : 'they print') + ' in that face.' }
         : { state:'pass', text:'Every font used is carried inside the file.' };
     }},
   { id:'spots', label:'Color', run(f){
@@ -2997,9 +3168,10 @@ const FILE_CHECKS = [
       /* Only a layer switched OFF is a finding — the calculator's rule
          (ppsAnalyzePdfRisks). Layers that are all on are an ordinary export
          from InDesign or Illustrator; flagging every one of them fed the
-         acknowledgment gate with noise. A hidden one matters because this
-         proof leaves it out, and so does our print file, but a downstream
-         engine that ignores the file's layer settings would print it. */
+         acknowledgment gate with noise. A hidden one matters because it will
+         not print — this proof leaves it out, so does our print file, and the
+         imposition tool keeps it off on the press sheet — and the customer may
+         have hidden something they meant to keep. */
       if (f.hiddenLayers.length) return { state:'warn', text:'Hidden layer' +
         (f.hiddenLayers.length === 1 ? '' : 's') + ' in the file: ' + f.hiddenLayers.join(', ') +
         '. ' + (f.hiddenLayers.length === 1 ? 'It is' : 'They are') + ' switched off, so ' +
@@ -3010,11 +3182,28 @@ const FILE_CHECKS = [
         ? { state:'pass', text:'The file has layers, and every one is visible — what you see is what prints.' }
         : { state:'pass', text:'No optional-content layers.' };
     }},
-  { id:'interactive', label:'Interactive content', run(f){
+  { id:'interactive', label:'Comments, stamps and form fields', run(f){
       if (!f.pdfs.length) return { state:'unknown', text:NO_STRUCTURE };
-      return f.interactive
-        ? { state:'warn', text:'The file carries annotations or form fields. Those are screen furniture: comments, form boxes and links do not print, and anything you meant to be artwork needs to be flattened into the page.' }
-        : { state:'pass', text:'No annotations or form fields.' };
+      /* They PRINT. The imposition tool draws every visible annotation's
+         appearance into the page (pressSafety, since its 1.54), and this proof's
+         own print render draws the same appearances — so a review comment left in
+         the file ends up on the press sheet. Links, popups and hidden comments
+         have nothing to draw and are left out by both. */
+      const a = f.annots;
+      if (a.drawn){
+        const WORD = { Widget:'form field', FreeText:'text box', Text:'comment note', Stamp:'stamp',
+                       Highlight:'highlight', Underline:'markup', StrikeOut:'markup', Squiggly:'markup',
+                       Square:'drawn shape', Circle:'drawn shape', Line:'drawn shape', Polygon:'drawn shape',
+                       PolyLine:'drawn shape', Ink:'drawing' };
+        const tally = {};
+        for (const [k, v] of Object.entries(a.kinds)){ const w = WORD[k] || 'annotation'; tally[w] = (tally[w] || 0) + v; }
+        const list = Object.entries(tally).map(([w, v]) => v + ' ' + w + (v === 1 ? '' : 's')).join(', ');
+        return { state:'warn', text:'The file carries ' + list + ', and ' + (a.drawn === 1 ? 'it prints' : 'they print') +
+          ' exactly as shown in this proof. If any is a review note that should not print, delete it and export again.' };
+      }
+      if (a.links || a.hidden) return { state:'pass', text:'Nothing on the pages prints beyond the artwork. ' +
+          (a.links ? 'Links are left out of the print. ' : '') + (a.hidden ? 'Hidden comments are left out too.' : '') };
+      return { state:'pass', text:'No comments, stamps or form fields.' };
     }},
 ];
 
@@ -3216,11 +3405,26 @@ function untouchedOriginal(pages){
   const s0 = first.pdfSrc;
   if (s0.numPages !== pages.length)
     return { why:'the PDF has ' + s0.numPages + ' page' + (s0.numPages === 1 ? '' : 's') + ', the book ' + pages.length };
-  if (s0.ocOff === null) return { why:'its layers could not be read' };
-  if (s0.ocOff.length) return { why:'it has hidden layers (' + s0.ocOff.join(', ') + ')' };
-  const pdfInfo = first.pdf || {};
-  if (pdfInfo.hasAcroForm) return { why:'it has form fields, which would not survive downstream' };
-  if (pdfInfo.hasAnnots)   return { why:'it has annotations, which would not survive downstream' };
+  if (s0.ocOff === null) return { why:'its layers could not be read, so this proof cannot promise it shows what prints' };
+  /* The file goes to the imposition tool next, and it decides (owner, 2026-10-25).
+     So the customer's bytes are handed over only when it will take them AS THEY
+     ARE: nothing it refuses, nothing it advises rasterising. Anything else is
+     rendered, which keeps exactly what this proof showed.
+     Hidden layers, annotations and form fields no longer stop it — the imposition
+     tool carries the layer settings onto the press sheet (OFF stays off, with
+     /Usage /Print OFF besides) and draws visible annotations into the page, as
+     this proof shows them. Until 2026-10-25 any of the three rendered the whole
+     book, and one hyperlink cost a customer their vector file. */
+  const pdfInfo = first.pdf || {}, press = pdfInfo.press || {}, im = press.images || {};
+  if (press.encrypted) return { why:'it is password-protected, and the imposition tool cannot open a protected file' };
+  if (press.damaged && press.damaged.length) return { why:'the content of page' + (press.damaged.length === 1 ? ' ' : 's ') +
+      press.damaged.join(', ') + ' cannot be decompressed, and a RIP would fail on it the same way' };
+  if (pdfInfo.notEmbedded && pdfInfo.notEmbedded.length) return { why:'fonts are not embedded (' + pdfInfo.notEmbedded.join(', ') +
+      '); the press would substitute other faces, so the ones this proof showed are rendered in' };
+  if (im.jpx || im.jbig2 || im.deep) return { why:'it carries ' + [im.jpx && 'JPEG 2000', im.jbig2 && 'JBIG2', im.deep && '16-bit']
+      .filter(Boolean).join(' and ') + ' images, which some RIPs print blank' };
+  if (press.transfer) return { why:'it carries transfer functions, which the imposition tool removes and this proof applies' };
+  if (press.maskRisk) return { why:'it carries soft masks that not every RIP honours' };
   const near = (a, b) => Math.abs(a - b) <= UNTOUCHED_EPS;
   for (const n of pages){
     const u = uploads.get(n);
@@ -3365,6 +3569,11 @@ async function buildPackage(){
       // the bindery exactly where the trim guide sits on screen.
       const pg = pdf.addPage([BLEED_W * 72, BLEED_H * 72]);
       pg.drawImage(img, { x:0, y:0, width:BLEED_W * 72, height:BLEED_H * 72 });
+      // Say where the cut is. The imposition tool reads a TrimBox first; without
+      // one it guesses from the page size and favours round numbers, so a
+      // 4.25" x 5.5" book's 4.5" x 5.75" sheet was taken for the trim.
+      pg.setBleedBox(0, 0, BLEED_W * 72, BLEED_H * 72);
+      pg.setTrimBox(MODEL.bleed * 72, MODEL.bleed * 72, MODEL.trim.w * 72, MODEL.trim.h * 72);
       const mk = checkMargins(n, r);
       perPage.push({ n, effDpi:r.effDpi, t:Object.assign({}, state.perPage[n]),
                      src:SRCget(n).label || 'placeholder', margins:mk, print:r.source });
@@ -3543,6 +3752,41 @@ async function buildPackage(){
   L.push('screen (placeArt), so position, size, crop and rotation cannot differ. The');
   L.push('print file draws that placement at ' + PRINT_DPI + ' DPI from the source named');
   L.push('under PRINT SOURCE — the customer\'s PDF re-rendered, not the screen image.');
+
+  /* For the imposition tool, which reads this file next and decides where the two
+     disagree (owner, 2026-10-25). First the calculator modal's own labels — its
+     parseManifest() already reads Trim size, Binding, Booklet Specifications and
+     Filename, so the proofer speaks that format rather than asking it to learn a
+     new one. Then one line, PPS-JOB, carrying as JSON what that format has no
+     words for: whether the print file is the customer's own bytes, which pages
+     are meant to be blank, and each image page's real resolution. */
+  const BIND = { saddle:'Saddle Stitch', 'perfect-bound':'Perfect Bound', coupon:'Coupon Book' };
+  const colourWord = c => c === 'bw' ? 'Greyscale' : 'Full color';
+  const pressJob = {
+    v:1, calc:MODEL.calc, trim:{ w:MODEL.trim.w, h:MODEL.trim.h }, bleed:MODEL.bleed, safety:MODEL.safety,
+    pages:pages.length, insideColor:MODEL.insideColor === 'bw' ? 'bw' : 'color', coverColor:MODEL.coverColor === 'bw' ? 'bw' : 'color',
+    printFile:{ name:'PRINT_READY.pdf', sha256:printHash, untouched:!!original.bytes,
+                why:original.bytes ? null : (original.why || null), trimBox:!original.bytes },
+    blankPages:{ added, noArt:blanks },
+    notPrinted:(rc && rc.type !== 'padded') ? rc.dropped : [],
+    perPage:perPage.map(r => {
+      const k = (r.print || {}).kind;
+      return k === 'bitmap' ? { n:r.n, src:'image', dpi:r.effDpi } : { n:r.n, src:k === 'original' || k === 'pdf' ? 'pdf' : 'blank' };
+    }),
+    preflight:{ errors:_f.errors, warns:_f.warns, acknowledged:(_f.errors + _f.warns === 0) || !!document.getElementById('ackIssues').checked },
+  };
+  L.splice(2, 0,
+    '── Booklet Specifications ──',
+    'Filename: ' + ((origins[0] && origins[0].name) || 'artwork'),
+    'Trim size: ' + MODEL.trim.w + '″ × ' + MODEL.trim.h + '″',
+    'Bleed-inclusive size: ' + BLEED_W + '″ × ' + BLEED_H + '″',
+    'Bleed margin: ' + MODEL.bleed + '″ per side',
+    'Binding: ' + (BIND[MODEL.calc] || MODEL.calc),
+    'Page count (with padding): ' + pages.length,
+    'Inside printing: ' + colourWord(MODEL.insideColor),
+    'Cover printing: ' + colourWord(MODEL.coverColor),
+    'PPS-JOB ' + JSON.stringify(pressJob),
+    '');
   files.push({ name:'MANIFEST.txt', blob:new Blob([L.join('\n')], { type:'text/plain' }),
                note:'transforms, effective DPI, margins, hashes' });
 
@@ -3564,13 +3808,23 @@ function renderPackage(pkg){
 
 function deliverablesHtml(){
   const origins = deliverables();
+  // When the proof IS the customer's file, that file is what prints (untouchedOriginal);
+  // saying "flattened at 300 DPI" then would be untrue, and that case is common
+  // since 2026-10-25 — a link, a stamp or a hidden layer no longer forces a render.
+  const asSent = !!untouchedOriginal(MODEL.pages.map(p => p.n)).bytes;
   // Its heading is the toggle above it in the rail, which folds it away.
   return '<div class="deliv" id="deliv">' +
-    '<div class="delivrow"><strong>The print file.</strong> Every page flattened at 300 DPI exactly as you see it ' +
-      'here — the transforms baked in, nothing left to interpret. This is what goes on the press, because it is ' +
-      'what you approved.</div>' +
+    (asSent
+      ? '<div class="delivrow"><strong>The print file.</strong> Your own PDF, byte for byte — nothing rendered or ' +
+        're-encoded, its type and vectors exactly as made. Every page is exactly as you see it here, so it goes to ' +
+        'the press as you sent it.</div>'
+      : '<div class="delivrow"><strong>The print file.</strong> Every page flattened at 300 DPI exactly as you see it ' +
+        'here — the transforms baked in, nothing left to interpret. This is what goes on the press, because it is ' +
+        'what you approved.</div>') +
     '<div class="delivrow"><strong>Your original, untouched.</strong> ' +
-      (origins.length
+      (asSent
+        ? 'Kept exactly as sent. It is also the file we print from.'
+        : origins.length
         ? 'Kept exactly as sent and passed to production alongside the print file. It is the reference copy, not the ' +
           'one we print from.'
         : 'Whatever you send is kept exactly as sent, byte for byte, and passed to production alongside the print file.') +

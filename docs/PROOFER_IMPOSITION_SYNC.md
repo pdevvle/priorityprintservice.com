@@ -1,5 +1,21 @@
 # Proofer ↔ imposition tool: keeping file handling and preflight in sync
 
+> **Status, later on 2026-10-25.** The owner ruled that the imposition tool decides in
+> any conflict, and the proofer's half is done:
+> - its PDF readers are the imposition tool's, copied verbatim;
+> - its severities follow the imposition tool's;
+> - it ships the customer's file untouched only when the imposition tool would impose
+>   those bytes with no override;
+> - its rendered print file carries a TrimBox and BleedBox;
+> - its manifest carries the modal's labels plus a `PPS-JOB` JSON line.
+>
+> `tools-proof-imposition-sync-test.mjs` now passes all 26 checks against v1.61; the
+> old proofer fails 21 of them. What the imposition tool is asked to do is in
+> **`docs/IMPOSITION_SESSION_BRIEF.md`**. Art status on queue rows is first, because
+> NOT APPROVED orders still impose with a clean name. The "Build order" section below
+> is the original plan; Phase 1 is what landed, with one change: the shared reader is a
+> verbatim block plus a parity check, not a separate file.
+
 Analysis of 2026-10-25. Proofer: `proof-ui-draft.html` at `945cc78` (branch
 `claude/proofer-parity`, PR #56). Imposition tool: `imposition-tool.html` +
 `pps-imposition.php` v1.61 at `223cc0f` (branch

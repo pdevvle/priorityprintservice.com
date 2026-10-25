@@ -80,7 +80,7 @@ a real origin).
 | Suite | Covers | Env |
 |---|---|---|
 | `tools-proof-ui-draft-test.mjs` | Engine, core behaviour | hard-codes Playwright path and `:8137` |
-| `tools-proof-ui-preflight-test.mjs` | PDF preflight findings | hard-codes both |
+| `tools-proof-ui-preflight-test.mjs` | PDF preflight findings, graded the imposition tool's way (standard-14 passes, a stamp prints, a font or ink inside placed artwork is found) | hard-codes both |
 | `tools-proof-ui-mobile-test.mjs` | Touch layout, rotation | hard-codes both |
 | `tools-proof-ui-style-test.mjs` | **Design parity** — reads the palette from the saddle calculator; fails any rule whose `var()` does not resolve | `PPS_PLAYWRIGHT`, `PPS_PROOF_BASE`, `PPS_CALC_FILE` |
 | `tools-proof-embed-test.mjs` | The host seam / postMessage contract | `PPS_PLAYWRIGHT`, `PPS_PROOF_BASE` |
@@ -792,6 +792,13 @@ hidden, one set all-visible) — copy it if reviving the first.
 19. **A canvas you free must be one you own.** `composePage()` caches; anything that
     zeroes a canvas to save memory (the print loop, the second pass) must get one with
     `own`, or it corrupts the cache for the next caller.
+20. **The imposition tool decides** (owner, 2026-10-25). The block between the
+    `pps-imposition-copy` markers is its code; change it there and copy it back,
+    never here alone. `untouchedOriginal()` lists everything it refuses or advises
+    rasterising. A file goes to it untouched only when it would impose those bytes
+    with no override. `tools-proof-imposition-sync-test.mjs` checks both, against the
+    imposition tool's HTML (`PPS_IMPOSE_HTML`). `docs/IMPOSITION_SESSION_BRIEF.md` is
+    the contract.
 
 ---
 
