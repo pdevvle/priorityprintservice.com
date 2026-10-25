@@ -468,7 +468,10 @@ function pps_mp_api( $method, $path, array $query = array(), $body = null ) {
     if ( is_wp_error( $r ) ) return $r;
     $code = (int) wp_remote_retrieve_response_code( $r );
     $data = json_decode( (string) wp_remote_retrieve_body( $r ), true );
-    if ( $code < 200 || $code >= 300 ) return new WP_Error( 'missive_' . $code, 'Missive answered ' . $code . ( $code === 401 ? ' (the token was refused)' : '' ) . '.' );
+    if ( $code < 200 || $code >= 300 ) {
+        $why = is_array( $data ) ? trim( (string) ( $data['error'] ?? $data['message'] ?? ( is_array( $data['errors'] ?? null ) ? implode( '; ', array_map( 'strval', array_filter( $data['errors'], 'is_scalar' ) ) ) : '' ) ) ) : '';
+        return new WP_Error( 'missive_' . $code, 'Missive answered ' . $code . ( $code === 401 ? ' (the token was refused)' : '' ) . ( $why !== '' ? ': ' . mb_substr( $why, 0, 200 ) : '' ) . '.' );
+    }
     return is_array( $data ) ? $data : array();
 }
 
@@ -627,11 +630,49 @@ function pps_mp_set_due( $task_id, $ymd, $hm = '17:00' ) {
     if ( ! $at || $ymd !== gmdate( 'Y-m-d', strtotime( $ymd . ' 12:00 UTC' ) ) ) return new WP_Error( 'due', 'That is not a date.' );
     $tasks = pps_mp_tasks();
     if ( is_wp_error( $tasks ) ) return $tasks;
-    if ( ! pps_mp_task_listed( $tasks, $task_id ) ) return new WP_Error( 'unlisted', 'That task is not one of the subtasks the panel shows, so the panel will not change it.' );
-    $r = pps_mp_api( 'PATCH', 'tasks/' . rawurlencode( $task_id ), array(), array( 'tasks' => array( 'due_at' => $at ) ) );
-    if ( is_wp_error( $r ) ) return $r;
+    if ( ! pps_mp_task_listed( $tasks, $task_id ) ) {
+        // Not in the (up to 2-minute-old) list: ask Missive for that one task rather than refuse a
+        // subtask the panel was showing a moment ago. Still only a subtask — one in a conversation.
+        $one = pps_mp_api( 'GET', 'tasks/' . rawurlencode( $task_id ) );
+        $t1  = is_wp_error( $one ) ? null : pps_mp_task_of( $one );
+        if ( ! $t1 || (string) ( $t1['id'] ?? '' ) !== (string) $task_id || empty( $t1['conversation'] ) )
+            return new WP_Error( 'unlisted', 'That task is not one of the subtasks the panel shows, so the panel will not change it.' );
+    }
+    // Owner 2026-10-25: "Ensure that the due date changes are also changing the task within missive in
+    // all circumstances." So success is what MISSIVE says the due date now is, not a 200: the PATCH's
+    // own answer, else a fresh read of the task; on a mismatch the change is sent once more and read
+    // again, and a task still showing another date is reported, never shown as saved.
+    $seen = null;
+    for ( $try = 0; $try < 2; $try++ ) {
+        $r = pps_mp_api( 'PATCH', 'tasks/' . rawurlencode( $task_id ), array(), array( 'tasks' => array( 'due_at' => $at ) ) );
+        if ( is_wp_error( $r ) ) return $r;
+        $seen = pps_mp_due_of( $r );
+        if ( $seen !== $at ) {
+            $g = pps_mp_api( 'GET', 'tasks/' . rawurlencode( $task_id ) );
+            if ( ! is_wp_error( $g ) ) $seen = pps_mp_due_of( $g );
+        }
+        if ( $seen === $at ) break;
+    }
     delete_transient( PPS_MP_TASKS_CACHE );
+    if ( $seen !== $at ) {
+        $now = $seen ? pps_mp_unix_ymd( $seen ) . ' ' . pps_mp_unix_hm( $seen ) : 'no due date';
+        return new WP_Error( 'not_taken', 'Missive did not take the new due date — the task still shows ' . $now . '. Nothing was changed; try again or set it in Missive.' );
+    }
     return true;
+}
+
+/** The task object in a Missive task answer (`tasks` as an object or a one-item list, or `task`). */
+function pps_mp_task_of( $d ) {
+    if ( ! is_array( $d ) ) return null;
+    $t = $d['tasks'] ?? ( $d['task'] ?? null );
+    if ( is_array( $t ) && isset( $t[0] ) && is_array( $t[0] ) ) $t = $t[0];
+    return is_array( $t ) ? $t : null;
+}
+
+/** A Missive task answer's due_at as an int (0 when none), or null when the answer holds no task. */
+function pps_mp_due_of( $d ) {
+    $t = pps_mp_task_of( $d );
+    return $t === null ? null : (int) ( $t['due_at'] ?? 0 );
 }
 
 /* ── Creating one subtask per job ─────────────────────────────

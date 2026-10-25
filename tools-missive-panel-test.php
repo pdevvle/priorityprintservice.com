@@ -36,7 +36,21 @@ function wp_remote_request( $url, $args ) {
     if ( $path === '/v1/organizations' ) return array( 'code' => 200, 'body' => json_encode( array( 'organizations' => array( array( 'id' => 'org-1' ) ) ) ) );
     if ( $path === '/v1/tasks' && $args['method'] === 'GET' ) { $t = array_values( array_filter( $GLOBALS['mtasks'], function ( $t ) use ( $q ) { return $t['state'] === $q['state']; } ) ); return array( 'code' => 200, 'body' => json_encode( array( 'tasks' => $t ) ) ); }
     if ( strpos( $path, '/v1/conversations/' ) === 0 ) { $id = substr( $path, 18 ); return array( 'code' => 200, 'body' => json_encode( array( 'conversations' => array( array( 'id' => $id, 'subject' => $GLOBALS['msubjects'][ $id ] ?? 'Question about paper' ) ) ) ) ); }
-    if ( strpos( $path, '/v1/tasks/' ) === 0 && $args['method'] === 'PATCH' ) return array( 'code' => 200, 'body' => '{"tasks":{}}' );
+    // A Missive that behaves: PATCH applies the fields and answers with the task; GET reads one task.
+    // Switches: m_err (refuse with Missive's own words), m_empty (answer a PATCH with no task),
+    // m_ignore (answer 200 but change nothing — the case the due-date check exists for).
+    if ( strpos( $path, '/v1/tasks/' ) === 0 && in_array( $args['method'], array( 'PATCH', 'GET' ), true ) ) {
+        $id = substr( $path, 10 ); $k = null;
+        foreach ( $GLOBALS['mtasks'] as $i => $t ) if ( $t['id'] === $id ) $k = $i;
+        if ( $k === null ) return array( 'code' => 404, 'body' => '{"error":"Not found"}' );
+        if ( $args['method'] === 'PATCH' ) {
+            if ( ! empty( $GLOBALS['m_err'] ) ) return array( 'code' => 422, 'body' => '{"error":"due_at is invalid"}' );
+            $b = json_decode( $args['body'], true );
+            if ( empty( $GLOBALS['m_ignore'] ) ) foreach ( (array) ( $b['tasks'] ?? array() ) as $f => $v ) $GLOBALS['mtasks'][ $k ][ $f ] = $v;
+            if ( ! empty( $GLOBALS['m_empty'] ) ) return array( 'code' => 200, 'body' => '{}' );
+        }
+        return array( 'code' => 200, 'body' => json_encode( array( 'tasks' => $GLOBALS['mtasks'][ $k ] ) ) );
+    }
     if ( $path === '/v1/tasks' && $args['method'] === 'POST' ) { $GLOBALS['made'] = ( $GLOBALS['made'] ?? 0 ) + 1; if ( ! empty( $GLOBALS['fail_after'] ) && $GLOBALS['made'] > $GLOBALS['fail_after'] ) return array( 'code' => 500, 'body' => '{}' ); return array( 'code' => 201, 'body' => json_encode( array( 'tasks' => array( 'id' => 'new-' . $GLOBALS['made'], 'state' => 'todo' ) ) ) ); }
     return array( 'code' => 404, 'body' => '{}' );
 }
@@ -193,6 +207,24 @@ ok( $r === true && $last['args']['body'] === '{"tasks":{"due_at":' . pps_mp_due_
 $GLOBALS['http'] = array();
 ok( is_wp_error( pps_mp_set_due( 't1', '2026-10-30', '18:00' ) ) && is_wp_error( pps_mp_set_due( 't1', '2026-10-30', 'noon' ) ) && ! $GLOBALS['http'], 'only the 4 pm, 5 pm and 7 pm presets are accepted' );
 ok( pps_mp_unix_hm( 0 ) === '' && pps_mp_unix_hm( pps_mp_due_unix( '2026-10-26', '16:00' ) ) === '16:00', 'a task\'s due time is read back in shop time' );
+// Missive is the judge (owner 2026-10-25: "in all circumstances")
+$patches = function () { return count( array_filter( $GLOBALS['http'], function ( $h ) { return $h['args']['method'] === 'PATCH'; } ) ); };
+$GLOBALS['http'] = array();
+ok( pps_mp_set_due( 't1', '2026-11-02', '16:00' ) === true && $GLOBALS['mtasks'][0]['due_at'] === pps_mp_due_unix( '2026-11-02', '16:00' ) && $patches() === 1, 'the change lands on the task in Missive, confirmed from Missive\'s own answer, sent once' );
+$GLOBALS['http'] = array(); $GLOBALS['m_empty'] = 1;
+ok( pps_mp_set_due( 't1', '2026-11-03' ) === true && $GLOBALS['mtasks'][0]['due_at'] === pps_mp_due_unix( '2026-11-03' ) && $GLOBALS['http'][ count( $GLOBALS['http'] ) - 1 ]['args']['method'] === 'GET', 'when Missive answers without the task, the site reads the task back to confirm' );
+unset( $GLOBALS['m_empty'] ); $GLOBALS['http'] = array(); $GLOBALS['m_ignore'] = 1; $before = $GLOBALS['mtasks'][0]['due_at'];
+$r = pps_mp_set_due( 't1', '2026-11-09' );
+ok( is_wp_error( $r ) && strpos( $r->get_error_message(), 'did not take the new due date' ) !== false && strpos( $r->get_error_message(), '2026-11-03 17:00' ) !== false && $patches() === 2 && $GLOBALS['mtasks'][0]['due_at'] === $before, 'a Missive that answers OK but keeps the old date: sent once more, then reported with the date it still shows — never shown as saved', $r );
+unset( $GLOBALS['m_ignore'] ); $GLOBALS['m_err'] = 1;
+$r = pps_mp_set_due( 't1', '2026-11-09' );
+ok( is_wp_error( $r ) && strpos( $r->get_error_message(), 'Missive answered 422: due_at is invalid' ) !== false, 'a refusal names Missive\'s own reason', $r );
+unset( $GLOBALS['m_err'] ); $GLOBALS['http'] = array();
+$GLOBALS['tr'][ PPS_MP_TASKS_CACHE ] = array(); // the list no longer holds t1 (cache from before it was made, say)
+ok( pps_mp_set_due( 't1', '2026-11-04', '19:00' ) === true && $GLOBALS['mtasks'][0]['due_at'] === pps_mp_due_unix( '2026-11-04', '19:00' ) && strpos( $GLOBALS['http'][0]['url'], '/v1/tasks/t1' ) !== false, 'a subtask missing from the cached list is looked up directly, not refused' );
+$GLOBALS['tr'][ PPS_MP_TASKS_CACHE ] = array();
+ok( is_wp_error( pps_mp_set_due( 't4', '2026-11-04' ) ) && $GLOBALS['mtasks'][3]['due_at'] === 0, 'a direct lookup still refuses a task outside any conversation' );
+unset( $GLOBALS['tr'][ PPS_MP_TASKS_CACHE ] );
 $GLOBALS['opts'][ PPS_MP_ALLOW_OPTION ] = 0; $GLOBALS['http'] = array();
 ok( is_wp_error( pps_mp_set_due( 't1', '2026-10-30' ) ) && ! $GLOBALS['http'], 'with the switch off, refused without calling Missive' );
 $GLOBALS['opts'][ PPS_MP_ALLOW_OPTION ] = 1;
