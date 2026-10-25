@@ -17,7 +17,7 @@ const answer = { today: '2026-10-19', orders: [], missing: [], missive: { connec
   row({ order: 87002, item: 2, customer: 'Bo Ray', start: '2026-10-15', qty: '1000', size: '6×9', print: 'Inside Color · Cover Color', pages: '16 pp', rush: true, papers: [{ label: '80lb Matte Cardstock', sheet: '13x19', sheets: 90, key: 'm', in_stock: false }] }),
   row({ order: 87003, item: 3, customer: 'Cy Doe', addons: ['Coating: Aqueous'], finishing: ['Coating'] }),
   row({ order: 87400, item: 0, customer: 'Dee Fox', what: 'Reprint flyers', qty: 0, size: '', start: '2026-10-30', must_ship: '2026-10-30', delivery: '', paper: '', sheet: '', sheets: 0, papers: [], source: 'missive',
-        task: { id: 'tx', title: 'Reprint flyers', state: 'todo', due: '2026-10-30', started: '', conversation: 'c1' }, missive_only: true, reason: 'Order #87400 is completed', order_status: 'completed' }) ] };
+        task: { id: 'tx', title: 'Reprint flyers', state: 'todo', due: '2026-10-30', due_time: '17:00', started: '', conversation: 'c1' }, missive_only: true, reason: 'Order #87400 is completed', order_status: 'completed' }) ] };
 const b = await pw.chromium.launch(); const top = await b.newPage({ viewport: { width: 380, height: 900 } });
 top.on('pageerror', e => errs.push(e.message + ' @ ' + (e.stack||'').split('\n').slice(0,3).join(' | ')));
 // Missive loads the panel in a frame and the panel listens for conversation changes; a stand-in
@@ -75,7 +75,7 @@ ok(await p.evaluate(() => !document.querySelector('iframe.imp') && document.quer
 ok(await p.evaluate(() => { const r = document.querySelector('.pill-late').getBoundingClientRect(); return r.height < 30 && r.width < 200; }), 'a late-start pill is a small pill, not a full-screen overlay (Missive\'s own .alert class)');
 // a Missive task that is on no open job (owner 2026-10-20) — and the filters that hide rows, said
 const mrow = await p.evaluate(() => { const r = [...document.querySelectorAll('.row')].find(x => /Reprint flyers/.test(x.textContent)); return r ? r.textContent : null; });
-ok(mrow && /due Fri, Oct 30/.test(mrow) && /#87400/.test(mrow) && /Missive task only/.test(mrow) && /Order #87400 is completed/.test(mrow) && /Find in Missive/.test(mrow), 'a Missive task on no open job shows as its own row: due date, order, why it is not on a job', mrow);
+ok(mrow && /#87400/.test(mrow) && /Missive task only/.test(mrow) && /Order #87400 is completed/.test(mrow) && /Find in Missive/.test(mrow), 'a Missive task on no open job shows as its own row: due date, order, why it is not on a job', mrow);
 ok(await p.evaluate(() => /Missive-only tasks \(1\)/.test(document.querySelector('.tools').textContent)), 'it can be hidden with a tick that counts them');
 await p.selectOption('.tools select >> nth=0', 'week').catch(() => {});
 const when = await p.evaluate(() => { const s = [...document.querySelectorAll('.tools select')].find(x => [...x.options].some(o => o.value === 'week')); if (s) { s.value = 'week'; s.dispatchEvent(new Event('change')); } return !!s; });
@@ -128,6 +128,8 @@ ok(due && (await due.textContent()) === 'due Wed, Oct 21 at 5pm', 'the subtask\'
 const duePills = await q.$$eval('.subs button.pill.due', b => b.map(x => x.textContent));
 ok(duePills.includes('due Mon, Oct 26 at 4pm') && await q.evaluate(() => /Order subtask · Print 87001 \(AI\)/.test(document.querySelector('.subs').innerText) && /To do/.test(document.querySelector('.subs').innerText)), 'the conversation\'s order-level subtask is in the top box too, with its state and its own editable due pill', duePills);
 if (due) { await due.click(); await t2.waitForTimeout(50); }
+const boardDue = await q.evaluate(() => [...document.querySelectorAll('.row')].filter(r => !r.closest('.subs') && !r.closest('details.oc')).map(r => ({ t: r.innerText.slice(0, 60), btn: [...r.querySelectorAll('button.pill.due')].map(b => b.textContent), plain: [...r.querySelectorAll('span.pill.due')].map(b => b.textContent) })));
+ok(boardDue.length === 1 && boardDue[0].btn.length === 1 && boardDue[0].btn[0] === 'due Fri, Oct 30 at 5pm' && !/^due /.test(boardDue[0].t), 'a lower (board) task leads with the same clickable due pill, date and time — no plain date above it', boardDue);
 if (shot) await t2.screenshot({ path: shot.replace(/\.png$/, '-due.png'), clip: { x: 0, y: 0, width: 380, height: 360 } });
 const chips = await q.$$eval('.subs .duebox .tchip', b => b.map(x => x.textContent + (x.classList.contains('on') ? '*' : '')));
 ok(chips.join(',') === '4pm,5pm*,7pm', 'clicking it opens the date and the 4pm / 5pm / 7pm presets, the current time chosen', chips);

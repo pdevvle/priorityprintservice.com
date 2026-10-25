@@ -167,8 +167,9 @@ $GLOBALS['http'] = array();
 $r = pps_mp_set_state( 't1', 'in_progress' );
 ok( is_wp_error( $r ) && strpos( $r->get_error_message(), 'switched off' ) !== false && ! $GLOBALS['http'], 'changing a subtask is refused while the setting is off, without calling Missive', $r );
 $GLOBALS['opts'][ PPS_MP_ALLOW_OPTION ] = 1;
-$r = pps_mp_set_state( 't3', 'closed' );
-ok( is_wp_error( $r ) && strpos( $r->get_error_message(), 'not paired' ) !== false, 'an unpaired subtask is never changed', $r );
+$GLOBALS['http'] = array();
+ok( is_wp_error( pps_mp_set_state( 'nope', 'closed' ) ) && strpos( pps_mp_set_state( 'nope', 'closed' )->get_error_message(), 'not one of the subtasks' ) !== false
+    && is_wp_error( pps_mp_set_state( 't4', 'closed' ) ) && ! array_filter( $GLOBALS['http'], function ( $h ) { return $h['args']['method'] === 'PATCH'; } ), 'a task the panel does not list, or a standalone task outside any conversation, is never changed' );
 ok( is_wp_error( pps_mp_set_state( 't1', 'deleted' ) ), 'only to do / in progress / done are accepted' );
 $GLOBALS['http'] = array();
 $r = pps_mp_set_state( 't1', 'in_progress' );
@@ -176,7 +177,11 @@ $last = end( $GLOBALS['http'] );
 ok( $r === true && $last['args']['method'] === 'PATCH' && strpos( $last['url'], '/v1/tasks/t1' ) !== false && $last['args']['body'] === '{"tasks":{"state":"in_progress"}}', 'allowed: a paired subtask gets exactly its state changed, nothing else', $last );
 ok( ! isset( $GLOBALS['tr'][ PPS_MP_TASKS_CACHE ] ), 'the task cache is dropped after a change so the board shows it' );
 // due date (owner 2026-10-24)
-ok( is_wp_error( pps_mp_set_due( 't3', '2026-10-30' ) ) && strpos( pps_mp_set_due( 't3', '2026-10-30' )->get_error_message(), 'not paired' ) !== false, 'an unpaired subtask\'s due date is never changed' );
+ok( is_wp_error( pps_mp_set_due( 'nope', '2026-10-30' ) ) && is_wp_error( pps_mp_set_due( 't4', '2026-10-30' ) ), 'an unlisted task\'s due date, or a standalone task\'s, is never changed' );
+$GLOBALS['http'] = array();
+$r = pps_mp_set_due( 't3', '2026-10-30', '16:00' ); $last = end( $GLOBALS['http'] );
+ok( $r === true && strpos( $last['url'], '/v1/tasks/t3' ) !== false && $last['args']['body'] === '{"tasks":{"due_at":' . pps_mp_due_unix( '2026-10-30', '16:00' ) . '}}', 'a Missive-only row\'s subtask (no order in its conversation) can have its due date moved from the board too', $last );
+$GLOBALS['tr'] = array();
 ok( is_wp_error( pps_mp_set_due( 't1', '2026-02-30' ) ) && is_wp_error( pps_mp_set_due( 't1', 'tomorrow' ) ), 'only a real date is accepted' );
 $GLOBALS['http'] = array();
 $r = pps_mp_set_due( 't1', '2026-10-30' ); $last = end( $GLOBALS['http'] );

@@ -589,16 +589,25 @@ function pps_mp_answer( array $ids, $conv = '' ) {
     return $out;
 }
 
-/** Change one paired subtask's state. Returns true or a WP_Error naming why not. */
+/**
+ * Whether a task id is one of the subtasks the board shows (owner 2026-10-25: "the top box has the
+ * correct button but the lower tasks don't"): a paired job's or order's subtask, or a Missive-only
+ * row's — any SUBTASK (it sits in a conversation) in the panel's own task list. A task the panel does
+ * not list, or a standalone task with no conversation, is never changed.
+ */
+function pps_mp_task_listed( $tasks, $task_id ) {
+    if ( ! is_array( $tasks ) || (string) $task_id === '' ) return false;
+    foreach ( $tasks as $t ) if ( is_array( $t ) && (string) ( $t['id'] ?? '' ) === (string) $task_id && ! empty( $t['conversation'] ) ) return true;
+    return false;
+}
+
+/** Change one subtask's state. Returns true or a WP_Error naming why not. */
 function pps_mp_set_state( $task_id, $state ) {
     if ( ! get_option( PPS_MP_ALLOW_OPTION, false ) ) return new WP_Error( 'off', 'Changing subtasks from the panel is switched off (PPS Calculators → Missive Panel).' );
     if ( ! in_array( $state, array( 'todo', 'in_progress', 'closed' ), true ) ) return new WP_Error( 'state', 'Unknown state.' );
     $tasks = pps_mp_tasks();
     if ( is_wp_error( $tasks ) ) return $tasks;
-    list( $by, , $by_item ) = pps_mp_pair_tasks( $tasks, pps_mp_conv_map(), pps_mp_item_map() );
-    $ok = false;
-    foreach ( array_merge( array_values( $by ), array_values( $by_item ) ) as $t ) if ( $t['id'] === $task_id ) { $ok = true; break; }
-    if ( ! $ok ) return new WP_Error( 'unpaired', 'That task is not paired with an order, so the panel will not change it.' );
+    if ( ! pps_mp_task_listed( $tasks, $task_id ) ) return new WP_Error( 'unlisted', 'That task is not one of the subtasks the panel shows, so the panel will not change it.' );
     $r = pps_mp_api( 'PATCH', 'tasks/' . rawurlencode( $task_id ), array(), array( 'tasks' => array( 'state' => $state ) ) );
     if ( is_wp_error( $r ) ) return $r;
     delete_transient( PPS_MP_TASKS_CACHE );
@@ -618,10 +627,7 @@ function pps_mp_set_due( $task_id, $ymd, $hm = '17:00' ) {
     if ( ! $at || $ymd !== gmdate( 'Y-m-d', strtotime( $ymd . ' 12:00 UTC' ) ) ) return new WP_Error( 'due', 'That is not a date.' );
     $tasks = pps_mp_tasks();
     if ( is_wp_error( $tasks ) ) return $tasks;
-    list( $by, , $by_item ) = pps_mp_pair_tasks( $tasks, pps_mp_conv_map(), pps_mp_item_map() );
-    $ok = false;
-    foreach ( array_merge( array_values( $by ), array_values( $by_item ) ) as $t ) if ( $t['id'] === $task_id ) { $ok = true; break; }
-    if ( ! $ok ) return new WP_Error( 'unpaired', 'That task is not paired with an order, so the panel will not change it.' );
+    if ( ! pps_mp_task_listed( $tasks, $task_id ) ) return new WP_Error( 'unlisted', 'That task is not one of the subtasks the panel shows, so the panel will not change it.' );
     $r = pps_mp_api( 'PATCH', 'tasks/' . rawurlencode( $task_id ), array(), array( 'tasks' => array( 'due_at' => $at ) ) );
     if ( is_wp_error( $r ) ) return $r;
     delete_transient( PPS_MP_TASKS_CACHE );
@@ -782,7 +788,7 @@ a{color:#2563eb;cursor:pointer;text-decoration:none}
 .pill.k-pages{background:#e2f5f1;color:#0f5348;border-color:#9fd6cb} .pill.k-qty{background:#e8f5e2;color:#24521a;border-color:#b0d8a2}
 .pill.k-size{background:#fbf0dc;color:#6b4610;border-color:#e6c88f}
 .subs .row:last-child{border-bottom:0} .subs b{font-weight:600}
-button.pill.edit{cursor:pointer;font:inherit;font-size:11px} button.pill.edit:hover{border-color:#888} .duebox{display:inline-flex;flex-wrap:wrap;gap:3px;align-items:center} .duebox input{font-size:11px;padding:1px 2px} .tchip{font:inherit;font-size:11px;border:1px solid #bbb;border-radius:10px;padding:0 7px;background:transparent;cursor:pointer} .tchip.on{background:#1f6feb;border-color:#1f6feb;color:#fff}
+button.pill.edit{cursor:pointer;font:inherit;font-size:11px} button.pill.edit:hover{border-color:#888} .duebox{display:inline-flex;flex-wrap:wrap;gap:3px;align-items:center} .duebox input{font-size:11px;padding:1px 2px} .pill.due.overdue{color:#b42318;border-color:#f3b4ae} .tchip{font:inherit;font-size:11px;border:1px solid #bbb;border-radius:10px;padding:0 7px;background:transparent;cursor:pointer} .tchip.on{background:#1f6feb;border-color:#1f6feb;color:#fff}
 .pill.pill-flag{background:#7f1d1d;color:#fff;border-color:#5f1414;font-weight:600}
 .pill.pill-plain{background:rgba(128,128,128,.12);color:inherit;border-color:rgba(128,128,128,.35)} .pill.pill-late{background:#c62828;color:#fff;border-color:#a51f1f;font-weight:600}
 .tag{display:inline-block;border:1px solid rgba(128,128,128,.4);border-radius:3px;padding:0 4px;margin:1px 2px 1px 0;font-size:11px}
@@ -951,8 +957,9 @@ var DUE_TIMES = [['16:00','4pm'],['17:00','5pm'],['19:00','7pm']];
 function hm12(t){ if(!t) return ''; var h=+t.slice(0,2), m=t.slice(3,5); return (h%12||12)+(m!=='00'?':'+m:'')+(h<12?'am':'pm'); }
 function dueLabel(t){ return 'due '+(t.due ? md(t.due)+(t.due_time ? ' at '+hm12(t.due_time) : '') : '—'); }
 function duePill(t){
-  if(!DATA.missive.can_change) return el('span',{cls:'pill pill-plain due',text:dueLabel(t)});
-  var p = el('button',{cls:'pill pill-plain due edit',text:dueLabel(t),title:'Click to change this subtask\'s due date and time in Missive'});
+  var overdue = t.due && t.due < DATA.today && t.state !== 'closed';
+  if(!DATA.missive.can_change) return el('span',{cls:'pill pill-plain due'+(overdue?' overdue':''),text:dueLabel(t)});
+  var p = el('button',{cls:'pill pill-plain due edit'+(overdue?' overdue':''),text:dueLabel(t),title:'Click to change this subtask\'s due date and time in Missive'});
   p.addEventListener('click',function(){
     var f = el('span',{cls:'duebox'}), inp = el('input',{type:'date'}); inp.value = t.due || DATA.today;
     var pick = DUE_TIMES.some(function(x){ return x[0]===t.due_time; }) ? t.due_time : '17:00', chips = [];
@@ -1068,7 +1075,9 @@ function boardRow(r, here){
   var late = r.must_ship && r.must_ship < DATA.today;
   if(r.missive_only){
     var m = el('div',{cls:'row'});
-    m.appendChild(el('div',{},[ el('span',{cls:late?'late':'',text:r.must_ship?'due '+md(r.must_ship):'no due date'}), ' ',
+    // The due date is the subtask's own pill on the line below (clickable, with its time), so the
+    // header no longer repeats it as plain text; it only says so when the task has no due date.
+    m.appendChild(el('div',{},[ r.must_ship?null:el('span',{cls:'muted',text:'no due date '}),
       r.order?el('a',{text:'#'+r.order,on:function(){find(r.order);}}):null,
       r.order&&r.order_status&&CFG.ship?el('a',{cls:'small',text:' [Ship]',title:'Shipping rates and labels for this order',on:function(){ ship(r.order); }}):null,
       ' '+(r.customer?r.customer+' — ':'')+r.what ]));
