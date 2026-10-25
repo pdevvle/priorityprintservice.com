@@ -18,7 +18,7 @@ import { chromium } from './node_modules/playwright/index.mjs';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'; import path from 'node:path';
 const SP = path.dirname(new URL(import.meta.url).pathname);
 const V  = p => readFileSync(path.join(SP,'ui/vendor',p),'utf8');
-const b = await chromium.launch({ executablePath:'/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args:['--no-sandbox'] });
+const b = await chromium.launch({ executablePath: process.env.PPS_CHROME || '/opt/pw-browsers/chromium', args:['--no-sandbox'] });
 const p = await b.newPage({ viewport:{ width:1600, height:1000 } });
 const errs = [];
 p.on('pageerror', e => errs.push(String(e.message||e)));

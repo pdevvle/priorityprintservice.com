@@ -25,6 +25,18 @@ const probe = (x,y,w,h) => p.evaluate(([x,y,w,h])=>{
 
 ck('renders without errors', errs.length===0, errs[0]||'');
 
+// Page thumbnails live in the rail's page headings (owner's pick, 2026-10-25;
+// there used to be a row of them under the stage). Found by page number,
+// through the heading they sit in.
+const cellHelpers = () => p.evaluate(()=>{
+  window.__heads = () => [...document.querySelectorAll('#rail .acc')].slice(1);
+  window.__title = a => a.querySelector('.acchead span').textContent;
+  window.__cells = () => __heads().map(a=>a.querySelector('.pagehead .pg.mini'));
+  window.__cell  = n => __cells()[n-1];
+  window.__withArt = () => __cells().map((c,i)=>c && c.classList.contains('hasart') ? (i+1)+':'+c.title.replace('.png','') : null).filter(Boolean).join(',');
+});
+await cellHelpers();
+
 // ── the shell, carried forward from earlier rounds ──
 ck('approve disabled until agree', await p.evaluate(()=>document.getElementById('approveBtn').disabled===true));
 await p.click('#agree'); await p.waitForTimeout(200);
@@ -77,7 +89,10 @@ ck('the gate scans every page, not the selected one', await p.evaluate(()=>{
 // that a flag re-appearing does not silently re-lock approve was testing a box
 // that had been un-ticked behind its back.
 ck('page rows rendered', await p.evaluate(()=>document.querySelectorAll('#rail .acc').length)===9, 'want 9 (whole file + 8 pages)');
-ck('filmstrip groups', await p.evaluate(()=>document.querySelectorAll('#stripBottom .grp').length)===5);
+ck('every page heading carries that page\'s thumbnail', await p.evaluate(()=>
+  __cells().length===8 && __cells().every(Boolean)));
+ck('nothing sits under the stage to take height from the page', await p.evaluate(()=>
+  !document.getElementById('stripBottom') && !document.querySelector('.main .strip')));
 // Reversed on the owner's instruction, 2026-09-09. It used to be the opposite
 // assertion — the gate beside the button, not inside the text — but reading the
 // terms and accepting them in one box beats reading them here and accepting
@@ -129,10 +144,10 @@ ck('the whole bar is one row, mode toggle to APPROVE', await p.evaluate(()=>{
 ck('the disclaimer keeps a readable measure on that row', await p.evaluate(()=>
   document.querySelector('.note').getBoundingClientRect().width >= 380),
   await p.evaluate(()=>Math.round(document.querySelector('.note').getBoundingClientRect().width)+'px'));
-ck('no "center spread" caption under any thumbnail', await p.evaluate(()=>
-  ![...document.querySelectorAll('#stripBottom .pg')].some(e=>/spread/i.test(e.textContent))));
-ck('all filmstrip cells identical box', await p.evaluate(()=>{
-  const r=[...document.querySelectorAll('#stripBottom .pg')].map(e=>e.getBoundingClientRect());
+ck('no "center spread" label on any page', await p.evaluate(()=>
+  !__heads().some(a=>/spread/i.test(__title(a)))));
+ck('every heading thumbnail is the same box', await p.evaluate(()=>{
+  const r=__cells().map(e=>e.getBoundingClientRect());
   return r.length===8 && r.every(x=>Math.abs(x.width-r[0].width)<0.6 && Math.abs(x.height-r[0].height)<0.6);}));
 ck('undo reads "Undo" with an icon', await p.evaluate(()=>{
   const u=document.querySelector('.undo');
@@ -226,9 +241,9 @@ await p.waitForTimeout(300);
 
 // ── one engine feeds every surface ──
 ck('thumbnails come from the same composition', await p.evaluate(()=>
-  /^url\("data:image\/png/.test(document.querySelector('#stripBottom .pg .thumb').style.backgroundImage)));
+  /^url\("data:image\/png/.test(__cell(1).querySelector('.thumb').style.backgroundImage)));
 ck('changing a transform changes that page thumbnail', await p.evaluate(async ()=>{
-  const get=()=>document.querySelector('#stripBottom .pg .thumb').style.backgroundImage;
+  const get=()=>__cell(1).querySelector('.thumb').style.backgroundImage;
   const before=get();
   const sel=document.querySelector('.behavior select');
   sel.value='stretch'; sel.dispatchEvent(new Event('change'));
@@ -366,7 +381,7 @@ ck('3D hides the legend and the artwork-edit panel', await p.evaluate(()=>
   && getComputedStyle(document.getElementById('railEdit')).display==='none'));
 ck('3D puts the thumbnails in the right rail', await p.evaluate(()=>
   document.querySelectorAll('#stripRail .pg').length===8
-  && document.querySelectorAll('#stripBottom .pg').length===0));
+  && !document.getElementById('stripBottom')));
 ck('closed book builds all six faces', await p.evaluate(()=>{
   const f=[...document.querySelectorAll('#bpv .bpface')];
   return f.length===6 && ['front','back','topedge','bottomedge','foreedge','spineedge']
@@ -479,20 +494,20 @@ ck('ticking it copies this page to every page', await p.evaluate(async ()=>{
   sel.value='fill'; sel.dispatchEvent(new Event('change')); await new Promise(r=>setTimeout(r,200));
   document.getElementById('applyAll').click(); await new Promise(r=>setTimeout(r,300));
   // every thumbnail should now be composed the same way: none flags a bleed gap
-  return !document.querySelector('#stripBottom .pg .dot');}));
+  return !__heads().some(a=>a.querySelector('.acchead .bang'));}));
 ck('and later changes keep every page matched', await p.evaluate(async ()=>{
   const sel=document.querySelector('.behavior select');
   sel.value='fit'; sel.dispatchEvent(new Event('change')); await new Promise(r=>setTimeout(r,350));
   // Fit letterboxes, so EVERY page should now report the bleed gap
-  return document.querySelectorAll('#stripBottom .pg .dot').length===8;}),
-  await p.evaluate(()=>document.querySelectorAll('#stripBottom .pg .dot').length+' of 8 flagged'));
+  return __heads().filter(a=>a.querySelector('.acchead .bang')).length===8;}),
+  await p.evaluate(()=>__heads().filter(a=>a.querySelector('.acchead .bang')).length+' of 8 flagged'));
 ck('unticking lets pages diverge again', await p.evaluate(async ()=>{
   document.getElementById('applyAll').click(); await new Promise(r=>setTimeout(r,250));
   const sel=document.querySelector('.behavior select');
   sel.value='fill'; sel.dispatchEvent(new Event('change')); await new Promise(r=>setTimeout(r,350));
   // only the open page changed, so 7 of 8 still carry the Fit bleed gap
-  return document.querySelectorAll('#stripBottom .pg .dot').length===7;}),
-  await p.evaluate(()=>document.querySelectorAll('#stripBottom .pg .dot').length+' of 8 flagged'));
+  return __heads().filter(a=>a.querySelector('.acchead .bang')).length===7;}),
+  await p.evaluate(()=>__heads().filter(a=>a.querySelector('.acchead .bang')).length+' of 8 flagged'));
 
 // ── longer documents ──
 for (const [count, groups, spreads] of [[16,9,7],[64,33,31]]){
@@ -503,15 +518,13 @@ for (const [count, groups, spreads] of [[16,9,7],[64,33,31]]){
   ck(count+'pp: rail lists every page', await p.evaluate(c=>
     document.querySelectorAll('#rail .acc').length===c+1, count),
     await p.evaluate(()=>document.querySelectorAll('#rail .acc').length+' rows'));
-  ck(count+'pp: filmstrip pairs interior pages into spreads', await p.evaluate(([c,g])=>
-    document.querySelectorAll('#stripBottom .grp').length===g
-    && document.querySelectorAll('#stripBottom .pg').length===c, [count,groups]),
-    await p.evaluate(()=>document.querySelectorAll('#stripBottom .grp').length+' groups, '
-      +document.querySelectorAll('#stripBottom .pg').length+' pages'));
+  ck(count+'pp: every page heading carries its thumbnail', await p.evaluate(c=>
+    __cells().length===c && __cells().every(Boolean), count),
+    await p.evaluate(()=>__cells().filter(Boolean).length+' thumbnails'));
   ck(count+'pp: covers are still named, interior pages are not', await p.evaluate(c=>{
-    const cells=[...document.querySelectorAll('#stripBottom .pg')];
-    return /front cover/.test(cells[0].textContent) && /back cover/.test(cells[c-1].textContent)
-        && /inside front cover/.test(cells[1].textContent);}, count));
+    const h=__heads();
+    return /front cover/.test(__title(h[0])) && /back cover/.test(__title(h[c-1]))
+        && /inside front cover/.test(__title(h[1])) && !/\(/.test(__title(h[2]));}, count));
   ck(count+'pp: no horizontal page scroll', await p.evaluate(()=>
     document.documentElement.scrollWidth<=window.innerWidth+1));
   ck(count+'pp: rebuilt in reasonable time', ms<9000, ms+'ms');
@@ -521,14 +534,17 @@ for (const [count, groups, spreads] of [[16,9,7],[64,33,31]]){
                    || document.querySelectorAll('#rail .acc').length<12;
     return sh.height<=920 && railScrolls;}),
     await p.evaluate(()=>Math.round(document.querySelector('.shell').getBoundingClientRect().height)+'px tall'));
-  ck(count+'pp: the filmstrip does not become a wall', await p.evaluate(()=>
-    document.getElementById('stripBottom').getBoundingClientRect().height<=232),
-    await p.evaluate(()=>Math.round(document.getElementById('stripBottom').getBoundingClientRect().height)+'px'));
-  ck(count+'pp: the artwork is still the biggest thing on screen', await p.evaluate(()=>{
-    const a=document.getElementById('sheet').getBoundingClientRect();
-    const strip=document.getElementById('stripBottom').getBoundingClientRect();
-    return a.height>strip.height;}));
+  ck(count+'pp: the stage has the whole height of its column', await p.evaluate(()=>{
+    const m=document.querySelector('.main').getBoundingClientRect(), w=document.querySelector('.stagewrap').getBoundingClientRect();
+    return w.height>=m.height-40;}),
+    await p.evaluate(()=>Math.round(document.querySelector('.stagewrap').getBoundingClientRect().height)+' of '
+      +Math.round(document.querySelector('.main').getBoundingClientRect().height)+'px'));
   await go('book'); await p.waitForTimeout(500);
+  ck(count+'pp: in 3D the strip pairs interior pages into spreads', await p.evaluate(([c,g])=>
+    document.querySelectorAll('#stripRail .grp').length===g
+    && document.querySelectorAll('#stripRail .pg').length===c, [count,groups]),
+    await p.evaluate(()=>document.querySelectorAll('#stripRail .grp').length+' groups, '
+      +document.querySelectorAll('#stripRail .pg').length+' pages'));
   ck(count+'pp: the book gets visibly thicker', await p.evaluate(c=>{
     const half=parseFloat(document.querySelector('#bpv .bpclosed').style.getPropertyValue('--half-depth'));
     return Math.abs(half-Math.max(2,c*0.3)/2)<0.01;}, count),
@@ -551,12 +567,12 @@ await p.selectOption('#pageCount','8'); await p.waitForTimeout(700);
 
 // ── uploads live on the page tiles ──
 ck('every page tile carries an upload chip', await p.evaluate(()=>
-  document.querySelectorAll('#stripBottom .pg .pgup').length===8));
+  __cells().filter(c=>c && c.querySelector('.pgup')).length===8));
 ck('pages with no file are marked as such', await p.evaluate(()=>
-  document.querySelectorAll('#stripBottom .pg.hasart').length===0
-  && [...document.querySelectorAll('#stripBottom .pg')].every(e=>/No file on this page yet/.test(e.title))));
+  __withArt()===''
+  && __cells().every(e=>/No file on this page yet/.test(e.title))));
 ck('the upload chip does not also select the page', await p.evaluate(async ()=>{
-  const t=[...document.querySelectorAll('#stripBottom .pg')].find(e=>/P5/.test(e.textContent));
+  const t=__cell(5);
   let bubbled=false;
   t.addEventListener('click',()=>{bubbled=true;},{once:true});
   t.querySelector('.pgup').dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
@@ -573,22 +589,18 @@ await mkfile('A',1800,1200,'#8b1f3f');
 ck('dropping a file on a tile attaches it to THAT page', await p.evaluate(async ()=>{
   loadArtSequence(4,[window.__f.A]);
   await new Promise(r=>setTimeout(r,700));
-  const p4=[...document.querySelectorAll('#stripBottom .pg')].find(e=>/P4/.test(e.textContent));
-  return p4.classList.contains('hasart') && /A\.png/.test(p4.title)
-      && document.querySelectorAll('#stripBottom .pg.hasart').length===1;}),
-  await p.evaluate(()=>[...document.querySelectorAll('#stripBottom .pg.hasart')].map(e=>e.textContent.match(/P(\d+)/)[1]).join(',')));
+  const p4=__cell(4);
+  return p4.classList.contains('hasart') && /A\.png/.test(p4.title) && __withArt()==='4:A';}),
+  await p.evaluate(()=>__withArt()));
 await mkfile('B',1800,1200,'#1f5f8b'); await mkfile('C',1800,1200,'#2f7a4f');
 ck('several files fill onward from the tile, in name order', await p.evaluate(async ()=>{
   loadArtSequence(6,[window.__f.C,window.__f.B]);          // deliberately out of order
   await new Promise(r=>setTimeout(r,900));
-  return [...document.querySelectorAll('#stripBottom .pg.hasart')]
-    .map(e=>e.textContent.match(/P(\d+)/)[1]+':'+e.title.replace('.png',''))
-    .join(',')==='4:A,6:B,7:C';}),
-  await p.evaluate(()=>[...document.querySelectorAll('#stripBottom .pg.hasart')].map(e=>e.textContent.match(/P(\d+)/)[1]+':'+e.title.replace('.png','')).join(',')));
+  return __withArt()==='4:A,6:B,7:C';}),
+  await p.evaluate(()=>__withArt()));
 ck('an upload changes that page and leaves its neighbour alone', await p.evaluate(()=>{
-  const t=[...document.querySelectorAll('#stripBottom .pg')];
-  return t.find(e=>/P4/.test(e.textContent)).querySelector('.thumb').style.backgroundImage
-      !== t.find(e=>/P5/.test(e.textContent)).querySelector('.thumb').style.backgroundImage;}));
+  return __cell(4).querySelector('.thumb').style.backgroundImage
+      !== __cell(5).querySelector('.thumb').style.backgroundImage;}));
 
 // ── the anchor grid only offers points that can move this file ──
 await openPage(4); await p.waitForTimeout(350);

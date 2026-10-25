@@ -43,7 +43,7 @@ async function open(b, viewport) {
   return { p, dialogs, errs };
 }
 
-const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'] });
+const b = await chromium.launch({ executablePath: process.env.PPS_CHROME || '/opt/pw-browsers/chromium', args: ['--no-sandbox'] });
 
 // ── 1. the artwork gate ─────────────────────────────────────────────────────
 {

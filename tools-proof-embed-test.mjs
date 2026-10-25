@@ -28,7 +28,7 @@ const ok = (label, cond, detail) => {
 };
 
 const browser = await chromium.launch({
-  executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+  executablePath: process.env.PPS_CHROME || '/opt/pw-browsers/chromium',
   args: ['--no-sandbox'],
 });
 
@@ -143,15 +143,18 @@ console.log('\n── approving returns the package to the host ──');
   await page.waitForTimeout(300);
 
   // ── the press simulation, on every surface the customer looks at ──
-  const grey = await page.evaluate(() => {
+  const grey = await page.evaluate(async () => {
     const filt = () => document.querySelector('#sheet canvas').style.filter;
-    const thumb = n => [...document.querySelectorAll('#stripBottom .pg')]
-      .find(e => new RegExp('P' + n + '(\\D|$)').test(e.querySelector('.n').textContent))
-      .querySelector('.thumb').style.filter;
+    // page n's thumbnail, in its heading in the rail
+    const thumb = n => [...document.querySelectorAll('#rail .acc')][n]
+      .querySelector('.pagehead .pg.mini .thumb').style.filter;
     state.selected = 1; renderAll(); const p1 = filt();
     state.selected = 3; renderAll(); const p3 = filt();
     return { p1, p3, t1: thumb(1), t3: thumb(3), t12: thumb(12),
-             printIsColour: (() => { const c = renderPrintPage(3).canvas;
+             // renderPrintPage is async since 2026-09-28: it re-renders the page
+             // from its source at print resolution rather than reusing the
+             // screen raster.
+             printIsColour: await (async () => { const c = (await renderPrintPage(3)).canvas;
                const d = c.getContext('2d').getImageData(c.width/2|0, c.height/2|0, 1, 1).data;
                return Math.max(d[0],d[1],d[2]) - Math.min(d[0],d[1],d[2]) > 30; })() };
   });

@@ -64,7 +64,7 @@ const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64').replace(/\+
 const SHIP = { shipState: 'AZ', shipAddr: { name: 'Test', street1: '1 Main St', city: 'Phoenix', zip: '85087' } };
 const field = (body, name) => { const m = body.match(new RegExp('name="' + name + '"\\r\\n\\r\\n([\\s\\S]*?)\\r\\n--')); return m ? m[1] : null; };
 
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'] });
+const browser = await chromium.launch({ executablePath: process.env.PPS_CHROME || '/opt/pw-browsers/chromium', args: ['--no-sandbox'] });
 
 async function open(file, reorder) {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 1100 } });

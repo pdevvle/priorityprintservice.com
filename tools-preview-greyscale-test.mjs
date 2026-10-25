@@ -35,7 +35,7 @@ const ok = (label, cond, detail) => {
 
 async function run(which) {
   branch = which;
-  const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'] });
+  const b = await chromium.launch({ executablePath: process.env.PPS_CHROME || '/opt/pw-browsers/chromium', args: ['--no-sandbox'] });
   const p = await (await b.newContext({ viewport: { width: 1400, height: 1000 } })).newPage();
   const errs = []; p.on('pageerror', e => errs.push(String(e).slice(0, 200)));
   await p.goto('http://127.0.0.1:8137/' + file, { waitUntil: 'domcontentloaded' });
