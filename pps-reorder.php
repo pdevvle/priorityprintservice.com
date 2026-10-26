@@ -437,7 +437,22 @@ function pps_order_lookup_active_email() {
 
 add_shortcode( 'pps_order_lookup', 'pps_order_lookup_shortcode' );
 
+/**
+ * The lookup page is never page-cached. Its form carries a nonce, and a cached copy outlives it:
+ * on 2026-10-26 WP Rocket was serving a /reorders/ cached 23 hours earlier, whose nonce WordPress
+ * no longer accepted, so every lookup came back blank — no results, no error, no reorder button.
+ * The quote page has the same rule. Defined before output so the page cache never stores it.
+ */
+add_action( 'template_redirect', function () {
+    if ( ! is_singular() ) return;
+    $post = get_post();
+    if ( ! $post || ! has_shortcode( (string) $post->post_content, 'pps_order_lookup' ) ) return;
+    if ( ! defined( 'DONOTCACHEPAGE' ) ) define( 'DONOTCACHEPAGE', true );
+    nocache_headers();
+}, 1 );
+
 function pps_order_lookup_shortcode() {
+    if ( ! defined( 'DONOTCACHEPAGE' ) ) define( 'DONOTCACHEPAGE', true );
     $error_kind = '';
 
     if ( isset( $_POST['pps_lookup_signout'] )
@@ -485,6 +500,11 @@ function pps_order_lookup_shortcode() {
                 $error_kind = 'mismatch';
             }
         }
+    } elseif ( isset( $_POST['pps_lookup_submit'] ) ) {
+        // A stale form (its nonce older than WordPress accepts) used to fall through in silence:
+        // the page came back blank with no results and no error (found 2026-10-26, when a 23-hour-old
+        // page-cached copy of /reorders/ was being served). Say so; the form below is fresh.
+        $error_kind = 'expired';
     }
 
     // ── Contact form submission ──
@@ -551,7 +571,10 @@ function pps_order_lookup_render_banner( $kind ) {
             <path d="M8 4v5M8 11.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
         </svg>
         <div>
-            <?php if ( $is_rate ) : ?>
+            <?php if ( $kind === 'expired' ) : ?>
+                <strong>That page had expired, so your lookup didn&rsquo;t go through.</strong>
+                <div style="font-size:12px;margin-top:2px;color:var(--mid)">Please enter your order details again &mdash; this form is fresh.</div>
+            <?php elseif ( $is_rate ) : ?>
                 <strong>Too many attempts.</strong>
                 <div style="font-size:12px;margin-top:2px;color:var(--mid)">Please try again in 15 minutes.</div>
             <?php else : ?>

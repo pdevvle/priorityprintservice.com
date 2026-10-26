@@ -65,6 +65,13 @@ ok( strpos( $page['page'] ?? '', 'reorder access ends 30 minutes after you look 
 $page = json_decode( (string) shell_exec( 'php ' . escapeshellarg( __FILE__ ) . ' child page ' . escapeshellarg( '<script>alert(1)</script>' ) . ' 2>&1' ), true );
 ok( ( $page['page'] ?? '' ) === '<cart/>', 'an unknown code prints nothing — only the fixed sentences can appear', $page );
 
+// The lookup page must never be page-cached: a cached copy carries a nonce WordPress stops accepting (2026-10-26).
+$c = json_decode( (string) shell_exec( 'php ' . escapeshellarg( __FILE__ ) . ' child cache ' . escapeshellarg( $src ) . ' 2>&1' ), true );
+$o = json_decode( (string) shell_exec( 'php ' . escapeshellarg( __FILE__ ) . ' child cache-other ' . escapeshellarg( $src ) . ' 2>&1' ), true );
+ok( ( $c['nocache'] ?? false ) === true && ( $o['nocache'] ?? true ) === false, 'the page holding the order lookup is never page-cached; other pages are untouched', array( $c, $o ) );
+$code = file_get_contents( $src );
+ok( (bool) preg_match( "/\\} elseif \\( isset\\( \\\$_POST\\['pps_lookup_submit'\\] \\) \\) \\{[\\s\\S]{0,400}\\\$error_kind = 'expired';/", $code ) && strpos( $code, 'so your lookup didn&rsquo;t go through' ) !== false, 'a lookup sent from a stale form says so, instead of coming back blank' );
+
 echo "\n$checks checks, $failed failed\n";
 echo $failed ? ">>> REORDER WCPA FAILED\n" : ">>> REORDER WCPA OK\n";
 exit( $failed ? 1 : 0 );
@@ -101,6 +108,11 @@ function child( $scenario, $src ) {
     function wp_safe_redirect( $u ) { $GLOBALS['redirect'] = $u; }
     function get_transient( $k ) { return apply_filters( 'transient_' . $k, $GLOBALS['transients'][ $k ] ?? false, $k ); }
     function is_admin() { return false; }
+    function is_singular() { return true; }
+    function get_post() { return (object) array( 'post_content' => $GLOBALS['page_content'] ?? '' ); }
+    function has_shortcode( $c, $t ) { return strpos( $c, '[' . $t ) !== false; }
+    function nocache_headers() { $GLOBALS['nocache_sent'] = true; }
+    $GLOBALS['page_content'] = $scenario === 'cache' ? '<p>[pps_order_lookup]</p>' : '<p>About us</p>';
     $GLOBALS['notices'] = array(); $GLOBALS['transients']['wcpa_products_transient_ver_3'] = array( 'full' => array( 83664, 999 ), 'direct_purchasable' => array() );
     define( 'WCPA_ORDER_META_KEY', '_WCPA_order_meta_data' );
 
@@ -164,6 +176,11 @@ function child( $scenario, $src ) {
     } );
 
     if ( $scenario === 'stale' ) $GLOBALS['stale'] = true;
+    if ( $scenario === 'cache' || $scenario === 'cache-other' ) {
+        $GLOBALS['done_page'] = 1;
+        do_action( 'template_redirect' );
+        echo json_encode( array( 'nocache' => defined( 'DONOTCACHEPAGE' ) && ! empty( $GLOBALS['nocache_sent'] ) ) ); exit;
+    }
     if ( $scenario === 'page' ) { $GLOBALS['done_page'] = 1; $_GET = array( 'pps_reorder_msg' => $code ); echo json_encode( array( 'page' => apply_filters( 'the_content', '<cart/>' ) ) ); exit; }
     if ( $scenario === 'plain' ) { $GLOBALS['cart']->add_to_cart( 83664, 1 ); exit; }
     $_GET = array( 'pps_reorder_order' => '87533', 'pps_reorder_item' => '44995', 'pps_reorder_tier' => '0', '_wpnonce' => 'n' );
