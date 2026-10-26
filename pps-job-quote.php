@@ -191,6 +191,12 @@ function pps_quote_create( array $a ) {
     // serve a standing job. Off unless asked for: the price is frozen into the
     // link, so a reusable one quotes today's figure indefinitely.
     if ( ! empty( $a['reusable'] ) ) update_post_meta( $id, '_q_reusable', 1 );
+    // Nothing ships: billing only, and no delivery date to choose, so the
+    // date picker is forced off whatever min_days said.
+    if ( ! empty( $a['noship'] ) ) {
+        update_post_meta( $id, '_q_noship', 1 );
+        update_post_meta( $id, '_q_allow_date', 0 );
+    }
     update_post_meta( $id, '_q_allow_date', ! empty( $a['allow_date'] ) ? 1 : 0 );
     update_post_meta( $id, '_q_min_days', max( 0, (int) ( $a['min_days'] ?? 0 ) ) );
     update_post_meta( $id, '_q_pay_source', $source );
@@ -226,6 +232,7 @@ function pps_quote_get( $token ) {
         'order'      => (int) get_post_meta( $id, '_q_order', true ),
         'orders'     => array_values( (array) get_post_meta( $id, '_q_orders', true ) ),
         'reusable'   => (bool) get_post_meta( $id, '_q_reusable', true ),
+        'noship'     => (bool) get_post_meta( $id, '_q_noship', true ),
         'note'       => (string) get_post_meta( $id, '_q_note', true ),
     );
 }
@@ -253,6 +260,62 @@ function pps_quote_url( $token ) {
     $page = get_page_by_path( 'quote' );
     $base = $page ? get_permalink( $page ) : home_url( '/quote/' );
     return add_query_arg( 'q', rawurlencode( $token ), $base );
+}
+
+/**
+ * Which posted block is the billing address and which is the destination.
+ *
+ * WHY THIS IS A FUNCTION OF ITS OWN
+ *
+ * Getting it backwards ships the job to the cardholder instead of the
+ * recipient, which is the shape of the fault behind order 87032. It used to be
+ * three closures inside pps_quote_to_order(), reachable only by building a
+ * WooCommerce order, so the suite that covered it tested a RETYPED COPY -- a
+ * copy that would have gone on passing while the real code said something else.
+ *
+ * The form version decides, and it travels with the markup rather than being
+ * read off the quote, so a page already open in somebody's tab is interpreted
+ * exactly as it was rendered:
+ *
+ *   v1  the primary block is BILLING;     s_ overrides the destination
+ *   v2  the primary block is the DESTINATION; b_ overrides billing
+ *   v3  the primary block is BILLING and nothing ships at all
+ *
+ * @return array{bill:array<string,string>,ship:array<string,string>,ships:bool}
+ */
+function pps_quote_resolve_addresses( array $p ) {
+    $keys = array( 'first', 'last', 'company', 'address_1', 'address_2', 'city', 'state', 'postcode' );
+    $v    = (string) ( $p['pps_form_v'] ?? '' );
+    $v3   = ( '3' === $v );
+    $v2   = ( '2' === $v );
+
+    $get = function ( $k ) use ( $p ) {
+        return isset( $p[ $k ] ) ? sanitize_text_field( $p[ $k ] ) : '';
+    };
+    // The alternate block: billing overrides in v2, the destination in v1.
+    $alt_prefix = $v2 ? 'b_' : 's_';
+    $alt_same   = $v2 ? ! empty( $p['bill_same'] ) : ! empty( $p['ship_same'] );
+
+    $bill = array();
+    $ship = array();
+    foreach ( $keys as $k ) {
+        $primary = $get( $k );
+        $alt     = $alt_same ? $primary : $get( $alt_prefix . $k );
+        if ( $v3 ) {
+            // Nothing ships, and the destination is left genuinely EMPTY rather
+            // than copied from billing: a shipping address that is really the
+            // cardholder's is how something gets posted to the wrong place.
+            $bill[ $k ] = $primary;
+            $ship[ $k ] = '';
+        } elseif ( $v2 ) {
+            $bill[ $k ] = $alt;
+            $ship[ $k ] = $primary;
+        } else {
+            $bill[ $k ] = $primary;
+            $ship[ $k ] = $alt;
+        }
+    }
+    return array( 'bill' => $bill, 'ship' => $ship, 'ships' => ! $v3 );
 }
 
 /**
@@ -307,7 +370,13 @@ function pps_quote_to_order( array $q, array $p ) {
 
     $email = isset( $p['email'] ) ? sanitize_email( $p['email'] ) : '';
     if ( ! $email || ! is_email( $email ) ) return new WP_Error( 'email', 'Please enter a valid email address.' );
-    foreach ( array( 'first' => 'first name', 'last' => 'last name', 'phone' => 'phone number', 'address_1' => 'street address', 'city' => 'city', 'state' => 'state', 'postcode' => 'ZIP code' ) as $k => $label ) {
+    // Phone is collected FOR THE CARRIER -- the label says so. Nothing ships on
+    // a *virtual order, so requiring it would be asking for something no one
+    // will use. Everything else still applies: the billing address is wanted
+    // for the card and for the invoice.
+    $need = array( 'first' => 'first name', 'last' => 'last name', 'phone' => 'phone number', 'address_1' => 'street address', 'city' => 'city', 'state' => 'state', 'postcode' => 'ZIP code' );
+    if ( ! empty( $q['noship'] ) ) unset( $need['phone'] );
+    foreach ( $need as $k => $label ) {
         if ( empty( $p[ $k ] ) ) return new WP_Error( $k, 'Please enter your ' . $label . '.' );
     }
 
@@ -342,63 +411,49 @@ function pps_quote_to_order( array $q, array $p ) {
 
     $order->set_created_via( 'pps-job-quote' );
 
-    // Which address the primary fields carry depends on the form that posted.
-    //
-    // v2 asks for the DESTINATION first, because that is the answer the job
-    // actually needs — it drives transit, and the customer knows it before
-    // they think about a card. Billing then defaults to it. v1 asked the other
-    // way round. The version travels with the form so a link already open in
-    // somebody's tab keeps being read the way it was rendered; getting this
-    // backwards would silently ship to the cardholder instead of the
-    // recipient, which is the shape of the fault behind order 87032.
-    $v2 = ( '2' === (string) ( $p['pps_form_v'] ?? '' ) );
-
-    $primary = function( $k ) use ( $p ) {
-        return isset( $p[ $k ] ) ? sanitize_text_field( $p[ $k ] ) : '';
-    };
-    // The alternate block: billing overrides in v2, shipping overrides in v1.
-    $alt_prefix = $v2 ? 'b_' : 's_';
-    $alt_same   = $v2 ? ! empty( $p['bill_same'] ) : ! empty( $p['ship_same'] );
-    $alt = function( $k ) use ( $p, $alt_prefix, $alt_same, $primary ) {
-        if ( $alt_same ) return $primary( $k );
-        $src = $alt_prefix . $k;
-        return isset( $p[ $src ] ) ? sanitize_text_field( $p[ $src ] ) : '';
-    };
+    $addr = pps_quote_resolve_addresses( $p );
+    $v3   = ! $addr['ships'];
 
     // Contact details are contact, not address — they belong to the person
     // buying whichever way round the form asked.
     $order->set_billing_email( $email );
     $order->set_billing_phone( isset( $p['phone'] ) ? sanitize_text_field( $p['phone'] ) : '' );
 
-    $bill = $v2 ? $alt : $primary;   // v2: billing is the alternate block
-    $ship = $v2 ? $primary : $alt;   // v2: shipping is the primary block
-
-    $order->set_billing_first_name( $bill( 'first' ) );
-    $order->set_billing_last_name( $bill( 'last' ) );
-    $order->set_billing_company( $bill( 'company' ) );
-    $order->set_billing_address_1( $bill( 'address_1' ) );
-    $order->set_billing_address_2( $bill( 'address_2' ) );
-    $order->set_billing_city( $bill( 'city' ) );
-    $order->set_billing_state( $bill( 'state' ) );
-    $order->set_billing_postcode( $bill( 'postcode' ) );
+    $b = $addr['bill'];
+    $order->set_billing_first_name( $b['first'] );
+    $order->set_billing_last_name( $b['last'] );
+    $order->set_billing_company( $b['company'] );
+    $order->set_billing_address_1( $b['address_1'] );
+    $order->set_billing_address_2( $b['address_2'] );
+    $order->set_billing_city( $b['city'] );
+    $order->set_billing_state( $b['state'] );
+    $order->set_billing_postcode( $b['postcode'] );
     $order->set_billing_country( 'US' );
 
-    $g = $ship;
-    $order->set_shipping_first_name( $g( 'first' ) );
-    $order->set_shipping_last_name( $g( 'last' ) );
-    $order->set_shipping_company( $g( 'company' ) );
-    $order->set_shipping_address_1( $g( 'address_1' ) );
-    $order->set_shipping_address_2( $g( 'address_2' ) );
-    $order->set_shipping_city( $g( 'city' ) );
-    $order->set_shipping_state( $g( 'state' ) );
-    $order->set_shipping_postcode( $g( 'postcode' ) );
-    // Carriers read the shipping phone, not the billing one, and a delivery
-    // exception is resolved by whoever answers at the destination. Same number
-    // on both: it is collected once, in the shipping block, for that purpose.
-    if ( is_callable( array( $order, 'set_shipping_phone' ) ) ) {
-        $order->set_shipping_phone( isset( $p['phone'] ) ? sanitize_text_field( $p['phone'] ) : '' );
+    // No shipping address on a *virtual order. Left genuinely EMPTY rather than
+    // copied from billing: a shipping address that is really the cardholder's
+    // is how something gets posted to the wrong place, and an addendum has
+    // nowhere to go by definition.
+    if ( $v3 ) {
+        $order->set_shipping_country( '' );
+    } else {
+        $h = $addr['ship'];
+        $order->set_shipping_first_name( $h['first'] );
+        $order->set_shipping_last_name( $h['last'] );
+        $order->set_shipping_company( $h['company'] );
+        $order->set_shipping_address_1( $h['address_1'] );
+        $order->set_shipping_address_2( $h['address_2'] );
+        $order->set_shipping_city( $h['city'] );
+        $order->set_shipping_state( $h['state'] );
+        $order->set_shipping_postcode( $h['postcode'] );
+        // Carriers read the shipping phone, not the billing one, and a delivery
+        // exception is resolved by whoever answers at the destination. Same number
+        // on both: it is collected once, in the shipping block, for that purpose.
+        if ( is_callable( array( $order, 'set_shipping_phone' ) ) ) {
+            $order->set_shipping_phone( isset( $p['phone'] ) ? sanitize_text_field( $p['phone'] ) : '' );
+        }
+        $order->set_shipping_country( 'US' );
     }
-    $order->set_shipping_country( 'US' );
 
     // One WooCommerce line per quote line. The spec, project name and delivery
     // date hang off the FIRST line only: they describe the order, and repeating
@@ -622,15 +677,17 @@ function pps_quote_form_view( array $q, $error ) {
                 <span class="pps-q-total-label">Total</span>
                 <?php echo wp_kses_post( wc_price( pps_quote_lines_total( $lines ) ) ); ?>
             </p>
-            <p class="pps-q-incl">Delivery included — this is the total.</p>
+            <p class="pps-q-incl"><?php echo $q['noship'] ? 'This is the total.' : 'Delivery included — this is the total.'; ?></p>
         <?php elseif ( $single ) : ?>
             <p class="pps-q-price"><?php echo wp_kses_post( wc_price( $tiers[0]['price'] ) ); ?></p>
-            <p class="pps-q-incl">Delivery included — this is the total.</p>
+            <p class="pps-q-incl"><?php echo $q['noship'] ? 'This is the total.' : 'Delivery included — this is the total.'; ?></p>
         <?php endif; ?>
 
         <form method="post" class="form" id="pps-q-form" style="margin-top:16px">
             <?php wp_nonce_field( 'pps_quote_' . $q['token'], 'pps_quote_nonce' ); ?>
-            <input type="hidden" name="pps_form_v" value="2">
+            <?php // v3 is the billing-only form. The version travels with the markup
+                  // so a page already open in a tab is read exactly as rendered. ?>
+            <input type="hidden" name="pps_form_v" value="<?php echo $q['noship'] ? '3' : '2'; ?>">
             <?php // Inside the form, not hoisted out with a form= attribute: the tier
                   // index must post even if that attribute is ever unsupported, or the
                   // order silently takes tier 0 by fallback instead of by intent. ?>
@@ -649,7 +706,7 @@ function pps_quote_form_view( array $q, $error ) {
                             </option>
                         <?php endforeach; ?>
                     </select>
-                    <span class="field-hint">Delivery included — the price shown is the total.</span>
+                    <span class="field-hint"><?php echo $q['noship'] ? 'The price shown is the total.' : 'Delivery included — the price shown is the total.'; ?></span>
                 </div>
             <?php endif; ?>
 
@@ -669,34 +726,45 @@ function pps_quote_form_view( array $q, $error ) {
             </div>
 
             <?php // Destination first: it is what the job needs, it drives transit, and
-                  // the customer knows it before they think about a card. ?>
-            <h3 class="con-h" style="margin-top:20px">Shipping</h3>
+                  // the customer knows it before they think about a card.
+                  //
+                  // On a *virtual order there is no destination at all, so this one
+                  // block is the billing address and the autocomplete hints say so --
+                  // a browser offering a shipping address into a billing field is how
+                  // the wrong address gets saved to somebody's profile. ?>
+            <?php $ac = $q['noship'] ? 'billing' : 'shipping'; ?>
+            <h3 class="con-h" style="margin-top:20px"><?php echo $q['noship'] ? 'Billing' : 'Shipping'; ?></h3>
             <div class="con-row">
-                <div class="field"><label for="q-first">First name <span class="req">*</span></label><input type="text" id="q-first" name="first" required autocomplete="shipping given-name"></div>
-                <div class="field"><label for="q-last">Last name <span class="req">*</span></label><input type="text" name="last" id="q-last" required autocomplete="shipping family-name"></div>
+                <div class="field"><label for="q-first">First name <span class="req">*</span></label><input type="text" id="q-first" name="first" required autocomplete="<?php echo esc_attr( $ac ); ?> given-name"></div>
+                <div class="field"><label for="q-last">Last name <span class="req">*</span></label><input type="text" name="last" id="q-last" required autocomplete="<?php echo esc_attr( $ac ); ?> family-name"></div>
             </div>
             <div class="con-row">
-                <div class="field"><label for="q-company">Company</label><input type="text" id="q-company" name="company" autocomplete="shipping organization"></div>
-                <div class="field"><label for="q-phone">Phone <span class="req">*</span></label>
-                    <input type="tel" id="q-phone" name="phone" required autocomplete="tel" inputmode="tel">
-                    <span class="field-hint">Given to UPS / FedEx for delivery.</span></div>
+                <div class="field"><label for="q-company">Company</label><input type="text" id="q-company" name="company" autocomplete="<?php echo esc_attr( $ac ); ?> organization"></div>
+                <?php // Phone is collected FOR THE CARRIER, which is why the hint names
+                      // them. Nothing ships on a *virtual order, so it is optional there
+                      // and the hint would be a lie. ?>
+                <div class="field"><label for="q-phone">Phone <?php if ( ! $q['noship'] ) : ?><span class="req">*</span><?php endif; ?></label>
+                    <input type="tel" id="q-phone" name="phone" <?php if ( ! $q['noship'] ) : ?>required<?php endif; ?> autocomplete="tel" inputmode="tel">
+                    <span class="field-hint"><?php echo $q['noship'] ? 'Optional — only if we need to reach you about this charge.' : 'Given to UPS / FedEx for delivery.'; ?></span></div>
             </div>
-            <div class="field"><label for="q-a1">Street address <span class="req">*</span></label><input type="text" id="q-a1" name="address_1" required autocomplete="shipping address-line1"></div>
-            <div class="field"><label for="q-a2">Apt, suite, unit</label><input type="text" id="q-a2" name="address_2" autocomplete="shipping address-line2"></div>
+            <div class="field"><label for="q-a1">Street address <span class="req">*</span></label><input type="text" id="q-a1" name="address_1" required autocomplete="<?php echo esc_attr( $ac ); ?> address-line1"></div>
+            <div class="field"><label for="q-a2">Apt, suite, unit</label><input type="text" id="q-a2" name="address_2" autocomplete="<?php echo esc_attr( $ac ); ?> address-line2"></div>
             <div class="con-row">
-                <div class="field"><label for="q-city">City <span class="req">*</span></label><input type="text" id="q-city" name="city" required autocomplete="shipping address-level2"></div>
+                <div class="field"><label for="q-city">City <span class="req">*</span></label><input type="text" id="q-city" name="city" required autocomplete="<?php echo esc_attr( $ac ); ?> address-level2"></div>
                 <div class="field"><label for="q-state">State <span class="req">*</span></label>
-                    <select id="q-state" name="state" required autocomplete="shipping address-level1">
+                    <select id="q-state" name="state" required autocomplete="<?php echo esc_attr( $ac ); ?> address-level1">
                         <option value="">—</option>
                         <?php foreach ( $states as $s ) : ?><option value="<?php echo esc_attr( $s ); ?>"><?php echo esc_html( $s ); ?></option><?php endforeach; ?>
                     </select></div>
-                <div class="field"><label for="q-zip">ZIP <span class="req">*</span></label><input type="text" id="q-zip" name="postcode" required inputmode="numeric" autocomplete="shipping postal-code"></div>
+                <div class="field"><label for="q-zip">ZIP <span class="req">*</span></label><input type="text" id="q-zip" name="postcode" required inputmode="numeric" autocomplete="<?php echo esc_attr( $ac ); ?> postal-code"></div>
             </div>
 
-            <?php // Filled in by the same transit endpoint the calculators use, so the
-                  // date quoted here and the date quoted on a product page come from
-                  // one source rather than two that can drift apart. ?>
-            <p class="field-hint pps-q-transit" id="q-transit" hidden></p>
+            <?php if ( ! $q['noship'] ) : ?>
+                <?php // Filled in by the same transit endpoint the calculators use, so the
+                      // date quoted here and the date quoted on a product page come from
+                      // one source rather than two that can drift apart. ?>
+                <p class="field-hint pps-q-transit" id="q-transit" hidden></p>
+            <?php endif; ?>
 
             <?php if ( $q['allow_date'] ) : ?>
                 <div class="field">
@@ -708,10 +776,15 @@ function pps_quote_form_view( array $q, $error ) {
                 </div>
             <?php endif; ?>
 
-            <h3 class="con-h" style="margin-top:20px">Billing</h3>
+            <h3 class="con-h" style="margin-top:20px"><?php echo $q['noship'] ? 'Contact' : 'Billing'; ?></h3>
             <div class="field"><label for="q-email">Email <span class="req">*</span></label><input type="email" id="q-email" name="email" required autocomplete="email">
                 <span class="field-hint">Your receipt and order history use this address.</span></div>
 
+            <?php // Only a shipping form needs a separate billing address. On a
+                  // *virtual order the one block above IS the billing address, so
+                  // offering to make billing "same as shipping" would be asking
+                  // about a shipping address that does not exist. ?>
+            <?php if ( ! $q['noship'] ) : ?>
             <div class="field">
                 <label class="con-radio"><input type="checkbox" name="bill_same" value="1" checked id="q-same"> Billing address same as shipping</label>
             </div>
@@ -732,6 +805,7 @@ function pps_quote_form_view( array $q, $error ) {
                     <div class="field"><label for="q-bzip">ZIP</label><input type="text" id="q-bzip" name="b_postcode" inputmode="numeric" autocomplete="billing postal-code"></div>
                 </div>
             </div>
+            <?php endif; ?>
 
             <button type="submit" name="pps_quote_submit" value="1" class="btn btn-primary btn-submit">Continue to payment</button>
             <p class="form-foot">You'll confirm payment on the next screen.</p>
@@ -803,7 +877,13 @@ function pps_quote_form_view( array $q, $error ) {
             });
         }
 
+        // Both of the blocks below belong to the SHIPPING form. A *virtual order
+        // renders neither the billing-override panel nor the transit line, so
+        // guard on the elements themselves: a check against what is actually in
+        // the document cannot disagree with what was rendered, the way a flag
+        // duplicated into JS eventually would.
         var same = document.getElementById('q-same'), bill = document.getElementById('q-bill');
+        if (same && bill) {
         function sync(){
             bill.hidden = same.checked;
             // Required only while the panel is visible, or a hidden blank field
@@ -813,6 +893,7 @@ function pps_quote_form_view( array $q, $error ) {
             });
         }
         same.addEventListener('change', sync); sync();
+        }
 
         // Live transit, from the same endpoint the calculators call. Debounced
         // and asked once per ZIP: the answer is cached server-side for 30 days
@@ -823,6 +904,7 @@ function pps_quote_form_view( array $q, $error ) {
             st  = document.getElementById('q-state'),
             out = document.getElementById('q-transit'),
             seen = {}, timer = null;
+        if (zip && st && out) {
         function ask(){
             var z = (zip.value || '').replace(/[^0-9]/g,'').slice(0,5);
             if (z.length !== 5 || seen[z] !== undefined) return;
@@ -841,6 +923,7 @@ function pps_quote_form_view( array $q, $error ) {
         function queue(){ clearTimeout(timer); timer = setTimeout(ask, 600); }
         zip.addEventListener('input', queue);
         st.addEventListener('change', queue);
+        }
     })();
     </script>
     <?php return ob_get_clean();

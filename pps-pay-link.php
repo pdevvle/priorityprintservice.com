@@ -293,11 +293,26 @@ function pps_paylink_parse_flags( $text ) {
         $text = str_replace( $m[0], ' ', $text );
     }
 
+    // *virtual / *noship / *addendum — nothing ships, so the page asks for
+    // billing only: no destination, no transit, no delivery date. For an
+    // addendum to a job already in production, a change fee, extra proofs.
+    //
+    // The internal name is noship, not virtual, because every pay-link product
+    // is ALREADY a WooCommerce virtual product (that is what keeps WooCommerce's
+    // own shipping machinery out of the cart). Two unrelated meanings of
+    // "virtual" one grep apart is how a later reader gets it wrong.
+    $noship = false;
+    if ( preg_match( '/(?:^|\s)\*(virtual|noship|no-ship|addendum)(?=$|\s)/i', $text, $m ) ) {
+        $noship = true;
+        $text = str_replace( $m[0], ' ', $text );
+    }
+
     return array(
         'reference' => $reference,
         'min_days'  => $min_days,
         'qbo'       => $qbo,
         'reusable'  => $reusable,
+        'noship'    => $noship,
         'rest'      => $text,
     );
 }
@@ -400,6 +415,7 @@ function pps_paylink_parse_command( $text ) {
             'reference'   => $flags['reference'],
             'min_days'    => $flags['min_days'],
             'reusable'    => $flags['reusable'],
+            'noship'      => $flags['noship'],
         );
     }
 
@@ -424,6 +440,7 @@ function pps_paylink_parse_command( $text ) {
     $min_days  = $flags['min_days'];
     $qbo       = $flags['qbo'];
     $reusable  = $flags['reusable'];
+    $noship    = $flags['noship'];
     $text      = $flags['rest'];
 
     $price = null;
@@ -471,6 +488,7 @@ function pps_paylink_parse_command( $text ) {
         'reference'   => $reference,
         'min_days'    => $min_days,
         'reusable'    => $reusable,
+        'noship'      => $noship,
     );
 }
 
@@ -547,6 +565,7 @@ function pps_paylink_create( array $a ) {
         'tiers'      => array( array( 'qty' => $qty, 'price' => $price ) ),
         'lines'      => $lines,
         'reusable'   => ! empty( $a['reusable'] ),
+        'noship'     => ! empty( $a['noship'] ),
         // A multi-line quote has no single spec: each line carries its own
         // description. Leaving line one's text here put it at the top of the
         // payment page as if it were the whole job, and duplicated it on both
@@ -1014,6 +1033,7 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
         // whatever nobody remembered to add.
         'lines'       => isset( $body['lines'] ) ? $body['lines'] : array(),
         'reusable'    => ! empty( $body['reusable'] ),
+        'noship'      => ! empty( $body['noship'] ),
         'by'          => isset( $body['by'] ) ? $body['by'] : 'missive',
         'note'        => isset( $body['note'] ) ? $body['note'] : '',
         'reference'   => isset( $body['reference'] ) ? $body['reference'] : '',
@@ -1267,6 +1287,13 @@ add_action( 'woocommerce_update_order', function ( $order_id ) {
     if ( '' === trim( (string) $order->get_shipping_address_1() ) ) return;
 
     $seen[ $order_id ] = true;
+
+    // Nothing ships on a *virtual order, so there is no destination to record.
+    // Without this the snapshot would still be written from whatever survived
+    // -- in practice a lone "Tel 555..." line -- which reads as a destination
+    // on the receipt and in the Shippo check, and is worse than no line at all.
+    if ( '' === trim( (string) $order->get_shipping_address_1() ) ) return;
+
     $dest = pps_paylink_format_destination( $order );
 
     foreach ( $order->get_items() as $item ) {

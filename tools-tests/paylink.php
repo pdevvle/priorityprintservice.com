@@ -528,5 +528,32 @@ ok('reusable reaches quote', $GLOBALS['captured']['reusable'], true);
 $res = pps_paylink_create(array('description' => 'One off', 'price' => '120'));
 ok('default is single-use',  $GLOBALS['captured']['reusable'], false);
 
+// --- *virtual: nothing ships, so the page asks for billing only
+ok('*virtual read',    parse('/ppspay *virtual [Change fee] $45')['noship'], true);
+ok('*noship alias',    parse('/ppspay *noship [Change fee] $45')['noship'], true);
+ok('*no-ship alias',   parse('/ppspay *no-ship [Change fee] $45')['noship'], true);
+ok('*addendum alias',  parse('/ppspay *addendum [Change fee] $45')['noship'], true);
+ok('absent ships',     parse('/ppspay [Postcards] $45')['noship'], false);
+
+// Asterisk required, and never read out of the description. "Virtual" and
+// "addendum" are words a print spec uses about the job itself.
+ok('bare word ignored',   parse('/ppspay [X] virtual $45')['noship'], false);
+ok('in brackets ignored', parse('/ppspay [addendum to the Jan booklet] $45')['noship'], false);
+ok('and desc survives',   parse('/ppspay [addendum to the Jan booklet] $45')['description'], 'addendum to the Jan booklet');
+
+// With the other sigils, in any order, and on a multi-line command.
+$r = parse('/ppspay *qbo *virtual *reuse [Proof round 2] @1 $35 [Rush upcharge] @1 $60');
+ok('noship + qbo',    $r['qbo'], true);
+ok('noship + reuse',  $r['reusable'], true);
+ok('noship set',      $r['noship'], true);
+ok('noship + lines',  count($r['lines']), 2);
+ok('noship + total',  $r['price'], 95.0);
+
+// It reaches the quote.
+pps_paylink_create(array('description' => 'Change fee', 'price' => '45', 'noship' => true));
+ok('noship reaches quote', $GLOBALS['captured']['noship'], true);
+pps_paylink_create(array('description' => 'Postcards', 'price' => '45'));
+ok('default ships',        $GLOBALS['captured']['noship'], false);
+
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);
