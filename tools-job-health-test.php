@@ -73,14 +73,14 @@ class FakeOrder {
 require __DIR__ . '/pps-job-health.php';
 
 // ── a PDF by hand: N pages of a given MediaBox, each with one image XObject ──
-function make_pdf( $pages, $box, $img_w, $img_h, $with_images = true ) {
+function make_pdf( $pages, $box, $img_w, $img_h, $with_images = true, $rotate = 0 ) {
     $objs = array();
     $objs[] = '<< /Type /Catalog /Pages 2 0 R >>';
     $kids = array(); for ( $i = 0; $i < $pages; $i++ ) $kids[] = ( 3 + $i * 2 ) . ' 0 R';
     $objs[] = '<< /Type /Pages /Kids [' . implode( ' ', $kids ) . '] /Count ' . $pages . ' >>';
     for ( $i = 0; $i < $pages; $i++ ) {
         $pg = 3 + $i * 2; $im = $pg + 1;
-        $objs[] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' . $box[0] . ' ' . $box[1] . '] ' . ( $with_images ? '/Resources << /XObject << /I' . $i . ' ' . $im . ' 0 R >> >> ' : '' ) . '>>';
+        $objs[] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' . $box[0] . ' ' . $box[1] . '] ' . ( $rotate ? '/Rotate ' . ( $i ? $rotate + 180 : $rotate ) . ' ' : '' ) . ( $with_images ? '/Resources << /XObject << /I' . $i . ' ' . $im . ' 0 R >> >> ' : '' ) . '>>';
         $objs[] = $with_images ? '<< /Type /XObject /Subtype /Image /Width ' . $img_w . ' /Height ' . $img_h . ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length 3 >>stream' . "\n" . 'abc' . "\nendstream" : '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
     }
     $s = "%PDF-1.4\n"; $n = 1;
@@ -92,6 +92,9 @@ file_put_contents( "$T/pps-artwork/good_print-ready.pdf", make_pdf( 2, array( 15
 file_put_contents( "$T/pps-artwork/soft_print-ready.pdf", make_pdf( 2, array( 1530, 522 ), 3060, 1044 ) );   // the same sheet @ 144
 file_put_contents( "$T/pps-artwork/vector.pdf", make_pdf( 12, array( 324, 324 ), 0, 0, false ) );          // 4.5×4.5 in, no images
 file_put_contents( "$T/pps-artwork/notes.txt", 'hello' );
+// A portrait 5 × 7 postcard from the online designer: its own vector PDF, each 5.25×7.25 in
+// page turned onto the wide sheet (/Rotate 90 front, 270 back).
+file_put_contents( "$T/pps-artwork/portrait.pdf", make_pdf( 2, array( 378, 522 ), 0, 0, false, 90 ) );
 // Order 87272's shape: a customer's 12-page InDesign export, 8×11 in, a
 // sheet-proportioned photo on each page plus dozens of other placed images. Its
 // sheet-shaped images happen to count ≥ pages; the old rule called that "raster,
@@ -114,6 +117,15 @@ ok( 'order 87171\'s shape — 144 DPI page images on a 300 DPI claim — is flag
 $v = pps_print_file_check( "$T/pps-artwork/vector.pdf" );
 ok( 'a vector PDF is named as such with its page count and size, no DPI claim, no warning',
     $v['kind'] === 'vector' && $v['pages'] === 12 && $v['summary'] === 'vector PDF · 12 pages · 4.5×4.5 in' && $v['warn'] === '', $v['summary'] );
+$pt = pps_print_file_check( "$T/pps-artwork/portrait.pdf" );
+ok( 'a portrait designer PDF turned onto the sheet by /Rotate reads as the sheet it prints on (7.25×5.25 in)',
+    $pt['kind'] === 'vector' && $pt['summary'] === 'vector PDF · 2 pages · 7.25×5.25 in' && $pt['warn'] === '', $pt['summary'] );
+// A landscape 6 × 4 designer card with one 3:2 photo per side (1200×800 px placed at 3.375 in:
+// 356 DPI): its PDF/X file has a sheet-proportioned image per page, but it is not a page image.
+file_put_contents( "$T/pps-artwork/designer_print-ready.pdf", str_replace( '/Type /Catalog', '/Type /Catalog /OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX >>]', make_pdf( 2, array( 450, 306 ), 1200, 800 ) ) );
+$dz = pps_print_file_check( "$T/pps-artwork/designer_print-ready.pdf" );
+ok( 'a designer PDF/X with one card-shaped photo per side is not called raster and raises no warning',
+    $dz['kind'] === 'mixed' && $dz['warn'] === '' && strpos( $dz['summary'], 'PDF with 2 placed images' ) === 0, $dz['summary'] . ' | ' . $dz['warn'] );
 $x = pps_print_file_check( "$T/pps-artwork/notes.txt" );
 ok( 'a non-PDF is refused, not guessed', $x['ok'] === false && $x['summary'] === 'not a PDF' );
 ok( 'a missing file is reported, not fatal', pps_print_file_check( "$T/nope.pdf" )['summary'] === 'print file not readable' );
