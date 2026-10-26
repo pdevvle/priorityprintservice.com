@@ -501,5 +501,32 @@ $res = pps_paylink_create(array(
 ));
 ok('unpayable line dropped', count($GLOBALS['captured']['lines']), 1);
 
+// --- *reuse: the link keeps working after its order is paid
+$r = parse('/ppspay *reuse [Weekly flyer] $120');
+ok('*reuse read',            $r['reusable'], true);
+ok('*reuse leaves desc',     $r['description'], 'Weekly flyer');
+ok('*reusable also reads',   parse('/ppspay *reusable [X] $10')['reusable'], true);
+ok('absent is single-use',   parse('/ppspay [X] $10')['reusable'], false);
+
+// The asterisk is REQUIRED, unlike *qbo. "reuse" is an ordinary English word
+// and a spec saying to reuse the old artwork must not make a link permanent.
+ok('bare word is not the flag', parse('/ppspay [X] reuse $10')['reusable'], false);
+ok('inside brackets is desc',   parse('/ppspay [reuse the old plates] $10')['reusable'], false);
+ok('desc survives that',        parse('/ppspay [reuse the old plates] $10')['description'], 'reuse the old plates');
+
+// Alongside the other sigils, in any order.
+$r = parse('/ppspay *qbo *reuse !3 #weekly [Flyer] @500 $120 [Insert] @500 $40');
+ok('with qbo',       $r['qbo'], true);
+ok('with reuse',     $r['reusable'], true);
+ok('with days',      $r['min_days'], 3);
+ok('with reference', $r['reference'], 'weekly');
+ok('with lines',     count($r['lines']), 2);
+
+// And it reaches the quote.
+$res = pps_paylink_create(array('description' => 'Weekly flyer', 'price' => '120', 'reusable' => true));
+ok('reusable reaches quote', $GLOBALS['captured']['reusable'], true);
+$res = pps_paylink_create(array('description' => 'One off', 'price' => '120'));
+ok('default is single-use',  $GLOBALS['captured']['reusable'], false);
+
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);

@@ -283,7 +283,23 @@ function pps_paylink_parse_flags( $text ) {
         $text = preg_replace( '/(?:^|\s)\*?(qbo|quickbooks)(?=$|\s)/i', ' ', $text, 1 );
     }
 
-    return array( 'reference' => $reference, 'min_days' => $min_days, 'qbo' => $qbo, 'rest' => $text );
+    // *reuse — the link keeps working after its order is paid, so one link can
+    // serve a standing job. Requires the asterisk, unlike *qbo: "reuse" is an
+    // ordinary English word and a description saying "reuse the old artwork"
+    // must not quietly make a link reusable forever.
+    $reusable = false;
+    if ( preg_match( '/(?:^|\s)\*(reuse|reusable)(?=$|\s)/i', $text, $m ) ) {
+        $reusable = true;
+        $text = str_replace( $m[0], ' ', $text );
+    }
+
+    return array(
+        'reference' => $reference,
+        'min_days'  => $min_days,
+        'qbo'       => $qbo,
+        'reusable'  => $reusable,
+        'rest'      => $text,
+    );
 }
 
 /**
@@ -383,6 +399,7 @@ function pps_paylink_parse_command( $text ) {
             'qbo'         => $flags['qbo'],
             'reference'   => $flags['reference'],
             'min_days'    => $flags['min_days'],
+            'reusable'    => $flags['reusable'],
         );
     }
 
@@ -406,6 +423,7 @@ function pps_paylink_parse_command( $text ) {
     $reference = $flags['reference'];
     $min_days  = $flags['min_days'];
     $qbo       = $flags['qbo'];
+    $reusable  = $flags['reusable'];
     $text      = $flags['rest'];
 
     $price = null;
@@ -452,6 +470,7 @@ function pps_paylink_parse_command( $text ) {
         'qbo'         => $qbo,
         'reference'   => $reference,
         'min_days'    => $min_days,
+        'reusable'    => $reusable,
     );
 }
 
@@ -527,6 +546,7 @@ function pps_paylink_create( array $a ) {
         'product'    => $pid,
         'tiers'      => array( array( 'qty' => $qty, 'price' => $price ) ),
         'lines'      => $lines,
+        'reusable'   => ! empty( $a['reusable'] ),
         // A multi-line quote has no single spec: each line carries its own
         // description. Leaving line one's text here put it at the top of the
         // payment page as if it were the whole job, and duplicated it on both
@@ -993,6 +1013,7 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
         // untested was the seam between them, and an allow-list silently drops
         // whatever nobody remembered to add.
         'lines'       => isset( $body['lines'] ) ? $body['lines'] : array(),
+        'reusable'    => ! empty( $body['reusable'] ),
         'by'          => isset( $body['by'] ) ? $body['by'] : 'missive',
         'note'        => isset( $body['note'] ) ? $body['note'] : '',
         'reference'   => isset( $body['reference'] ) ? $body['reference'] : '',

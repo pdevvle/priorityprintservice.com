@@ -187,6 +187,10 @@ function pps_quote_create( array $a ) {
     // made before this existed, which is exactly how a one-line quote reads.
     $lines = pps_quote_normalise_lines( isset( $a['lines'] ) ? $a['lines'] : array() );
     if ( $lines ) update_post_meta( $id, '_q_lines', $lines );
+    // A reusable link keeps working after its order is paid, so one link can
+    // serve a standing job. Off unless asked for: the price is frozen into the
+    // link, so a reusable one quotes today's figure indefinitely.
+    if ( ! empty( $a['reusable'] ) ) update_post_meta( $id, '_q_reusable', 1 );
     update_post_meta( $id, '_q_allow_date', ! empty( $a['allow_date'] ) ? 1 : 0 );
     update_post_meta( $id, '_q_min_days', max( 0, (int) ( $a['min_days'] ?? 0 ) ) );
     update_post_meta( $id, '_q_pay_source', $source );
@@ -220,6 +224,8 @@ function pps_quote_get( $token ) {
         'pay_source' => (string) get_post_meta( $id, '_q_pay_source', true ),
         'pay_link'   => (string) get_post_meta( $id, '_q_pay_link', true ),
         'order'      => (int) get_post_meta( $id, '_q_order', true ),
+        'orders'     => array_values( (array) get_post_meta( $id, '_q_orders', true ) ),
+        'reusable'   => (bool) get_post_meta( $id, '_q_reusable', true ),
         'note'       => (string) get_post_meta( $id, '_q_note', true ),
     );
 }
@@ -247,6 +253,32 @@ function pps_quote_url( $token ) {
     $page = get_page_by_path( 'quote' );
     $base = $page ? get_permalink( $page ) : home_url( '/quote/' );
     return add_query_arg( 'q', rawurlencode( $token ), $base );
+}
+
+/**
+ * What a visit to an already-used quote should do.
+ *
+ *   resume  -- go back to the order already placed
+ *   settled -- show what they bought; the link is spent
+ *   form    -- start a new order
+ *
+ * THE LOAD-BEARING RULE IS THE MIDDLE ONE. An unfinished payment always returns
+ * to its own order, reusable or not: a customer who closed the tab mid-payment,
+ * or opened the link twice, must land back on the order they already placed.
+ * Without that a reusable link produces two orders against one payment, and the
+ * second looks as legitimate as the first.
+ *
+ * It also means a reusable link cannot be double-ordered by accident, because a
+ * new order can only begin once the previous one is actually settled.
+ *
+ * A pure function because this is the decision that governs whether money and
+ * orders line up, and it should be checkable without a WooCommerce order, a
+ * session or a page render.
+ */
+function pps_quote_visit_action( $has_order, $is_unpaid, $reusable ) {
+    if ( ! $has_order ) return 'form';
+    if ( $is_unpaid )   return 'resume';
+    return $reusable ? 'form' : 'settled';
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -441,7 +473,13 @@ function pps_quote_to_order( array $q, array $p ) {
         $date ? ' Requested delivery ' . $date . '.' : ''
     ) );
 
+    // _q_order is the MOST RECENT order, which is what the return-visit check
+    // needs. A reusable link can produce many, so the full list is kept too --
+    // otherwise the second order would erase any trace of the first.
     update_post_meta( $q['id'], '_q_order', $order->get_id() );
+    $history   = array_values( (array) get_post_meta( $q['id'], '_q_orders', true ) );
+    $history[] = $order->get_id();
+    update_post_meta( $q['id'], '_q_orders', array_values( array_unique( array_map( 'intval', $history ) ) ) );
     return $order;
 }
 
@@ -462,14 +500,14 @@ function pps_job_quote_shortcode() {
         return '<div class="pps-acct"><div class="lookup-shell"><div class="empty"><span>This quote link is not valid. Please check the link or contact us.</span></div></div></div>';
     }
 
-    // Already used: send them back to the same order rather than making a
-    // second one. A customer who closed the tab mid-payment lands here.
     if ( $q['order'] ) {
         $existing = wc_get_order( $q['order'] );
-        if ( $existing && ! pps_job_invoice_is_unpaid( $existing ) ) {
-            return pps_quote_placed_view( $existing, true );
+        if ( $existing ) {
+            $act = pps_quote_visit_action( true, pps_job_invoice_is_unpaid( $existing ), $q['reusable'] );
+            if ( 'resume'   === $act ) return pps_quote_placed_view( $existing, false );
+            if ( 'settled'  === $act ) return pps_quote_placed_view( $existing, true );
+            // 'form' -- paid and reusable, so fall through to a fresh order.
         }
-        if ( $existing ) return pps_quote_placed_view( $existing, false );
     }
 
     $error = '';
@@ -525,7 +563,17 @@ function pps_quote_form_view( array $q, $error ) {
     $single   = $lines ? true : ( count( $tiers ) === 1 );
     ob_start(); ?>
     <div class="pps-acct"><div class="pps-q-wrap" style="max-width:640px;margin:0 auto">
-        <p class="lookup-eyebrow">Your quote</p>
+        <?php // A reusable link that has already been ordered from looks exactly
+              // like a fresh one, so say which it is. Without this a repeat
+              // customer cannot tell whether their last order went through, and
+              // the safe guess -- submitting again -- is the wrong one. ?>
+        <?php $placed = $q['reusable'] ? count( $q['orders'] ) : 0; ?>
+        <p class="lookup-eyebrow"><?php echo $placed ? 'Order again' : 'Your quote'; ?></p>
+        <?php if ( $placed ) : ?>
+            <p class="pps-q-again">You have ordered this
+                <?php echo 1 === $placed ? 'once' : esc_html( number_format_i18n( $placed ) . ' times' ); ?>
+                before. Filling this in again places a new order at the same price.</p>
+        <?php endif; ?>
 
         <?php // The description IS the product here -- a conversation-minted job has
               // no catalogue page to explain it, so it carries the whole spec and is
@@ -692,6 +740,8 @@ function pps_quote_form_view( array $q, $error ) {
     <style>
       .pps-q-spec{font-size:1.05rem;line-height:1.55;white-space:pre-wrap;word-break:break-word;margin:0 0 10px}
       .pps-q-note{margin:0 0 10px;opacity:.85}
+      .pps-q-again{margin:0 0 12px;padding:10px 12px;border-radius:8px;
+        background:rgba(0,0,0,.04);font-size:.98rem;line-height:1.45}
       .pps-q-price{font-size:1.6rem;font-weight:700;margin:0 0 2px}
       /* Itemised lines. Grid rather than a table: it collapses to one column on
          a phone without a horizontal scroller, and these are read, not scanned. */

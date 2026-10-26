@@ -89,5 +89,31 @@ ok('cents do not drift', pps_quote_lines_total(array(
 ok('null is empty',    pps_quote_normalise_lines(null), array());
 ok('string is empty',  pps_quote_normalise_lines('nope'), array());
 
+// --- what a visit to an already-used quote does
+function act($has, $unpaid, $reuse) { return pps_quote_visit_action($has, $unpaid, $reuse); }
+
+// Never ordered: the form, either way.
+ok('fresh single-use',  act(false, false, false), 'form');
+ok('fresh reusable',    act(false, false, true),  'form');
+
+// THE RULE THAT MATTERS. An unfinished payment goes back to its own order even
+// on a reusable link -- otherwise a customer who closed the tab mid-payment, or
+// opened the link twice, places a SECOND order against one payment.
+ok('unpaid resumes, single-use', act(true, true, false), 'resume');
+ok('unpaid resumes, REUSABLE',   act(true, true, true),  'resume');
+
+// Paid: single-use is spent, reusable starts again.
+ok('paid single-use is spent', act(true, false, false), 'settled');
+ok('paid reusable reopens',    act(true, false, true),  'form');
+
+// Stated as the invariant rather than the cases: a reusable link can only ever
+// begin a new order once the previous one is settled, which is what makes it
+// safe to hand the same URL out repeatedly.
+$reopens = 0;
+foreach (array(true, false) as $unpaid) {
+    if ('form' === act(true, $unpaid, true)) $reopens++;
+}
+ok('reusable reopens only when settled', $reopens, 1);
+
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);
