@@ -411,6 +411,11 @@ function pps_order_lookup_record_attempt() {
 
 function pps_order_lookup_grant( $email ) {
     if ( function_exists( 'WC' ) && WC()->session ) {
+        // WooCommerce sends a guest no session cookie until something is in their cart, so the
+        // grant was saved to a session the browser never received and was gone on the next page:
+        // every reorder button pressed by a guest with an empty cart was refused (found 2026-10-26
+        // on order 87533). Start the cookie with the grant.
+        if ( method_exists( WC()->session, 'set_customer_session_cookie' ) ) WC()->session->set_customer_session_cookie( true );
         WC()->session->set( 'pps_lookup_email', sanitize_email( $email ) );
         WC()->session->set( 'pps_lookup_granted_at', time() );
     }
@@ -487,9 +492,19 @@ function pps_order_lookup_shortcode() {
                 $sub_email   = strtolower( $email_raw );
                 $created     = $order->get_date_created();
                 $order_date  = $created ? $created->format( 'Y-m-d' ) : '';
+                // The date the customer remembers is the shop's (Arizona) date; the stored one read
+                // as UTC, so an order placed after 5 pm Arizona time only matched the NEXT day's date
+                // (87533: placed the evening of Oct 13, matched only "Oct 14"). Either is accepted.
+                $local_date  = '';
+                if ( $created ) {
+                    try {
+                        $tz = function_exists( 'pps_shop_timezone' ) ? pps_shop_timezone() : 'America/Phoenix';
+                        $local_date = ( new DateTime( '@' . $created->getTimestamp() ) )->setTimezone( new DateTimeZone( is_string( $tz ) ? $tz : 'America/Phoenix' ) )->format( 'Y-m-d' );
+                    } catch ( \Throwable $e ) { $local_date = ''; }
+                }
 
                 $email_match = ( $sub_email !== '' ) && hash_equals( $order_email, $sub_email );
-                $date_match  = ( $date_raw !== '' ) && hash_equals( $order_date, $date_raw );
+                $date_match  = ( $date_raw !== '' ) && ( hash_equals( $order_date, $date_raw ) || ( $local_date !== '' && hash_equals( $local_date, $date_raw ) ) );
                 $ok = $email_match && $date_match;
                 if ( $ok ) $matched_email = $order->get_billing_email();
             }

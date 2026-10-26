@@ -70,6 +70,8 @@ $c = json_decode( (string) shell_exec( 'php ' . escapeshellarg( __FILE__ ) . ' c
 $o = json_decode( (string) shell_exec( 'php ' . escapeshellarg( __FILE__ ) . ' child cache-other ' . escapeshellarg( $src ) . ' 2>&1' ), true );
 ok( ( $c['nocache'] ?? false ) === true && ( $o['nocache'] ?? true ) === false, 'the page holding the order lookup is never page-cached; other pages are untouched', array( $c, $o ) );
 $code = file_get_contents( $src );
+ok( strpos( $code, "hash_equals( \$local_date, \$date_raw )" ) !== false && strpos( $code, "setTimezone( new DateTimeZone(" ) !== false, 'the lookup accepts the order\'s Arizona date as well as its UTC date (an evening order matches the date on the receipt)' );
+ok( (bool) preg_match( "/function pps_order_lookup_grant\\( \\\$email \\) \\{[\\s\\S]{0,600}set_customer_session_cookie\\( true \\)[\\s\\S]{0,120}'pps_lookup_email'/", $code ), 'the lookup starts the guest\'s session cookie when it grants access, so the reorder button works with an empty cart' );
 ok( (bool) preg_match( "/\\} elseif \\( isset\\( \\\$_POST\\['pps_lookup_submit'\\] \\) \\) \\{[\\s\\S]{0,400}\\\$error_kind = 'expired';/", $code ) && strpos( $code, 'so your lookup didn&rsquo;t go through' ) !== false, 'a lookup sent from a stale form says so, instead of coming back blank' );
 
 echo "\n$checks checks, $failed failed\n";
