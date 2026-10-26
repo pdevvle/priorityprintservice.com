@@ -922,14 +922,15 @@ function pps_handle_single_item_reorder() {
         : array( 'wcpaIgnore' => true, 'pps_no_addon_form' => true );
     // What the job WAS travels with it. A quote/pay-link line names the work only in its visible
     // meta (Specs, Item, Project); without it the new order read as a bare "Custom Order" and
-    // production could not tell what to print. "Requested delivery" belonged to the old order.
+    // production could not tell what to print.
     if ( ! $wcpa_line ) {
         $carry = array();
         foreach ( $item->get_meta_data() as $m ) {
             $d = $m->get_data();
             $k = (string) ( $d['key'] ?? '' );
             if ( $k === '' || $k[0] === '_' || ! is_scalar( $d['value'] ?? null ) || trim( (string) $d['value'] ) === '' ) continue;
-            if ( in_array( $k, array( 'Requested delivery', 'Quantity' ), true ) ) continue;
+            // The old order's date and address belong to it: the new order takes its own at checkout.
+            if ( in_array( $k, array( 'Requested delivery', 'Quantity', 'Ship to', 'Ship To', 'Delivery', 'Must ship by', 'Production start' ), true ) ) continue;
             $carry[] = array( mb_substr( $k, 0, 60 ), mb_substr( (string) $d['value'], 0, 4000 ) );
             if ( count( $carry ) >= 12 ) break;
         }

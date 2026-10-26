@@ -42,7 +42,7 @@ ok( ( $line['product_id'] ?? 0 ) === 83664 && abs( ( $line['pps_legacy_unit_pric
 ok( ! array_filter( $r['notices'], function ( $n ) { return $n[1] === 'error'; } ) && strpos( implode( ' ', array_column( $r['notices'], 0 ) ), 'Added to your cart from order #87533' ) !== false, 'no WCPA "required" or "options changed" error, and the cart says where it came from', $r['notices'] );
 ok( $r['checkout'] === array(), 'WCPA\'s checkout check lets it through (no "Addon data missing")', $r['checkout'] );
 ok( ( $line['pps_reorder_meta'] ?? null ) === array( array( 'Specs', '8 page booklet, 25 copies, 100lb cover' ), array( 'Project', 'Sample booklet' ) ) && ( $line['pps_reorder_of'] ?? '' ) === '87533',
-    'the job\'s description (Specs, Project) and "Reorder of #87533" ride with it; the old delivery date and hidden keys do not', $line );
+    'the job\'s description (Specs, Project) and "Reorder of #87533" ride with it; the old delivery date, old ship-to and hidden keys do not', $line );
 ok( $r['wcpa_hooked'] === true, 'WCPA\'s add-to-cart check is back in place after the add', $r );
 
 // A line sold THROUGH the WCPA form still goes through WCPA exactly as before.
@@ -124,7 +124,7 @@ function child( $scenario, $src ) {
     eval( 'class WC_Product { public $id, $name; function __construct( $i, $n ) { $this->id = $i; $this->name = $n; } function exists() { return true; } function get_id() { return $this->id; } function get_name() { return $this->name; } function get_title() { return $this->name; } function is_sold_individually() { return false; } function set_price( $p ) { $this->price = $p; } }' );
     eval( 'class WC_Order_Item_Product { public $meta; function __construct( $m ) { $this->meta = $m; } function get_product_id() { return 83664; } function get_variation_id() { return 0; } function get_quantity() { return 1; } function get_subtotal() { return 90.63; } function get_meta( $k ) { return $this->meta[ $k ] ?? ""; } function get_meta_data() { $o = array(); foreach ( $this->meta as $k => $v ) $o[] = new class( $k, $v ) { public $k, $v; function __construct( $k, $v ) { $this->k = $k; $this->v = $v; } function get_data() { return array( "key" => $this->k, "value" => $this->v ); } }; return $o; } }' );
     $item = new WC_Order_Item_Product( $scenario === 'wcpa' ? array( '_WCPA_order_meta_data' => array( array( 'fields' => array( array( 'name' => 'number_7266671348', 'value' => '90.63' ) ) ) ) )
-        : array( 'Specs' => '8 page booklet, 25 copies, 100lb cover', 'Project' => 'Sample booklet', 'Requested delivery' => '2026-10-20', '_reduced_stock' => '1' ) );
+        : array( 'Specs' => '8 page booklet, 25 copies, 100lb cover', 'Project' => 'Sample booklet', 'Requested delivery' => '2026-10-20', 'Ship to' => 'nancy spielman, 5405 Monterey Lakes', '_reduced_stock' => '1' ) );
     $GLOBALS['order'] = new class( $item ) {
         public $item; function __construct( $i ) { $this->item = $i; }
         function get_customer_id() { return 0; } function get_billing_email() { return 'nspielman@bellsouth.net'; }
