@@ -820,16 +820,12 @@ function pps_handle_single_item_reorder() {
     $redirect = wc_get_cart_url();
 
     if ( ! wp_verify_nonce( $nonce, 'pps_reorder_item_' . $order_id . '_' . $item_id ) ) {
-        wc_add_notice( 'That reorder link has expired. Please reload your orders page and try again.', 'error' );
-        wp_safe_redirect( $redirect );
-        exit;
+        pps_reorder_fail( 'expired' );
     }
 
     $order = wc_get_order( $order_id );
     if ( ! $order ) {
-        wc_add_notice( 'Order not found.', 'error' );
-        wp_safe_redirect( $redirect );
-        exit;
+        pps_reorder_fail( 'order' );
     }
 
     $allowed = false;
@@ -841,16 +837,12 @@ function pps_handle_single_item_reorder() {
         $allowed = true;
     }
     if ( ! $allowed ) {
-        wc_add_notice( 'You do not have access to that order.', 'error' );
-        wp_safe_redirect( $redirect );
-        exit;
+        pps_reorder_fail( 'access' );
     }
 
     $item = $order->get_item( $item_id );
     if ( ! $item || ! is_a( $item, 'WC_Order_Item_Product' ) ) {
-        wc_add_notice( 'Order item not found.', 'error' );
-        wp_safe_redirect( $redirect );
-        exit;
+        pps_reorder_fail( 'item' );
     }
 
     $product_id   = $item->get_product_id();
@@ -859,9 +851,7 @@ function pps_handle_single_item_reorder() {
     $product      = wc_get_product( $variation_id ? $variation_id : $product_id );
 
     if ( ! $product || ! $product->exists() ) {
-        wc_add_notice( 'That product is no longer available.', 'error' );
-        wp_safe_redirect( $redirect );
-        exit;
+        pps_reorder_fail( 'product' );
     }
 
     if ( ! WC()->cart ) {
@@ -880,8 +870,18 @@ function pps_handle_single_item_reorder() {
         }
     }
 
-    // Let WCPA (and any other add-ons) restore their cart item data from the line item
-    $cart_item_data = apply_filters( 'woocommerce_order_again_cart_item_data', array(), $item, $order );
+    // A line sold through a WCPA form carries its answers (_WCPA_order_meta_data), and WCPA puts
+    // them back. A line that never had any -- a quote or pay-link job on "Custom Order", whose
+    // "Custom Order - TFP" form REQUIRES a Project Price -- has nothing to put back, so WCPA
+    // refused the add ("Project Price is required"), the handler said "Could not add" in a notice
+    // the block cart never shows, and the customer landed on an empty cart (owner 2026-10-26,
+    // order 87533). Such a line is added as the job it was: WCPA's order-again and add-to-cart
+    // checks stay out of that one add, the line is marked for WCPA to leave alone (wcpaIgnore),
+    // and its checkout check skips it (pps_reorder_wcpa_hide below).
+    $wcpa_line = pps_reorder_line_has_wcpa( $item );
+    $cart_item_data = $wcpa_line
+        ? apply_filters( 'woocommerce_order_again_cart_item_data', array(), $item, $order )
+        : array( 'wcpaIgnore' => true, 'pps_no_addon_form' => true );
 
     // A quote-born order carries the quantity tiers it was sold with, so a
     // reorder can switch to one of them instead of repeating the exact figure.
@@ -924,19 +924,124 @@ function pps_handle_single_item_reorder() {
     // spec-less-line guard in pps-calculators.php would refuse it as if it were someone
     // pressing WooCommerce's Add to cart button on a placeholder-priced product.
     $GLOBALS['pps_internal_add_to_cart'] = true;
-    $cart_key = WC()->cart->add_to_cart( $product_id, $quantity, $variation_id, $variations, $cart_item_data );
+    $add = function () use ( $product_id, $quantity, $variation_id, $variations, $cart_item_data ) {
+        return WC()->cart->add_to_cart( $product_id, $quantity, $variation_id, $variations, $cart_item_data );
+    };
+    $cart_key = $wcpa_line ? $add() : pps_reorder_without_wcpa_validation( $add );
     unset( $GLOBALS['pps_internal_add_to_cart'] );
 
     if ( ! $cart_key ) {
-        wc_add_notice( 'Could not add that item to your cart.', 'error' );
-        wp_safe_redirect( $redirect );
-        exit;
+        pps_reorder_fail( 'add' );
     }
 
     wc_add_notice( 'Added to your cart from order #' . $order->get_order_number() . '.', 'success' );
     wp_safe_redirect( $redirect );
     exit;
 }
+
+/**
+ * Why a reorder link did not fill the cart, in words the customer can act on. The cart page is
+ * WooCommerce's block cart, which does not print wc_add_notice() messages, so a refused reorder
+ * used to land on an empty cart with no word (owner 2026-10-26). The reason now rides on the
+ * redirect as a short code and is printed above the cart; only these fixed sentences are ever
+ * shown, so nothing from the link reaches the page.
+ */
+function pps_reorder_messages() {
+    return array(
+        'expired' => 'That reorder link has expired. Please look up your order again and use the new reorder button.',
+        'order'   => 'We could not find that order. Please look it up again, or reply to your order email and we will set up the reorder for you.',
+        'access'  => 'For your security, reorder access ends 30 minutes after you look up your order. Please look it up again and use the reorder button.',
+        'item'    => 'We could not find that item on the order. Please look it up again, or reply to your order email and we will set up the reorder for you.',
+        'product' => 'That product is no longer available to reorder online. Reply to your order email and we will quote it for you.',
+        'add'     => 'We could not add that item to your cart. Reply to your order email and we will set up the reorder for you.',
+    );
+}
+
+/** Send a refused reorder to the cart with its reason (also as a notice, for any page that prints them). */
+function pps_reorder_fail( $code ) {
+    $msgs = pps_reorder_messages();
+    $code = isset( $msgs[ $code ] ) ? $code : 'add';
+    wc_add_notice( $msgs[ $code ], 'error' );
+    wp_safe_redirect( add_query_arg( 'pps_reorder_msg', $code, wc_get_cart_url() ) );
+    exit;
+}
+
+add_filter( 'the_content', function ( $content ) {
+    if ( empty( $_GET['pps_reorder_msg'] ) || ! function_exists( 'is_cart' ) || ! is_cart() || ! in_the_loop() ) return $content;
+    $msgs = pps_reorder_messages();
+    $code = sanitize_key( wp_unslash( $_GET['pps_reorder_msg'] ) );
+    if ( ! isset( $msgs[ $code ] ) ) return $content;
+    $lookup = home_url( '/reorders/' );
+    return '<div class="woocommerce-error pps-reorder-msg" role="alert" style="margin:0 0 1.5em;padding:14px 18px;border-left:4px solid #b32d2e;background:#fcf0f1">'
+         . esc_html( $msgs[ $code ] ) . ' <a href="' . esc_url( $lookup ) . '">Look up your order</a></div>' . $content;
+}, 5 );
+
+/** Whether an order line was sold through a WCPA form (it carries WCPA's saved answers). */
+function pps_reorder_line_has_wcpa( $item ) {
+    $key  = defined( 'WCPA_ORDER_META_KEY' ) ? WCPA_ORDER_META_KEY : '_WCPA_order_meta_data';
+    $meta = is_object( $item ) && method_exists( $item, 'get_meta' ) ? $item->get_meta( $key ) : '';
+    return ! empty( $meta );
+}
+
+/**
+ * Run one add-to-cart with WCPA's own add-to-cart check taken off, then put it back exactly as
+ * it was (same object, priority and argument count). WCPA does the same to itself after it has
+ * restored an order's answers. Only WCPA's callback is touched; every other check still runs.
+ */
+function pps_reorder_without_wcpa_validation( callable $fn ) {
+    $removed = array();
+    $hook    = $GLOBALS['wp_filter']['woocommerce_add_to_cart_validation'] ?? null;
+    if ( $hook && isset( $hook->callbacks ) && is_array( $hook->callbacks ) ) {
+        foreach ( $hook->callbacks as $prio => $cbs ) {
+            foreach ( (array) $cbs as $cb ) {
+                $f = $cb['function'] ?? null;
+                if ( is_array( $f ) && is_object( $f[0] ) && strpos( get_class( $f[0] ), 'Acowebs\\WCPA\\' ) === 0 && ( $f[1] ?? '' ) === 'add_to_cart_validation' ) {
+                    $removed[] = array( $f, (int) $prio, (int) ( $cb['accepted_args'] ?? 1 ) );
+                }
+            }
+        }
+    }
+    foreach ( $removed as $r ) remove_filter( 'woocommerce_add_to_cart_validation', $r[0], $r[1] );
+    try { $out = $fn(); }
+    finally { foreach ( $removed as $r ) add_filter( 'woocommerce_add_to_cart_validation', $r[0], $r[1], $r[2] ); }
+    return $out;
+}
+
+/** Products in the cart only as reorder lines WCPA was told to leave alone (no answers of their own). */
+function pps_reorder_wcpa_hidden_ids( $contents ) {
+    $ids = array();
+    foreach ( (array) $contents as $ci ) {
+        if ( ! is_array( $ci ) || empty( $ci['wcpaIgnore'] ) || ! isset( $ci['pps_legacy_unit_price'] ) || ! empty( $ci['wcpa_data'] ) ) continue;
+        $ids[] = (int) ( $ci['product_id'] ?? 0 );
+        if ( ! empty( $ci['variation_id'] ) ) $ids[] = (int) $ci['variation_id'];
+    }
+    return array_values( array_unique( array_filter( $ids ) ) );
+}
+
+/**
+ * WCPA's checkout check ("Addon data missing for product …") refuses any line of a product that
+ * has a form and carries no answers -- which a quote/pay-link reorder never has. While that check
+ * runs, the products held only by such reorder lines read as form-less to WCPA (its has_form()
+ * reads this cached list); a line that does carry WCPA answers is checked by WCPA as always.
+ */
+function pps_reorder_wcpa_hide( $list ) {
+    $hide = $GLOBALS['pps_reorder_wcpa_hide'] ?? array();
+    if ( ! $hide || ! is_array( $list ) ) return $list;
+    foreach ( array( 'full', 'direct_purchasable' ) as $k ) {
+        if ( empty( $list[ $k ] ) || ! is_array( $list[ $k ] ) ) continue;
+        $list[ $k ] = array_values( array_filter( $list[ $k ], function ( $id ) use ( $hide ) { return ! in_array( (int) $id, $hide, true ); } ) );
+    }
+    return $list;
+}
+add_filter( 'transient_wcpa_products_transient_ver_3', 'pps_reorder_wcpa_hide', 20 );
+add_action( 'woocommerce_check_cart_items', function () {
+    if ( ! function_exists( 'WC' ) || ! WC()->cart ) return;
+    $GLOBALS['pps_reorder_wcpa_hide'] = pps_reorder_wcpa_hidden_ids( WC()->cart->get_cart() );
+    // WCPA rebuilds its list unfiltered when the cache is empty; ask for it once first so the
+    // check reads the cached (filtered) copy.
+    if ( $GLOBALS['pps_reorder_wcpa_hide'] && function_exists( 'Acowebs\\WCPA\\has_form' ) ) \Acowebs\WCPA\has_form( 0 );
+}, 1 );
+add_action( 'woocommerce_check_cart_items', function () { unset( $GLOBALS['pps_reorder_wcpa_hide'] ); }, 999 );
 
 add_filter( 'woocommerce_get_cart_item_from_session', function( $cart_item, $values ) {
     if ( isset( $values['pps_legacy_unit_price'] ) ) {
