@@ -1074,6 +1074,13 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
         // it, and exactly the kind of thing this log has had to be taught twice
         // before (the empty 401 detail, the missing OAuth failure).
         'lines'        => isset( $body['lines'] ) && is_array( $body['lines'] ) ? count( $body['lines'] ) : 1,
+        // The sigils that change what the link IS, so the log can answer
+        // "is this feature being used, and does it work" a week after it
+        // shipped. That question has now been unanswerable three times --
+        // lines, then reuse, then noship -- and each time the missing field
+        // was the one the next question needed.
+        'reuse'        => ! empty( $body['reusable'] ),
+        'noship'       => ! empty( $body['noship'] ),
         'conversation' => '' !== $conversation,
     ) );
     pps_paylink_queue_note( $conversation, $note );
