@@ -920,6 +920,22 @@ function pps_handle_single_item_reorder() {
     $cart_item_data = $wcpa_line
         ? apply_filters( 'woocommerce_order_again_cart_item_data', array(), $item, $order )
         : array( 'wcpaIgnore' => true, 'pps_no_addon_form' => true );
+    // What the job WAS travels with it. A quote/pay-link line names the work only in its visible
+    // meta (Specs, Item, Project); without it the new order read as a bare "Custom Order" and
+    // production could not tell what to print. "Requested delivery" belonged to the old order.
+    if ( ! $wcpa_line ) {
+        $carry = array();
+        foreach ( $item->get_meta_data() as $m ) {
+            $d = $m->get_data();
+            $k = (string) ( $d['key'] ?? '' );
+            if ( $k === '' || $k[0] === '_' || ! is_scalar( $d['value'] ?? null ) || trim( (string) $d['value'] ) === '' ) continue;
+            if ( in_array( $k, array( 'Requested delivery', 'Quantity' ), true ) ) continue;
+            $carry[] = array( mb_substr( $k, 0, 60 ), mb_substr( (string) $d['value'], 0, 4000 ) );
+            if ( count( $carry ) >= 12 ) break;
+        }
+        if ( $carry ) $cart_item_data['pps_reorder_meta'] = $carry;
+        $cart_item_data['pps_reorder_of'] = (string) $order->get_order_number();
+    }
 
     // A quote-born order carries the quantity tiers it was sold with, so a
     // reorder can switch to one of them instead of repeating the exact figure.
@@ -1094,12 +1110,20 @@ add_filter( 'woocommerce_get_cart_item_from_session', function( $cart_item, $val
 // The quantity of a reorder carried as one whole-job line, shown in the cart and kept on
 // the order so production still reads it.
 add_filter( 'woocommerce_get_item_data', function( $data, $cart_item ) {
+    foreach ( (array) ( $cart_item['pps_reorder_meta'] ?? array() ) as $kv ) {
+        if ( is_array( $kv ) && count( $kv ) === 2 ) $data[] = array( 'key' => (string) $kv[0], 'value' => (string) $kv[1] );
+    }
+    if ( ! empty( $cart_item['pps_reorder_of'] ) ) $data[] = array( 'key' => 'Reorder of', 'value' => 'Order #' . $cart_item['pps_reorder_of'] );
     if ( ! empty( $cart_item['pps_legacy_qty'] ) ) {
         $data[] = array( 'key' => 'Quantity', 'value' => number_format( (int) $cart_item['pps_legacy_qty'] ) );
     }
     return $data;
 }, 10, 2 );
 add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $key, $values ) {
+    foreach ( (array) ( $values['pps_reorder_meta'] ?? array() ) as $kv ) {
+        if ( is_array( $kv ) && count( $kv ) === 2 ) $item->add_meta_data( (string) $kv[0], (string) $kv[1], true );
+    }
+    if ( ! empty( $values['pps_reorder_of'] ) ) $item->add_meta_data( 'Reorder of', 'Order #' . $values['pps_reorder_of'], true );
     if ( ! empty( $values['pps_legacy_qty'] ) ) {
         $item->add_meta_data( 'Quantity', number_format( (int) $values['pps_legacy_qty'] ), true );
     }
