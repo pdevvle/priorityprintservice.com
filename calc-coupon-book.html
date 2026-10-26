@@ -2490,12 +2490,14 @@ async function extractPdfPages(file, onProgress) {
   // Runs before the page renders below, so those reuse the operator lists this builds.
   window.PPS_PDF_RISKS.doc = await window.ppsAnalyzePdfRisks(pdf);
   const result = [];
-  // Get dimensions from first page (PDF units = 1/72 inch)
+  // Get dimensions from first page (PDF units = 1/72 inch), as the page is SEEN: its /Rotate
+  // applied, as every render of it applies it. pg.view is the unrotated box, so a page turned 90°
+  // was measured on its side while its pixels stood upright, and printed squashed (2026-10-13).
   const firstPg = await pdf.getPage(1);
-  const [x0, y0, x1, y1] = firstPg.view;
-  const pdfW = parseFloat(((x1 - x0) / 72).toFixed(3));
-  const pdfH = parseFloat(((y1 - y0) / 72).toFixed(3));
-  const pxW = Math.round(x1 - x0), pxH = Math.round(y1 - y0);
+  const v1 = firstPg.getViewport({ scale: 1 });
+  const pdfW = parseFloat((v1.width / 72).toFixed(3));
+  const pdfH = parseFloat((v1.height / 72).toFixed(3));
+  const pxW = Math.round(v1.width), pxH = Math.round(v1.height);
 
   for (let i = 1; i <= pdf.numPages; i++) {
     if (onProgress) onProgress(i, pdf.numPages);
@@ -2526,8 +2528,8 @@ async function splitReaderSpreads(pdfDoc, refWidthIn, onProgress) {
   for (let i = 1; i <= pdfDoc.numPages; i++) {
     if (onProgress) onProgress(i, pdfDoc.numPages);
     const pg = await pdfDoc.getPage(i);
-    const [x0, y0, x1, y1] = pg.view;
-    const pwIn = (x1 - x0) / 72, phIn = (y1 - y0) / 72;
+    const v1 = pg.getViewport({ scale: 1 });   // as seen, /Rotate applied (see extractPdfPages)
+    const pwIn = v1.width / 72, phIn = v1.height / 72;
     const isSpread = refWidthIn > 0 && pwIn > refWidthIn * 1.5;
     const vp = pg.getViewport({ scale: DPI / 72 });
     const canvas = document.createElement("canvas");
@@ -3305,7 +3307,7 @@ function SetPreview({ sizeLabel, customLong, customShort, bindDir, pageCount, ro
           c.width = Math.round(vp.width); c.height = Math.round(vp.height);
           await pg.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
           pages.push({ dataUrl: c.toDataURL("image/jpeg", 0.92), label: i === 1 ? "Cover — Outside" : "Cover — Inside (glue side)", isWrap: true, isBlank: false });
-          if (i === 1) { const v = pg.view; dimsIn = { wIn: +(((v[2] - v[0]) / 72).toFixed(3)), hIn: +(((v[3] - v[1]) / 72).toFixed(3)) }; }
+          if (i === 1) { const v = pg.getViewport({ scale: 1 }); dimsIn = { wIn: +((v.width / 72).toFixed(3)), hIn: +((v.height / 72).toFixed(3)) }; }   // as seen, /Rotate applied
         }
       } else if (/^image\//.test(f.type)) {
         const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
