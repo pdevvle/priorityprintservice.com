@@ -7687,6 +7687,17 @@ function pps_emit_localbusiness_schema( array $args ) {
 /**
  * Build (but do not emit) the LocalBusiness JSON-LD schema array.
  */
+/**
+ * The one email address the PUBLIC site shows (owner 2026-10-27: "use office"). Never
+ * admin_email: that is the owner's personal inbox, and until now it was printed in the
+ * LocalBusiness schema, the noscript fallbacks and /llms.txt on every calculator page.
+ * admin_email still receives WordPress's own account and security mail.
+ */
+if ( ! defined( 'PPS_PUBLIC_CONTACT_EMAIL' ) ) define( 'PPS_PUBLIC_CONTACT_EMAIL', 'Office@priorityprintservice.com' );
+function pps_public_contact_email() {
+    return PPS_PUBLIC_CONTACT_EMAIL;
+}
+
 function pps_build_localbusiness_schema( array $args ) {
     $defaults = array(
         'name'             => get_bloginfo( 'name' ),
@@ -7708,7 +7719,8 @@ function pps_build_localbusiness_schema( array $args ) {
     );
     $a = wp_parse_args( $args, $defaults );
 
-    $email = $a['email'] !== '' ? $a['email'] : get_option( 'admin_email' );
+    // Always the public address — a saved seo.email is not trusted to be one.
+    $email = pps_public_contact_email();
 
     $schema = array(
         '@context'       => 'https://schema.org',
@@ -8632,7 +8644,7 @@ add_action( 'wp_footer', function() {
     $title     = (string) ( $preset['title'] ?? '' );
     $desc      = pps_preset_meta_description( $preset );
     $defaults  = isset( $preset['defaults'] ) && is_array( $preset['defaults'] ) ? $preset['defaults'] : array();
-    $email     = get_option( 'admin_email' );
+    $email     = pps_public_contact_email();
 
     echo "<noscript>\n";
     echo '<div style="max-width:800px;margin:40px auto;padding:20px;font-family:sans-serif;color:#333">';
@@ -8669,7 +8681,7 @@ add_action( 'woocommerce_after_single_product_summary', function() {
 
     $config   = function_exists( 'pps_get_config' ) ? pps_get_config() : array();
     $min_days = intval( $config['minimum_turnaround_days'] ?? 3 );
-    $email    = esc_html( get_option( 'admin_email' ) );
+    $email    = esc_html( pps_public_contact_email() );
     $name     = esc_html( get_bloginfo( 'name' ) );
     ?>
     <noscript>
@@ -8694,7 +8706,7 @@ add_action( 'woocommerce_after_single_product_summary', function() {
         <h2>Artwork</h2>
         <p>Upload PDF or images. Built-in proof tool with bleed, trim, and safety guides.</p>
         <p><strong>Enable JavaScript for the interactive price calculator.</strong></p>
-        <p>Contact: <a href="mailto:<?php echo esc_attr( get_option( 'admin_email' ) ); ?>"><?php echo $email; ?></a></p>
+        <p>Contact: <a href="mailto:<?php echo esc_attr( pps_public_contact_email() ); ?>"><?php echo $email; ?></a></p>
     </div>
     </noscript>
     <?php
@@ -8717,7 +8729,7 @@ add_action( 'template_redirect', function() {
     $url      = home_url( '/' );
     $config   = function_exists( 'pps_get_config' ) ? pps_get_config() : array();
     $min_days = intval( $config['minimum_turnaround_days'] ?? 3 );
-    $email    = get_option( 'admin_email' );
+    $email    = pps_public_contact_email();
 
     header( 'Content-Type: text/plain; charset=utf-8' );
     header( 'Cache-Control: public, max-age=86400' );
