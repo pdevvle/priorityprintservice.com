@@ -318,6 +318,39 @@ function pps_paylink_parse_flags( $text ) {
 }
 
 /**
+ * Which link a *revoke command names.
+ *
+ * The operator has the link in the thread, so all three of these work and are
+ * tried in this order:
+ *
+ *   the pasted URL      .../quote/?q=20261026-0012
+ *   the bare token      20261026-0012
+ *   a #reference        #acme-october
+ *
+ * The URL comes first because a pasted link contains a token, and reading the
+ * token out of it is right while treating the whole URL as one is not. The
+ * timestamp token is matched as a shape rather than as any run of digits: a
+ * price or a quantity must never be mistaken for the thing being revoked.
+ *
+ * @return string the token or reference, or '' when the command names nothing
+ */
+function pps_paylink_parse_revoke_target( $text ) {
+    $text = (string) $text;
+
+    // From a pasted link: ?q=<token>, or the last path segment of /quote/<token>.
+    if ( preg_match( '#[?&]q=([A-Za-z0-9_-]{3,80})#', $text, $m ) ) return $m[1];
+    if ( preg_match( '#/quote/([A-Za-z0-9_-]{3,80})#', $text, $m ) ) return $m[1];
+
+    // A bare minted token: YYYYMMDD-HHMM, optionally WordPress's -2 suffix.
+    if ( preg_match( '/(?:^|\s)(\d{8}-\d{4}(?:-\d+)?)(?=$|\s)/', $text, $m ) ) return $m[1];
+
+    // A #reference, the same sigil used when the link was minted.
+    if ( preg_match( '/(?:^|\s)#([A-Za-z0-9_-]{2,60})\b/', $text, $m ) ) return $m[1];
+
+    return '';
+}
+
+/**
  * Normalise one line item's description the way a single-line one is handled:
  * collapse spaces, keep the operator's newlines.
  */
@@ -393,6 +426,19 @@ function pps_paylink_parse_command( $text ) {
     // spellings still answer, because a link minted yesterday should not stop
     // working because the command was renamed.
     $text = preg_replace( '/^\s*\/?(ppspay|paylink|pay|quote)\b[:\s]*/i', '', $text, 1 );
+
+    // ── *revoke: a different operation, not a link to mint ──────────────
+    // Checked first, because revoking names a link and carries no price or
+    // description at all. Falling through to the mint parser would refuse it
+    // for having no price, which says nothing about what was actually asked.
+    if ( preg_match( '/(?:^|\s)\*(revoke|cancel-link|kill)(?=$|\s)/i', $text ) ) {
+        $target = pps_paylink_parse_revoke_target( $text );
+        if ( '' === $target ) {
+            return new WP_Error( 'revoke_target',
+                'Say which link to revoke: paste the link, or give its token (like 20261026-0012) or its #reference.' );
+        }
+        return array( 'action' => 'revoke', 'target' => $target );
+    }
 
     // ── Several line items? ──────────────────────────────────────────────
     // Tried first, and only succeeds on an unmistakable shape (see
@@ -1016,6 +1062,38 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
                 'ok' => false, 'error' => $parsed->get_error_code(), 'message' => $parsed->get_error_message(),
             ), 200 );   // see pps_paylink_refusal_status()
         }
+        // A revoke is not a mint: it takes a different path out of here and
+        // must not reach pps_paylink_create(), which would refuse it for
+        // having no price.
+        if ( isset( $parsed['action'] ) && 'revoke' === $parsed['action'] ) {
+            if ( ! function_exists( 'pps_quote_revoke' ) ) {
+                return new WP_REST_Response( array( 'ok' => false, 'error' => 'unavailable' ), 200 );
+            }
+            $done = pps_quote_revoke( $parsed['target'] );
+            if ( is_wp_error( $done ) ) {
+                pps_paylink_log_outcome( 'revoke_refused', array(
+                    'error'        => $done->get_error_code(),
+                    'conversation' => '' !== $conversation,
+                ) );
+                if ( pps_paylink_refusal_allowed( $conversation ) ) {
+                    pps_paylink_queue_note( $conversation,
+                        "⚠️ Link not revoked.\n\n" . $done->get_error_message() );
+                }
+                return new WP_REST_Response( array(
+                    'ok' => false, 'error' => $done->get_error_code(), 'message' => $done->get_error_message(),
+                ), 200 );
+            }
+            pps_paylink_log_outcome( 'revoked', array(
+                'target'       => $parsed['target'],
+                'conversation' => '' !== $conversation,
+            ) );
+            pps_paylink_queue_note( $conversation,
+                "🚫 Link revoked: " . $parsed['target']
+                . "\n\nAnyone opening it now sees that the quote is no longer available."
+                . " Orders already placed from it are unaffected." );
+            return new WP_REST_Response( array( 'ok' => true, 'revoked' => $parsed['target'] ), 200 );
+        }
+
         $body = array_merge( $body, $parsed );
     }
 

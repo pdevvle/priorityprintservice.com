@@ -42,6 +42,23 @@ class WP_Error { public $code; public $msg;
     public function get_error_message() { return $this->msg; } }
 function is_wp_error($t) { return $t instanceof WP_Error; }
 
+$GLOBALS['meta'] = array();
+$GLOBALS['quote'] = null;
+function get_posts($a) { return $GLOBALS['quote'] ? array((object) array('ID' => 9)) : array(); }
+function get_post_meta($id, $k, $single = false) { return $GLOBALS['meta'][$k] ?? ''; }
+function update_post_meta($id, $k, $v) { $GLOBALS['meta'][$k] = $v; return true; }
+function wp_insert_post($a, $e = false) { return 9; }
+function get_post($id) { return (object) array('ID' => 9, 'post_name' => $GLOBALS['meta']['_q_token'] ?? 'tok'); }
+class PPS_StubOrder {
+    private $st; public function __construct($st) { $this->st = $st; }
+    public function get_status() { return $this->st; }
+    public function get_order_number() { return '87999'; }
+}
+function wc_get_order($id) { return $GLOBALS['order'] ?? null; }
+function pps_job_invoice_is_unpaid($o) {
+    return $o && in_array($o->get_status(), array('pending', 'on-hold', 'failed'), true);
+}
+
 require __DIR__ . '/../pps-job-quote.php';
 
 $pass = 0; $fail = 0;
@@ -114,6 +131,50 @@ foreach (array(true, false) as $unpaid) {
     if ('form' === act(true, $unpaid, true)) $reopens++;
 }
 ok('reusable reopens only when settled', $reopens, 1);
+
+// --- revoking a quote
+function setup_quote($order_id = 0, $revoked = 0) {
+    $GLOBALS['quote'] = true;
+    $GLOBALS['meta'] = array('_q_token' => 'tok123', '_q_order' => $order_id, '_q_revoked' => $revoked);
+    $GLOBALS['order'] = null;
+}
+
+// A quote nobody has ordered from: revoked cleanly.
+setup_quote();
+ok('revokes an unused quote', pps_quote_revoke('tok123'), true);
+ok('flag is stored',          $GLOBALS['meta']['_q_revoked'], 1);
+ok('and when it happened',    isset($GLOBALS['meta']['_q_revoked_at']), true);
+
+// Already revoked: said so rather than silently repeating.
+setup_quote(0, 1);
+$r = pps_quote_revoke('tok123');
+ok('already revoked refuses', is_wp_error($r) ? $r->get_error_code() : '', 'already');
+
+// Unknown token.
+$GLOBALS['quote'] = null;
+$r = pps_quote_revoke('nope');
+ok('unknown token refuses',   is_wp_error($r) ? $r->get_error_code() : '', 'not_found');
+
+// THE RULE THAT MATTERS: a quote whose order is UNPAID is not revoked. That
+// customer is mid-payment and this page is how they reach their pay link;
+// revoking it would strand them with an order they cannot complete.
+setup_quote(555);
+$GLOBALS['order'] = new PPS_StubOrder('pending');
+$r = pps_quote_revoke('tok123');
+ok('unpaid order blocks it',  is_wp_error($r) ? $r->get_error_code() : '', 'unpaid');
+ok('and names the order',     is_wp_error($r) && false !== strpos($r->get_error_message(), '87999'), true);
+ok('nothing was stored',      empty($GLOBALS['meta']['_q_revoked']), true);
+
+// on-hold counts as unpaid too.
+setup_quote(555);
+$GLOBALS['order'] = new PPS_StubOrder('on-hold');
+ok('on-hold blocks it too', is_wp_error(pps_quote_revoke('tok123')), true);
+
+// A PAID order does not block it -- that is the standing-link case, where
+// stopping further orders is the whole point.
+setup_quote(555);
+$GLOBALS['order'] = new PPS_StubOrder('processing');
+ok('paid order allows revoke', pps_quote_revoke('tok123'), true);
 
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);

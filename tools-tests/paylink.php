@@ -555,5 +555,46 @@ ok('noship reaches quote', $GLOBALS['captured']['noship'], true);
 pps_paylink_create(array('description' => 'Postcards', 'price' => '45'));
 ok('default ships',        $GLOBALS['captured']['noship'], false);
 
+// --- *revoke names a link and mints nothing
+function T($t) { return pps_paylink_parse_revoke_target($t); }
+
+// The three ways the operator has the link to hand.
+ok('from a pasted url',   T('https://x.test/quote/?q=20261026-0012'), '20261026-0012');
+ok('from a path url',     T('https://x.test/quote/20261026-0012'),    '20261026-0012');
+ok('from a bare token',   T('*revoke 20261026-0012'),                 '20261026-0012');
+ok('from a -2 token',     T('*revoke 20261026-0012-2'),               '20261026-0012-2');
+ok('from a #reference',   T('*revoke #acme-october'),                  'acme-october');
+ok('nothing named',       T('*revoke'),                                '');
+
+// A URL wins over anything else in the line: a pasted link CONTAINS a token,
+// and reading the token out of it is right where taking the whole URL is not.
+ok('url beats reference', T('*revoke #acme https://x.test/quote/?q=20261026-0012'), '20261026-0012');
+
+// A price or a quantity must never be read as the thing being revoked.
+ok('a price is not a token',  T('*revoke $250'), '');
+ok('a qty is not a token',    T('*revoke @500'), '');
+ok('a short number is not',   T('*revoke 1234'), '');
+
+// The command returns a revoke, not a mint, and asks for no price.
+$r = parse('/ppspay *revoke 20261026-0012');
+ok('action is revoke',  $r['action'], 'revoke');
+ok('target carried',    $r['target'], '20261026-0012');
+// No price and no description, and that must not be an error.
+ok('no price demanded', isset($r['price']), false);
+
+// Named nothing -> a refusal that says what to do, not "no price found".
+$bad = parse('/ppspay *revoke');
+ok('refuses with guidance', is_wp_error($bad), true);
+ok('names the right fault', $bad->get_error_code(), 'revoke_target');
+
+// NOT read out of a description. "Revoke" and "cancel" are words a thread uses.
+ok('in brackets is desc',  parse('/ppspay [revoke the old plates] $45')['description'], 'revoke the old plates');
+ok('and mints normally',   parse('/ppspay [revoke the old plates] $45')['price'], 45.0);
+ok('bare word mints too',  isset(parse('/ppspay [X] revoke $45')['action']), false);
+
+// Aliases.
+ok('*kill alias',        parse('/ppspay *kill 20261026-0012')['action'], 'revoke');
+ok('*cancel-link alias', parse('/ppspay *cancel-link 20261026-0012')['action'], 'revoke');
+
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);

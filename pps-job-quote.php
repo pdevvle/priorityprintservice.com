@@ -233,6 +233,7 @@ function pps_quote_get( $token ) {
         'orders'     => array_values( (array) get_post_meta( $id, '_q_orders', true ) ),
         'reusable'   => (bool) get_post_meta( $id, '_q_reusable', true ),
         'noship'     => (bool) get_post_meta( $id, '_q_noship', true ),
+        'revoked'    => (bool) get_post_meta( $id, '_q_revoked', true ),
         'note'       => (string) get_post_meta( $id, '_q_note', true ),
     );
 }
@@ -260,6 +261,40 @@ function pps_quote_url( $token ) {
     $page = get_page_by_path( 'quote' );
     $base = $page ? get_permalink( $page ) : home_url( '/quote/' );
     return add_query_arg( 'q', rawurlencode( $token ), $base );
+}
+
+/**
+ * Take a quote out of service.
+ *
+ * REVOKE, NOT DELETE. Deleting the post would orphan any order placed from it:
+ * the order carries _pps_quote_token, and /reorders, the console and the paper
+ * report all read it. A revoked quote that still resolves and says so is also
+ * better for a customer holding an old URL than a 404 they cannot interpret.
+ *
+ * Refused while its order is UNPAID. That customer is mid-payment and the quote
+ * page is how they get back to their pay link; revoking it would strand them
+ * with an order they cannot complete and no way to say so.
+ *
+ * @return true|WP_Error
+ */
+function pps_quote_revoke( $token ) {
+    $q = pps_quote_get( $token );
+    if ( ! $q ) return new WP_Error( 'not_found', 'No link with that reference. Check the token in the URL you sent.' );
+    if ( ! empty( $q['revoked'] ) ) return new WP_Error( 'already', 'That link was already revoked.' );
+
+    if ( $q['order'] ) {
+        $order = wc_get_order( $q['order'] );
+        if ( $order && pps_job_invoice_is_unpaid( $order ) ) {
+            return new WP_Error( 'unpaid', sprintf(
+                'Order #%s was placed from this link and is not paid yet. Revoking it would leave that customer unable to finish paying. Cancel the order first if that is what you want.',
+                $order->get_order_number()
+            ) );
+        }
+    }
+
+    update_post_meta( $q['id'], '_q_revoked', 1 );
+    update_post_meta( $q['id'], '_q_revoked_at', current_time( 'mysql' ) );
+    return true;
 }
 
 /**
@@ -553,6 +588,16 @@ function pps_job_quote_shortcode() {
     $q = $token ? pps_quote_get( $token ) : null;
     if ( ! $q ) {
         return '<div class="pps-acct"><div class="lookup-shell"><div class="empty"><span>This quote link is not valid. Please check the link or contact us.</span></div></div></div>';
+    }
+
+    // Revoked: checked BEFORE the order branches, and before the POST handler
+    // below, so a revoked link can neither be ordered from nor be submitted by
+    // a form somebody already had open. A paid order placed from it is still
+    // reachable from /reorders and the receipt; this page is closed.
+    if ( ! empty( $q['revoked'] ) ) {
+        return '<div class="pps-acct"><div class="lookup-shell"><div class="empty">'
+            . '<span>This quote is no longer available. Please contact us for a current price.</span>'
+            . '</div></div></div>';
     }
 
     if ( $q['order'] ) {
