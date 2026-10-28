@@ -373,10 +373,21 @@ function pps_quote_resolve_addresses( array $p ) {
  * orders line up, and it should be checkable without a WooCommerce order, a
  * session or a page render.
  */
-function pps_quote_visit_action( $has_order, $is_unpaid, $reusable ) {
+function pps_quote_visit_action( $has_order, $is_unpaid, $reusable, $is_dead = false ) {
     if ( ! $has_order ) return 'form';
+    // A cancelled or refunded order is not a live order, so the link is free
+    // again whether or not it is reusable. Without this the page told the
+    // customer "This order is paid. Thank you" about an order that had been
+    // cancelled -- 'cancelled' is not in the unpaid list, so it read as settled.
+    // True before *cancel existed, for anything cancelled in wp-admin.
+    if ( $is_dead )     return 'form';
     if ( $is_unpaid )   return 'resume';
     return $reusable ? 'form' : 'settled';
+}
+
+/** Statuses that mean there is no live order behind this quote any more. */
+function pps_quote_order_is_dead( $order ) {
+    return $order && in_array( $order->get_status(), array( 'cancelled', 'refunded', 'trash' ), true );
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -603,7 +614,12 @@ function pps_job_quote_shortcode() {
     if ( $q['order'] ) {
         $existing = wc_get_order( $q['order'] );
         if ( $existing ) {
-            $act = pps_quote_visit_action( true, pps_job_invoice_is_unpaid( $existing ), $q['reusable'] );
+            $act = pps_quote_visit_action(
+                true,
+                pps_job_invoice_is_unpaid( $existing ),
+                $q['reusable'],
+                pps_quote_order_is_dead( $existing )
+            );
             if ( 'resume'   === $act ) return pps_quote_placed_view( $existing, false );
             if ( 'settled'  === $act ) return pps_quote_placed_view( $existing, true );
             // 'form' -- paid and reusable, so fall through to a fresh order.

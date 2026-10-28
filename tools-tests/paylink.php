@@ -596,5 +596,93 @@ ok('bare word mints too',  isset(parse('/ppspay [X] revoke $45')['action']), fal
 ok('*kill alias',        parse('/ppspay *kill 20261026-0012')['action'], 'revoke');
 ok('*cancel-link alias', parse('/ppspay *cancel-link 20261026-0012')['action'], 'revoke');
 
+// --- *cancel names an ORDER, not a link
+$c = parse('/ppspay *cancel 87540');
+ok('action is cancel',  $c['action'], 'cancel');
+ok('order number read', $c['target'], 87540);
+ok('# prefix tolerated', parse('/ppspay *cancel #87540')['target'], 87540);
+
+// Named nothing -> a refusal that says the shape, not "no price found".
+$bad = parse('/ppspay *cancel');
+ok('refuses with guidance', is_wp_error($bad), true);
+ok('names the right fault', $bad->get_error_code(), 'cancel_target');
+
+// A price or a qty is not an order number.
+ok('a price is not an order', is_wp_error(parse('/ppspay *cancel $250')) ? parse('/ppspay *cancel $250')->get_error_code() : '', 'cancel_target');
+ok('a qty is not an order',   is_wp_error(parse('/ppspay *cancel @500')), true);
+
+// *cancel and *revoke cannot be confused: an order number is a bare integer,
+// a revoke token is a dated shape. The *cancel-link alias was removed for the
+// same reason -- two similar words meaning different things.
+ok('revoke still works',        parse('/ppspay *revoke 20261026-0012')['action'], 'revoke');
+// *cancel is disambiguated by its object, so the old spelling still does what
+// it always did rather than erroring about a missing price.
+ok('cancel-link revokes',       parse('/ppspay *cancel-link 20261026-0012')['action'], 'revoke');
+ok('cancel + a token revokes',  parse('/ppspay *cancel 20261026-0012')['action'], 'revoke');
+ok('cancel + a url revokes',    parse('/ppspay *cancel https://x.test/quote/?q=20261026-0012')['target'], '20261026-0012');
+ok('cancel-order cancels',      parse('/ppspay *cancel-order 87540')['target'], 87540);
+ok('*kill still revokes',       parse('/ppspay *kill 20261026-0012')['action'], 'revoke');
+
+// Never read out of a description -- "cancel" is a word a thread uses.
+ok('in brackets is desc', parse('/ppspay [cancel culture pamphlet] $45')['description'], 'cancel culture pamphlet');
+ok('and mints normally',  parse('/ppspay [cancel culture pamphlet] $45')['price'], 45.0);
+ok('bare word mints',     isset(parse('/ppspay [X] cancel $45')['action']), false);
+
+// The ambiguity worth pinning: # is the reference sigil AND how an order
+// number is written. Under *cancel, all digits means an order.
+ok('cancel #digits is an order', parse('/ppspay *cancel #87540')['action'], 'cancel');
+ok('cancel #word is a link',     parse('/ppspay *cancel #acme-october')['action'], 'revoke');
+// Under *revoke it stays a reference, because that command names links.
+ok('revoke #digits is a link',   parse('/ppspay *revoke #87540')['action'], 'revoke');
+ok('revoke #digits target',      parse('/ppspay *revoke #87540')['target'], '87540');
+
+// --- cancelling only touches an order that was never paid
+class PPS_CancelOrder {
+    public $st; public $notes = array(); public $changed = '';
+    public function __construct($st) { $this->st = $st; }
+    public function get_status() { return $this->st; }
+    public function get_order_number() { return '87540'; }
+    public function get_total() { return 663.14; }
+    public function add_order_note($n) { $this->notes[] = $n; }
+    public function update_status($s, $n = '') { $this->changed = $s; $this->st = $s; }
+}
+$GLOBALS['cancel_order'] = null;
+function wc_get_order($id) { return $GLOBALS['cancel_order']; }
+function wc_price($n) { return '$' . number_format((float) $n, 2); }
+function wp_strip_all_tags($t) { return strip_tags((string) $t); }
+
+function try_cancel($status) {
+    $GLOBALS['cancel_order'] = new PPS_CancelOrder($status);
+    $r = pps_paylink_cancel_order(87540);
+    return array($r, $GLOBALS['cancel_order']);
+}
+
+// A WHITELIST: these three were never paid, so cancelling moves no money.
+foreach (array('pending', 'on-hold', 'failed') as $st) {
+    list($r, $o) = try_cancel($st);
+    ok("cancels $st",        is_array($r), true);
+    ok("$st became cancelled", $o->changed, 'cancelled');
+}
+
+// Everything else is refused BY DEFAULT, so a status nobody thought about
+// here fails closed rather than closing a paid order without moving money.
+foreach (array('processing', 'completed', 'refunded', 'pps-weird-new-status') as $st) {
+    list($r, $o) = try_cancel($st);
+    ok("refuses $st",      is_wp_error($r), true);
+    ok("$st untouched",    $o->changed, '');
+}
+list($r, ) = try_cancel('processing');
+ok('refusal says it is paid',   $r->get_error_code(), 'paid');
+ok('refusal names the order',   false !== strpos($r->get_error_message(), '87540'), true);
+ok('and says where to refund',  false !== strpos($r->get_error_message(), 'QuickBooks'), true);
+
+// Already cancelled is said plainly, not repeated.
+list($r, ) = try_cancel('cancelled');
+ok('already cancelled', $r->get_error_code(), 'already');
+
+// A missing order.
+$GLOBALS['cancel_order'] = null;
+ok('unknown order refuses', pps_paylink_cancel_order(99999)->get_error_code(), 'not_found');
+
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);

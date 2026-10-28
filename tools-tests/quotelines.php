@@ -176,5 +176,28 @@ setup_quote(555);
 $GLOBALS['order'] = new PPS_StubOrder('processing');
 ok('paid order allows revoke', pps_quote_revoke('tok123'), true);
 
+// --- a cancelled order frees the link, and never reads as paid
+// The bug: 'cancelled' is not in the unpaid list, so visit_action returned
+// 'settled' and the page told the customer "This order is paid. Thank you"
+// about an order that had been cancelled. True for anything cancelled in
+// wp-admin, long before *cancel existed.
+ok('cancelled frees a single-use link', pps_quote_visit_action(true, false, false, true), 'form');
+ok('cancelled frees a reusable link',   pps_quote_visit_action(true, false, true,  true), 'form');
+// A dead order outranks even an unpaid reading, so a cancelled-then-pending
+// combination cannot send someone back to pay for a cancelled order.
+ok('dead outranks unpaid',              pps_quote_visit_action(true, true,  false, true), 'form');
+// And a live order is unaffected.
+ok('live paid still settles',           pps_quote_visit_action(true, false, false, false), 'settled');
+ok('live unpaid still resumes',         pps_quote_visit_action(true, true,  false, false), 'resume');
+
+// Which statuses count as dead.
+foreach (array('cancelled', 'refunded', 'trash') as $st) {
+    ok("$st is dead", pps_quote_order_is_dead(new PPS_StubOrder($st)), true);
+}
+foreach (array('pending', 'on-hold', 'failed', 'processing', 'completed') as $st) {
+    ok("$st is live", pps_quote_order_is_dead(new PPS_StubOrder($st)), false);
+}
+ok('no order is not dead', pps_quote_order_is_dead(null), false);
+
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);

@@ -318,6 +318,52 @@ function pps_paylink_parse_flags( $text ) {
 }
 
 /**
+ * Cancel a WooCommerce order from a conversation.
+ *
+ * ONLY AN ORDER THAT WAS NEVER PAID. A whitelist, not a blacklist: pending,
+ * on-hold and failed can be cancelled, and everything else is refused by
+ * default, so a status nobody thought about here fails closed.
+ *
+ * The reason is that WooCommerce's `cancelled` moves no money. Cancelling a
+ * PAID order would leave the customer's payment taken against an order that
+ * reads as closed -- worse than either outcome on its own, because it looks
+ * resolved and is not. Refunding is deliberately not something this can do, so
+ * a paid order has to be settled in QuickBooks or Stripe first and then
+ * cancelled from wp-admin by someone who can see both sides.
+ *
+ * @return array|WP_Error ['order' => string, 'total' => string] on success
+ */
+function pps_paylink_cancel_order( $order_id ) {
+    if ( ! function_exists( 'wc_get_order' ) ) {
+        return new WP_Error( 'unavailable', 'WooCommerce is not loaded.' );
+    }
+    $order = wc_get_order( absint( $order_id ) );
+    if ( ! $order ) {
+        return new WP_Error( 'not_found', 'No order #' . absint( $order_id ) . '. Check the number.' );
+    }
+
+    $status = $order->get_status();
+    if ( 'cancelled' === $status ) {
+        return new WP_Error( 'already', 'Order #' . $order->get_order_number() . ' is already cancelled.' );
+    }
+    if ( ! in_array( $status, array( 'pending', 'on-hold', 'failed' ), true ) ) {
+        return new WP_Error( 'paid', sprintf(
+            'Order #%s is %s, so it has been paid. Cancelling here would close the order without moving the money. Refund it in QuickBooks or Stripe first, then cancel it in wp-admin.',
+            $order->get_order_number(),
+            $status
+        ) );
+    }
+
+    $order->add_order_note( 'Cancelled from Missive.' );
+    $order->update_status( 'cancelled', 'Cancelled from Missive. ' );
+
+    return array(
+        'order' => (string) $order->get_order_number(),
+        'total' => wp_strip_all_tags( wc_price( $order->get_total() ) ),
+    );
+}
+
+/**
  * Which link a *revoke command names.
  *
  * The operator has the link in the thread, so all three of these work and are
@@ -427,11 +473,39 @@ function pps_paylink_parse_command( $text ) {
     // working because the command was renamed.
     $text = preg_replace( '/^\s*\/?(ppspay|paylink|pay|quote)\b[:\s]*/i', '', $text, 1 );
 
+    // ── *cancel: an order, not a link ───────────────────────────────────
+    // An order number is a bare integer, and the revoke token is a dated shape
+    // (YYYYMMDD-HHMM), so the two cannot be confused. A $price or an @qty is
+    // not an order number either -- naming nothing refuses rather than guessing
+    // at whichever digits are nearest.
+    if ( preg_match( '/(?:^|\s)\*cancel(?:-link|-order)?(?=$|\s)/i', $text ) ) {
+        // "Cancel" is disambiguated by WHAT FOLLOWS, not by which spelling was
+        // typed: a link means revoke that link, an order number means cancel
+        // that order. One word, two obvious objects. The alternative -- making
+        // *cancel-link mean one thing and *cancel another -- is two words a
+        // character apart meaning different things, which is a trap.
+        $link = pps_paylink_parse_revoke_target( $text );
+        // "#87540" is ambiguous: # is this parser's reference sigil, and it is
+        // also how everybody writes an order number. Under *cancel an all-digit
+        // target is an ORDER -- that is what the operator means, and a quote
+        // reference that is nothing but digits would be an odd thing to choose.
+        // Under *revoke it stays a reference, because that command names links.
+        if ( '' !== $link && ! preg_match( '/^\d{3,10}$/', $link ) ) {
+            return array( 'action' => 'revoke', 'target' => $link );
+        }
+
+        if ( preg_match( '/(?:^|\s)#?(\d{3,10})(?=$|\s)/', $text, $m ) ) {
+            return array( 'action' => 'cancel', 'target' => (int) $m[1] );
+        }
+        return new WP_Error( 'cancel_target',
+            'Say what to cancel: an order number (/ppspay *cancel 87540), or a link to revoke (/ppspay *cancel 20261026-0012).' );
+    }
+
     // ── *revoke: a different operation, not a link to mint ──────────────
     // Checked first, because revoking names a link and carries no price or
     // description at all. Falling through to the mint parser would refuse it
     // for having no price, which says nothing about what was actually asked.
-    if ( preg_match( '/(?:^|\s)\*(revoke|cancel-link|kill)(?=$|\s)/i', $text ) ) {
+    if ( preg_match( '/(?:^|\s)\*(revoke|kill)(?=$|\s)/i', $text ) ) {
         $target = pps_paylink_parse_revoke_target( $text );
         if ( '' === $target ) {
             return new WP_Error( 'revoke_target',
@@ -1062,6 +1136,34 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
                 'ok' => false, 'error' => $parsed->get_error_code(), 'message' => $parsed->get_error_message(),
             ), 200 );   // see pps_paylink_refusal_status()
         }
+        // Cancelling an order is not a mint either.
+        if ( isset( $parsed['action'] ) && 'cancel' === $parsed['action'] ) {
+            $done = pps_paylink_cancel_order( $parsed['target'] );
+            if ( is_wp_error( $done ) ) {
+                pps_paylink_log_outcome( 'cancel_refused', array(
+                    'error'        => $done->get_error_code(),
+                    'order'        => (int) $parsed['target'],
+                    'conversation' => '' !== $conversation,
+                ) );
+                if ( pps_paylink_refusal_allowed( $conversation ) ) {
+                    pps_paylink_queue_note( $conversation,
+                        "⚠️ Order not cancelled.\n\n" . $done->get_error_message() );
+                }
+                return new WP_REST_Response( array(
+                    'ok' => false, 'error' => $done->get_error_code(), 'message' => $done->get_error_message(),
+                ), 200 );
+            }
+            pps_paylink_log_outcome( 'cancelled', array(
+                'order'        => (int) $parsed['target'],
+                'conversation' => '' !== $conversation,
+            ) );
+            pps_paylink_queue_note( $conversation,
+                "🚫 Order #" . $done['order'] . " cancelled (" . $done['total'] . ")."
+                . "\n\nNothing was charged. The quote link it came from works again,"
+                . " so the customer can reorder if they want to." );
+            return new WP_REST_Response( array( 'ok' => true, 'cancelled' => $done['order'] ), 200 );
+        }
+
         // A revoke is not a mint: it takes a different path out of here and
         // must not reach pps_paylink_create(), which would refuse it for
         // having no price.
