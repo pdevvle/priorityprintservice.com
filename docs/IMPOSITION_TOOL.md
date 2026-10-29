@@ -743,6 +743,80 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### The bleed starts at the art's own edge, never at the finished size (1.63)
+
+  Owner, after 1.62: "The finished size shouldn't matter to the bleed
+  setting. When enabled the bleed should originate at the trim of the art
+  as-is and not the finished page size. The purpose is to correct frequent
+  customer mistakes, and mis-sizing the design is a frequent mistake."
+
+  **What was wrong.** The coverage model was one number per art: `ownBleed`
+  = the smallest of the four rings between the trim and the page edge,
+  clamped at zero, so `covX/covY` were symmetric per axis and the mirror
+  axis sat on the finished-size trim. Order 87898's 9.125″-wide pages in a
+  9.25″ finished size: the art stops 1/16″ inside the cut on each side, the
+  clamp read that as 0, the band mirrored about the cut — white reflected
+  onto white — and 1/16″ of paper showed inside the trim on every page. The
+  same clamp meant a 1/16″ bleed read as "has bleed" and got nothing, and a
+  TrimBox file smaller than the finished size was pre-scaled by the
+  difference because the ink probe measured from the finished-size trim.
+
+  **Now, per edge, signed, from the art's own boundary.** `resolveSideArt`
+  returns `ownRing {left,right,bottom,top}` (raw page edges, placed inches):
+  the distance from the trim to the art's own boundary — its BleedBox /
+  TrimBox + bleed when it declares one (`bound`; everything past that is
+  slug and is already clipped away), else the page. Positive = the file's
+  own bleed on that edge; negative = the art stops inside the finished size
+  there. No clamp. `finalizeArtCoverage` adds `covEdge` (per raw edge, with
+  every scale factor in) and keeps `covX/covY` only for the refusal that
+  guards an operator's inset / scale-down — a file's own shortfall is
+  reported, never refused. `placeArt` computes the four coverages against
+  the cell it is drawing into (`rawEdgeOf(e, drawRot)` maps each placed edge
+  to its raw edge through /Rotate, the cell turn and the pattern), reflects
+  about **that** edge and fills from it out to the bleed box: band =
+  `bleed − cov(edge)` per edge, no band where the edge already carries the
+  full bleed. `EDGE_CYC` / `rawEdgeOf()` are the one edge-mapping helper
+  (display ↔ raw ↔ placed); `markRingEmpty()` zeroes the ring on the edges
+  the ring probe found empty, per edge now, so a file with bleed on three
+  sides and an empty allowance on the fourth gets a fill on the fourth only.
+
+  **Gate.** The synthesizer fires whenever the art's shortest edge carries
+  less than the job's bleed (`ownBleed < bleed − SYNTH_TOL`, 0.01″) or an
+  inset is set — no bleed, thin bleed, partial bleed, empty allowance,
+  mis-sized design — and an edge with full bleed is left alone by the
+  per-edge band. A file with full bleed on every edge is untouched by every
+  mode (pixel-identical to 1.62 and to Off).
+
+  **Probes.** `detectInkGaps` and `detectBleedInk` measure inside the art's
+  boundary (`trimWithinBound` / `artBoundDisp`): a gap is ink shy of the
+  art's own edge, or of the cut where the art reaches past it. The mirror
+  modes pre-scale a shy edge to reach that line; Scale carries it to
+  cut + bleed. A 3.875″ TrimBox in a 4″ finished size used to read as 0.056″
+  of shy ink and be pre-scaled ×1.03.
+
+  Verified (`ui_edge163.mjs`, pymupdf fixtures with a different colour band
+  on each edge so the band's colour proves which edge it came from, 300 DPI
+  profiles across each cut from 0.15″ outside to 0.47″ inside, both builds):
+
+  | fixture (4×6 finished)             | 1.62 Mirror                               | 1.63 Mirror                                          |
+  |------------------------------------|-------------------------------------------|------------------------------------------------------|
+  | 4×6, no bleed                      | 0.125″ mirror about the cut               | identical                                            |
+  | 4.25×6.25, full bleed              | untouched                                 | untouched (Scale too)                                |
+  | 4.125×6.125, 1/16″ bleed           | nothing — 1/16″ white outside the art     | 1/16″ mirrored from the art's edge, ring full        |
+  | 3.875×5.875, no boxes, ×4 /Rotate  | white strip inside the cut + detached band| continuous: 3/16″ mirrored from the art's edge, every rotation, band colour = adjacent edge colour |
+  | 4.5×6.5 with 3.875×5.875 TrimBox + crop marks | white gaps and mark fragments  | continuous, no black anywhere, no pre-scale          |
+
+  Scale mode: uniform factor solved on the short axis (`(h+b)/ink`), so the
+  long axis pulls further — measured band widths match to the sample. Order
+  87898 (`ui_87898.mjs`): ink continuous from the clip edge (0.125″) through
+  the cut on both outer edges; the spine gap closes where the design has ink
+  there (page 1 left edge, column 1.00 from the spine out), and stays white
+  where the design itself is white at the spine (back cover). `ui_sidebar`
+  30, `ui_pick` 17, `ui_orient2` green.
+
+  **Rule: where the bleed starts is a fact about the art, read per edge;
+  the finished size only says where the cut is.**
+
   ### Order 87898: "the bleed addition won't mirror the pages — no reaction" (1.62)
 
   Owner, trying to impose order 87898 (Armadillo 8-page saddle booklet) with

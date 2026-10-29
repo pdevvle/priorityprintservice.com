@@ -121,7 +121,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-29 02:00 UTC · IMPOSE-V1.62</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-29 06:00 UTC · IMPOSE-V1.63</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -1601,6 +1601,17 @@ function displayRect(rect, rot, W, H) {
   const [p1, p2] = pts.map(map);
   return { x: Math.min(p1[0], p2[0]), y: Math.min(p1[1], p2[1]), w: Math.abs(p2[0] - p1[0]), h: Math.abs(p2[1] - p1[1]) };
 }
+// Edges in counter-clockwise order. rawEdgeOf(e, deg) is the edge of the
+// UNROTATED page that lands on edge `e` once the page is turned `deg` CCW
+// (multiples of 90). The display orientation is the raw page turned −/Rotate
+// (what displayRect does); the placed art is the raw page turned drawRot
+// (placeArt); placed → display is cellRotate. One function, one cycle, so
+// per-edge figures (bleed ring, ink gaps, text) cannot drift apart.
+const EDGE_CYC = ["left", "bottom", "right", "top"];
+function rawEdgeOf(e, deg) {
+  const k = Math.round(deg / 90);
+  return EDGE_CYC[(((EDGE_CYC.indexOf(e) - k) % 4) + 4) % 4];
+}
 
 // ── PDF threat inspection & sanitization ────────────────────────
 // Malicious-PDF payloads live in the document catalog and annotations
@@ -1876,28 +1887,48 @@ function resolveSideArt(page, pieceLong, pieceShort, cellLandscape, bleed, fitMo
   // the synthesizer stood down on every page whose top ring had ink, so
   // "Mirror" did nothing on 5 of 8 pages. The coverage model below already
   // takes the MIN over the four sides (ownBleed); the gate now agrees with it.
-  const minRingPt = Math.min(trimRaw.x, W - trimRaw.x - trimRaw.w, trimRaw.y, H - trimRaw.y - trimRaw.h);
-  const hasBleed = minRingPt > 1;
-  if (!hasBleed) notes.push(minRingPt < -1
-    ? `no bleed available — the art is smaller than the finished size on ${(trimRaw.x < -1 || W - trimRaw.x - trimRaw.w < -1) ? "the width" : "the height"}; cut lines may show paper white`
-    : (W - trimRaw.w > 1 || H - trimRaw.h > 1) ? "bleed on one axis only — the other edges have none; cut lines there may show paper white" : "no bleed available — cut lines may show paper white");
-  // How far the art's own content runs past its trim, in PLACED inches — the
-  // smallest of the four sides, so it is safe on every edge and needs no
-  // rotation mapping (a min over all four is rotation-invariant). 0 for
-  // no-bleed art. Used to work out what the pull-off-trim inset leaves behind.
-  const ownBleed = Math.max(0, Math.min(
-    trimRaw.x, W - trimRaw.x - trimRaw.w, trimRaw.y, H - trimRaw.y - trimRaw.h)) * scale / PT;
-
   // A file that declares its trim also declares where its slug starts: crop
   // marks, colour bars and job text live outside the BleedBox. When the
   // finished size is larger than that trim (Crop never scales — 1.56), the
   // whole page would otherwise land inside the cut and the file's own crop
   // marks would print inside ours (owner, 2026-10-10). ownClip is applied as
-  // a second clip in placeArt, so the slug can never reach the sheet.
+  // a second clip in placeArt, so the slug can never reach the sheet. A clip
+  // that is not inside the page is no clip at all.
   if (ownClip && (ownClip.x > 1 || ownClip.y > 1 || ownClip.x + ownClip.w < W - 1 || ownClip.y + ownClip.h < H - 1))
     notes.push(`content outside the file's own ${getPageBox(page, "BleedBox") ? "BleedBox" : `TrimBox + ${B}″`} (its crop marks / slug) is clipped away`);
   else ownClip = null;
-  return { page, rot, mediaW: W, mediaH: H, trimRaw, ownClip, cellRotate, scale, hasBleed, ownBleed, notes,
+  // The art's own boundary: its BleedBox / TrimBox + bleed when it declares
+  // one (everything past that is slug and never reaches the sheet), else the
+  // page. The bleed ring is measured from the trim to THIS, per edge, SIGNED,
+  // in RAW page space: positive = the art carries that far past the cut (its
+  // own bleed); negative = the art STOPS that far inside the finished size —
+  // a mis-sized design, the most frequent customer mistake. No clamp: the
+  // fill in placeArt starts at this edge on each side, so where the bleed
+  // begins is decided by the art as it is, never by the finished size
+  // (owner, 2026-10-29). The old single min-over-four-sides figure put the
+  // mirror axis on the finished trim and left a design 1/16″ short of it
+  // with 1/16″ of paper white inside the cut and its fill reflected about
+  // nothing.
+  const bound = ownClip || { x: 0, y: 0, w: W, h: H };
+  const rawRing = {
+    left: trimRaw.x - bound.x, right: bound.x + bound.w - trimRaw.x - trimRaw.w,
+    bottom: trimRaw.y - bound.y, top: bound.y + bound.h - trimRaw.y - trimRaw.h,
+  };
+  const minRingPt = Math.min(rawRing.left, rawRing.right, rawRing.bottom, rawRing.top);
+  const maxRingPt = Math.max(rawRing.left, rawRing.right, rawRing.bottom, rawRing.top);
+  // Bleed means bleed on EVERY edge (1.62, order 87898).
+  const hasBleed = minRingPt > 1;
+  if (!hasBleed) notes.push(minRingPt < -1
+    ? `no bleed available — the art is smaller than the finished size on ${(rawRing.left < -1 || rawRing.right < -1) ? "the width" : "the height"} (by ${(-minRingPt / PT).toFixed(3)}″ on its shortest edge); the bleed fill starts at the art's own edge`
+    : maxRingPt > 1 ? "bleed on some edges only — the others have none; cut lines there may show paper white" : "no bleed available — cut lines may show paper white");
+  const ownRing = {};
+  for (const k of EDGE_CYC) ownRing[k] = rawRing[k] * scale / PT;   // placed inches at the art's scale
+  // The smallest of the four, clamped ≥ 0 — rotation-invariant. Used for the
+  // refusals that guard what the OPERATOR's inset / scale leaves short, which
+  // must never be confused with what the FILE leaves short (reported, shown,
+  // never refused).
+  const ownBleed = Math.max(0, minRingPt) * scale / PT;
+  return { page, rot, mediaW: W, mediaH: H, trimRaw, ownClip, bound, cellRotate, scale, hasBleed, ownBleed, ownRing, notes,
            placedW: cellW, placedH: cellH };
 }
 
@@ -1911,6 +1942,22 @@ function resolveSideArt(page, pieceLong, pieceShort, cellLandscape, bleed, fitMo
 const SYNTH_MAXFIX = 0.1875; // in — biggest shortfall treated as "meant to bleed"
 const SYNTH_MINGAP = 0.011;  // in — below raster resolution, treat as touching
 const INK_DPI = 144, INK_LUM = 245;
+// The art's own boundary (its BleedBox / TrimBox + bleed, else the page) in
+// DISPLAY space, and the trim rect cut down to it. Both ink probes measure
+// inside this: a gap is "ink shy of the art's own edge, or of the cut where
+// the art reaches past it" — never the distance from a finished size the art
+// was not built to (a 3.875″ TrimBox placed in a 4″ finished size used to
+// read as 1/16″ of shy ink and be pre-scaled by it).
+function artBoundDisp(art) {
+  const b = art.bound || { x: 0, y: 0, w: art.mediaW, h: art.mediaH };
+  return displayRect(b, art.rot, art.mediaW, art.mediaH);
+}
+function trimWithinBound(art) {
+  const td = displayRect(art.trimRaw, art.rot, art.mediaW, art.mediaH), bd = artBoundDisp(art);
+  const x0 = Math.max(td.x, bd.x), y0 = Math.max(td.y, bd.y);
+  const x1 = Math.min(td.x + td.w, bd.x + bd.w), y1 = Math.min(td.y + td.h, bd.y + bd.h);
+  return { x: x0, y: y0, w: Math.max(0, x1 - x0), h: Math.max(0, y1 - y0) };
+}
 async function detectInkGaps(pdfjsDoc, pnoZero, art) {
   const page = await pdfjsDoc.getPage(pnoZero + 1);
   const scale = INK_DPI / 72;
@@ -1920,7 +1967,7 @@ async function detectInkGaps(pdfjsDoc, pnoZero, art) {
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
   await page.render({ canvasContext: ctx, viewport: vp }).promise;
-  const td = displayRect(art.trimRaw, art.rot, art.mediaW, art.mediaH);
+  const td = trimWithinBound(art);
   const dispH = art.rot % 180 ? art.mediaW : art.mediaH;
   const x0 = Math.max(0, Math.floor(td.x * scale));
   const x1 = Math.min(canvas.width, Math.ceil((td.x + td.w) * scale));
@@ -2043,8 +2090,22 @@ function applyArtInset(art, inset) {
 function finalizeArtCoverage(art, bleed) {
   const g = (art.synth ? (art.synthScale || 1) : 1) * (art.insetF || 1) * (art.userScale || 1);
   const ob = art.ownBleed || 0;
+  // What the operator's shrink leaves short (the file's ring clamped ≥ 0):
+  // the refusal below is about an inset / scale-down with nothing to fill it,
+  // never about the file — a mis-sized file is reported, not refused.
   art.covX = g * (art.placedW / 2 + ob) - art.placedW / 2;
   art.covY = g * (art.placedH / 2 + ob) - art.placedH / 2;
+  // Per RAW edge, SIGNED, from the art's own boundary — what placeArt fills
+  // from. The cut sits half the placed trim from the centre along that raw
+  // axis (which placed axis that is depends on /Rotate and the cell turn);
+  // the art's own edge sits at its trim half-extent plus its ring, ×g.
+  const r = art.ownRing || { left: ob, right: ob, bottom: ob, top: ob };
+  const swap = ((Math.round(art.rot / 90) + Math.round(art.cellRotate / 90)) % 2) !== 0;
+  const hx = (swap ? art.placedH : art.placedW) / 2, hy = (swap ? art.placedW : art.placedH) / 2;
+  const ax = art.trimRaw.w / 2 * art.scale / PT, ay = art.trimRaw.h / 2 * art.scale / PT;
+  art.covEdge = { left: g * (ax + r.left) - hx, right: g * (ax + r.right) - hx,
+                  bottom: g * (ay + r.bottom) - hy, top: g * (ay + r.top) - hy };
+  const covMin = Math.min(art.covEdge.left, art.covEdge.right, art.covEdge.bottom, art.covEdge.top);
   const b = isFinite(bleed) ? bleed : BLEED;
   if (!art.synth) {
     // Nothing is filling the ring, so the art's own coverage has to carry it.
@@ -2052,12 +2113,24 @@ function finalizeArtCoverage(art, bleed) {
       const why = (art.userScale && art.userScale < 1) ? (art.insetF ? "Pull-off-trim and the art scale leave" : "Scaling the art down leaves") : "Pull-off-trim leaves";
       throw new Error(`${why} the art ${Math.abs(Math.min(art.covX, art.covY)).toFixed(3)}″ short of the cut with no bleed fill set — that band would print as paper white INSIDE the trim. Set "Add bleed" to Auto (text-safe), Mirror or Streak.`);
     }
-    if (art.covX < b - EPS || art.covY < b - EPS) {
-      art.notes.push(`art covers only ${Math.min(art.covX, art.covY).toFixed(3)}″ past the trim (need ${b}″) — cut lines may show paper white`);
+    if (covMin < -SYNTH_TOL) {
+      art.notes.push(`art stops ${(-covMin).toFixed(3)}″ short of the cut on its shortest edge and nothing fills the gap — paper white INSIDE the trim there. Set "Add bleed" to Auto (text-safe), Mirror or Streak to fill from the art's own edge out to the bleed box.`);
+    } else if (covMin < b - EPS) {
+      art.notes.push(`art covers only ${Math.max(0, covMin).toFixed(3)}″ past the trim (need ${b}″) — cut lines may show paper white`);
     }
   }
   return art;
 }
+// Ink stops at the trim on these DISPLAY edges (null = every edge): the
+// geometric ring there is an empty allowance, so the coverage model treats
+// the art as ending at the cut on those edges and the fill starts there.
+function markRingEmpty(art, dispEdges) {
+  const r = art.ownRing || (art.ownRing = { left: 0, right: 0, bottom: 0, top: 0 });
+  for (const d of dispEdges || EDGE_CYC) { const re = rawEdgeOf(d, -art.rot); r[re] = Math.min(r[re], 0); }
+  art.ownBleed = Math.max(0, Math.min(r.left, r.right, r.bottom, r.top));
+}
+// Ring shortfalls below this are rounding, not a missing bleed (0.72 pt).
+const SYNTH_TOL = 0.01;
 
 // ---- bleed-ring ink detection ---------------------------------------------
 // `hasBleed` above is purely GEOMETRIC — the page is bigger than the trim. It
@@ -2081,12 +2154,14 @@ async function detectBleedInk(pdfjsDoc, pnoZero, art) {
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
   await page.render({ canvasContext: ctx, viewport: vp }).promise;
-  const td = displayRect(art.trimRaw, art.rot, art.mediaW, art.mediaH);
+  const td = displayRect(art.trimRaw, art.rot, art.mediaW, art.mediaH), bd = artBoundDisp(art);
   const dispH = art.rot % 180 ? art.mediaW : art.mediaH;
-  // trim rect in canvas pixels (y flipped)
+  // trim rect in canvas pixels (y flipped); the ring runs out to the art's own
+  // boundary, not the page edge — the slug beyond a BleedBox has crop marks.
   const tx0 = td.x * scale, tx1 = (td.x + td.w) * scale;
   const ty0 = (dispH - (td.y + td.h)) * scale, ty1 = (dispH - td.y) * scale;
-  const W = canvas.width, H = canvas.height;
+  const W = Math.min(canvas.width, (bd.x + bd.w) * scale), H = Math.min(canvas.height, (dispH - bd.y) * scale);
+  const X0 = Math.max(0, bd.x * scale), Y0 = Math.max(0, (dispH - (bd.y + bd.h)) * scale);
   const pad = Math.max(1, Math.round(0.012 * RING_DPI)); // skip the antialiased trim boundary
   const frac = (x0, y0, x1, y1) => {
     x0 = Math.max(0, Math.floor(x0)); y0 = Math.max(0, Math.floor(y0));
@@ -2101,9 +2176,9 @@ async function detectBleedInk(pdfjsDoc, pnoZero, art) {
     return n ? ink / n : null;
   };
   const edges = {
-    left:   frac(0, ty0, tx0 - pad, ty1),
+    left:   frac(X0, ty0, tx0 - pad, ty1),
     right:  frac(tx1 + pad, ty0, W, ty1),
-    top:    frac(tx0, 0, tx1, ty0 - pad),
+    top:    frac(tx0, Y0, tx1, ty0 - pad),
     bottom: frac(tx0, ty1 + pad, tx1, H),
   };
   const present = {}, measured = [];
@@ -2117,9 +2192,13 @@ async function detectBleedInk(pdfjsDoc, pnoZero, art) {
 }
 
 function applySynthBleed(art, mode, bleed, gaps, streakEps, inset) {
-  // With an inset the ring must be filled even for art that HAS bleed: pulling
-  // the art in drags its bleed in with it, so the coverage falls short.
-  if (!mode || mode === "off" || (art.hasBleed && !art.bleedEmpty && !(inset > 0))) return art;
+  // Fill whenever some edge falls short of the bleed (none, thin, partial,
+  // empty allowance, mis-sized design). With an inset the ring must be filled
+  // even for art that HAS bleed: pulling the art in drags its bleed in with
+  // it, so the coverage falls short.
+  if (!mode || mode === "off") return art;
+  const bNeed = isFinite(bleed) ? bleed : BLEED;
+  if (!(inset > 0) && (art.ownBleed || 0) >= bNeed - SYNTH_TOL) return art;
   art.streakEps = streakEps || STREAK_EPS;
   // Art whose edges are white for more than SYNTH_MAXFIX on ALL four sides is
   // a design choice (white border, centred form), not art that fell shy of the
@@ -2133,21 +2212,31 @@ function applySynthBleed(art, mode, bleed, gaps, streakEps, inset) {
   art.synth = mode;
   art.synthB = isFinite(bleed) ? bleed : BLEED;
   const fix = g => (gaps && g > SYNTH_MINGAP && g <= SYNTH_MAXFIX) ? g : 0;
-  // work in PLACED space: art.scale already maps the art's trim onto the cell
-  const gs = gaps
-    ? { left: fix(gaps.left) * art.scale, right: fix(gaps.right) * art.scale,
-        top: fix(gaps.top) * art.scale, bottom: fix(gaps.bottom) * art.scale }
-    : { left: 0, right: 0, top: 0, bottom: 0 };
-  // display-orientation → placed-cell orientation (cellRotate swaps axes)
-  const [gx1, gx2, gy1, gy2] = art.cellRotate ? [gs.top, gs.bottom, gs.left, gs.right]
-                                              : [gs.left, gs.right, gs.top, gs.bottom];
+  // Per PLACED edge: the cut sits h from the centre; the art's own edge sits
+  // `ext` from it (its trim half-extent + its signed ring, raw edge mapped
+  // through /Rotate and the cell turn); its ink stops `g` short of that edge
+  // (detectInkGaps, display space, already relative to the art's edge where
+  // the art is smaller than the finished size — the canvas ends there).
+  // Scale mode must carry the ink to h+b; the mirror modes only pre-scale a
+  // shy edge so the ink reaches the art's OWN edge — never the finished
+  // size, which is not the art's to meet (owner, 2026-10-29).
   const hw = art.placedW / 2, hh = art.placedH / 2;
-  // per edge: ink sits (h−g) from center and must reach h (mirror) or h+b
-  // (scale) after ×f about the center → f = h/(h−g) or (h+b)/(h−g).
+  const ring = art.ownRing || { left: 0, right: 0, bottom: 0, top: 0 };
   const b = mode === "scale" ? art.synthB : 0;
   let f = 1;
-  for (const [h, g] of [[hw, gx1], [hw, gx2], [hh, gy1], [hh, gy2]]) {
-    if (mode === "scale" || g > 0) f = Math.max(f, (h + b) / (h - g));
+  for (const e of EDGE_CYC) {
+    const d = rawEdgeOf(e, art.cellRotate);          // display edge on this placed edge
+    const re = rawEdgeOf(d, -art.rot);               // raw edge on that display edge
+    const h = (e === "left" || e === "right") ? hw : hh;
+    const ext = ((re === "left" || re === "right") ? art.trimRaw.w : art.trimRaw.h) / 2 * art.scale / PT + ring[re];
+    // The gap is measured from the inner of the cut and the art's own edge
+    // (trimWithinBound); a shy edge is pre-scaled to reach THAT line.
+    const m = Math.min(h, ext);
+    const g = fix(gaps ? gaps[d] : 0) * art.scale;  // placed space: art.scale maps the art onto the cell
+    const ink = g > 0 ? m - g : ext;
+    if (!(ink > 0)) continue;
+    if (mode === "scale") f = Math.max(f, (h + b) / ink);
+    else if (g > 0) f = Math.max(f, m / ink);
   }
   art.synthScale = f;
   const short = Math.max(fix(gaps ? gaps.left : 0), fix(gaps ? gaps.right : 0), fix(gaps ? gaps.top : 0), fix(gaps ? gaps.bottom : 0));
@@ -2155,12 +2244,17 @@ function applySynthBleed(art, mode, bleed, gaps, streakEps, inset) {
   if (art.notes[last] === "no bleed available — cut lines may show paper white") art.notes.pop();
   const tn = art.textNear;
   const streaked = mode === "auto" && tn ? ["left", "right", "top", "bottom"].filter(e => tn[e]) : [];
+  const minR = Math.min(ring.left, ring.right, ring.bottom, ring.top);
+  const src = inset > 0 && (art.ownBleed || 0) >= bNeed - SYNTH_TOL ? "art pulled in from the trim"
+    : minR < -SYNTH_TOL ? `art stops ${(-minR).toFixed(3)}″ inside the finished size on its shortest edge — the fill starts at the art's own edge, not the finished size`
+    : (art.ownBleed || 0) > SYNTH_TOL ? `source bleed is only ${art.ownBleed.toFixed(3)}″ on its shortest edge`
+    : art.bleedEmpty ? "the source's bleed area is empty" : "no bleed in source";
   art.notes.push((mode === "scale"
-    ? `no bleed in source — art scaled up to cover ${art.synthB}″ bleed (trim-line content shifts outward by the same amount)`
-    : mode === "streak" ? `no bleed in source — ${art.synthB}″ streak bleed synthesized (outermost ${art.streakEps}″ stretched outward)`
-    : mode === "auto" ? `no bleed in source — ${art.synthB}″ bleed synthesized (mirror${streaked.length ? `; streak on ${streaked.join("/")} — text near trim, a mirror would duplicate it` : ", no text near trim"})`
-    : `no bleed in source — ${art.synthB}″ mirrored-edge bleed synthesized`)
-    + (short ? ` · art stopped ${short.toFixed(3)}″ shy of trim — pre-scaled ×${f.toFixed(4)} so ink reaches the cut` : "")
+    ? `${src} — art scaled up to cover ${art.synthB}″ bleed (trim-line content shifts outward by the same amount)`
+    : mode === "streak" ? `${src} — ${art.synthB}″ streak bleed synthesized (outermost ${art.streakEps}″ stretched outward)`
+    : mode === "auto" ? `${src} — ${art.synthB}″ bleed synthesized (mirror${streaked.length ? `; streak on ${streaked.join("/")} — text near trim, a mirror would duplicate it` : ", no text near trim"})`
+    : `${src} — ${art.synthB}″ mirrored-edge bleed synthesized`)
+    + (short ? ` · ink stopped ${short.toFixed(3)}″ shy of the art's edge — pre-scaled ×${f.toFixed(4)} so it reaches it` : "")
     + (designMargins ? " · edges are white for more than 3/16″ on all four sides, so the fill is white too — that is the file, not the setting" : ""));
   return art;
 }
@@ -2346,20 +2440,29 @@ function placeArt(outPage, embedded, art, targetTrim, clipRect, extraRotate) {
     // interior butt cuts and the saddle spine stay untouched.
     const b = art.synthB, T = targetTrim;
     const xL = T.x, xR = T.x + T.w, yB = T.y, yT = T.y + T.h;
-    // The art's outer edge sits covX/covY past the trim (negative once a
-    // pull-off-trim inset has drawn it back inside). Reflect about THAT edge,
-    // and widen the band to reach from it out to the bleed box — so with no
-    // inset this is exactly the previous trim-edge mirror of width b.
-    const cx = art.covX || 0, cy = art.covY || 0;
-    const bx = b - cx, by = b - cy;                       // band width per axis
-    const eL = xL - cx, eR = xR + cx, eB = yB - cy, eT = yT + cy; // art edges
+    const rawEdge = e => rawEdgeOf(e, drawRot);
+    // The art's own edge, per PLACED edge, relative to the cut: positive =
+    // past it (the file's own bleed), negative = inside it (a mis-sized
+    // design, or a pull-off-trim inset / scale-down). Reflect about THAT
+    // edge and reach from it out to the bleed box — a design 1/16″ short of
+    // the finished size gets 3/16″ of fill starting where its ink stops, and
+    // an edge that already carries the full bleed gets no band. The finished
+    // size never decides where the bleed starts (owner, 2026-10-29).
+    const g = s / art.scale;
+    const ring = art.ownRing || { left: art.ownBleed || 0, right: art.ownBleed || 0, bottom: art.ownBleed || 0, top: art.ownBleed || 0 };
+    const covE = e => {
+      const re = rawEdge(e);
+      const half = (e === "left" || e === "right") ? T.w / 2 : T.h / 2;
+      const ext = ((re === "left" || re === "right") ? art.trimRaw.w : art.trimRaw.h) / 2 * art.scale / PT + ring[re];
+      return g * ext - half;
+    };
+    const cL = covE("left"), cR = covE("right"), cB = covE("bottom"), cT = covE("top");
+    const bL = b - cL, bR = b - cR, bB = b - cB, bT = b - cT;          // band width per edge
+    const eL = xL - cL, eR = xR + cR, eB = yB - cB, eT = yT + cT;      // art edges
     const eps = art.streakEps || STREAK_EPS;
-    const Kx = bx / eps, Ky = by / eps;
-    const cyc = ["left", "bottom", "right", "top"]; // CCW edge cycle
-    const rawEdge = e => cyc[(((cyc.indexOf(e) - drawRot / 90) % 4) + 4) % 4];
     const streaky = e => art.synth === "streak" || (art.synth === "auto" && art.textNear && art.textNear[rawEdge(e)]);
-    const kx = { left: streaky("left") ? Kx : 1, right: streaky("right") ? Kx : 1 };
-    const ky = { bottom: streaky("bottom") ? Ky : 1, top: streaky("top") ? Ky : 1 };
+    const kx = { left: streaky("left") ? bL / eps : 1, right: streaky("right") ? bR / eps : 1 };
+    const ky = { bottom: streaky("bottom") ? bB / eps : 1, top: streaky("top") ? bT / eps : 1 };
     const mX = (E, k) => [-k, 0, 0, 1, E * (1 + k) * PT, 0];   // mirrored map about x=E
     const mY = (F, k) => [1, 0, 0, -k, 0, F * (1 + k) * PT];   // mirrored map about y=F
     const mXY = (E, F, k1, k2) => [-k1, 0, 0, -k2, E * (1 + k1) * PT, F * (1 + k2) * PT];
@@ -2378,17 +2481,19 @@ function placeArt(outPage, embedded, art, targetTrim, clipRect, extraRotate) {
     // blank ring. Only the outermost SEAM of art goes unrepresented in the
     // bleed, which at 4 thou is far below any cutting tolerance.
     const SEAM = 0.004;                       // in
-    const ox = bx > 0 ? SEAM : 0, oy = by > 0 ? SEAM : 0;
-    const aL = eL + ox, aR = eR - ox, aB = eB + oy, aT = eT - oy;   // axes, nudged inward
-    const regions = bx <= 0 && by <= 0 ? [] : [
-      bx > 0 && { r: { x: eL - bx, y: eB - oy, w: bx + ox, h: ih + 2 * oy }, m: mX(aL, kx.left) },
-      bx > 0 && { r: { x: eR - ox, y: eB - oy, w: bx + ox, h: ih + 2 * oy }, m: mX(aR, kx.right) },
-      by > 0 && { r: { x: eL - ox, y: eB - by, w: iw + 2 * ox, h: by + oy }, m: mY(aB, ky.bottom) },
-      by > 0 && { r: { x: eL - ox, y: eT - oy, w: iw + 2 * ox, h: by + oy }, m: mY(aT, ky.top) },
-      bx > 0 && by > 0 && { r: { x: eL - bx, y: eB - by, w: bx + ox, h: by + oy }, m: mXY(aL, aB, kx.left, ky.bottom) },
-      bx > 0 && by > 0 && { r: { x: eR - ox, y: eB - by, w: bx + ox, h: by + oy }, m: mXY(aR, aB, kx.right, ky.bottom) },
-      bx > 0 && by > 0 && { r: { x: eL - bx, y: eT - oy, w: bx + ox, h: by + oy }, m: mXY(aL, aT, kx.left, ky.top) },
-      bx > 0 && by > 0 && { r: { x: eR - ox, y: eT - oy, w: bx + ox, h: by + oy }, m: mXY(aR, aT, kx.right, ky.top) },
+    // An edge whose band is within rounding of nothing keeps its own bleed.
+    const wL = bL > SYNTH_TOL, wR = bR > SYNTH_TOL, wB = bB > SYNTH_TOL, wT = bT > SYNTH_TOL;
+    const oL = wL ? SEAM : 0, oR = wR ? SEAM : 0, oB = wB ? SEAM : 0, oT = wT ? SEAM : 0;
+    const aL = eL + oL, aR = eR - oR, aB = eB + oB, aT = eT - oT;   // axes, nudged inward
+    const regions = [
+      wL && { r: { x: eL - bL, y: eB - oB, w: bL + oL, h: ih + oB + oT }, m: mX(aL, kx.left) },
+      wR && { r: { x: eR - oR, y: eB - oB, w: bR + oR, h: ih + oB + oT }, m: mX(aR, kx.right) },
+      wB && { r: { x: eL - oL, y: eB - bB, w: iw + oL + oR, h: bB + oB }, m: mY(aB, ky.bottom) },
+      wT && { r: { x: eL - oL, y: eT - oT, w: iw + oL + oR, h: bT + oT }, m: mY(aT, ky.top) },
+      wL && wB && { r: { x: eL - bL, y: eB - bB, w: bL + oL, h: bB + oB }, m: mXY(aL, aB, kx.left, ky.bottom) },
+      wR && wB && { r: { x: eR - oR, y: eB - bB, w: bR + oR, h: bB + oB }, m: mXY(aR, aB, kx.right, ky.bottom) },
+      wL && wT && { r: { x: eL - bL, y: eT - oT, w: bL + oL, h: bT + oT }, m: mXY(aL, aT, kx.left, ky.top) },
+      wR && wT && { r: { x: eR - oR, y: eT - oT, w: bR + oR, h: bT + oT }, m: mXY(aR, aT, kx.right, ky.top) },
     ].filter(Boolean);
     for (const { r, m } of regions) {
       const ix = Math.max(r.x, cl.x), iy = Math.max(r.y, cl.y);
@@ -2764,21 +2869,25 @@ async function imposeSaddle(artBytes, spec, layout) {
           const ring = await detectBleedInk(inkDoc, i, art);
           if (ring && ring.empty) {
             art.bleedEmpty = true;
-            // ownBleed is GEOMETRIC — it reports the allowance as coverage, so
-            // covX/covY come out at the full bleed and the synth band computes
-            // to zero width, drawing nothing. The ink really stops at the trim,
-            // so say so: coverage 0, band = the whole bleed, mirrored about the
-            // trim edge. Without this the tool reports "synthesized" and emits
-            // byte-identical output.
-            art.ownBleed = 0;
+            // The ring is GEOMETRIC — it reports the allowance as coverage, so
+            // the synth band would compute to zero width and draw nothing. The
+            // ink really stops at the trim, so say so: coverage 0 on every
+            // edge, band = the whole bleed, mirrored about the trim edge.
+            markRingEmpty(art, null);
             art.notes.push(`page is bleed-sized but the bleed area is EMPTY — the art stops at the cut line, so every edge will cut paper white. Set "Add bleed" to Auto, Mirror or Scale to fill it, or supply art extended past the trim.`);
           } else if (ring && ring.blank.length) {
             art.bleedEmptyEdges = ring.blank;
-            art.notes.push(`bleed is missing on the ${ring.blank.join("/")} edge(s) — art stops at the cut line there`);
+            // Those edges end at the cut; the fill starts there, the others keep their own bleed.
+            markRingEmpty(art, ring.blank);
+            art.notes.push(`bleed is missing on the ${ring.blank.join("/")} edge(s) — art stops at the cut line there${abm ? "; the bleed fill starts at the cut on those edges" : ""}`);
           }
         } catch (e) { /* best-effort: never block an impose on the probe */ }
       }
-      if (abm && (!art.hasBleed || art.bleedEmpty || inset > 0)) {
+      // Fill whenever any edge falls short of the job's bleed — no bleed, a
+      // thin or partial bleed, an empty allowance, a mis-sized design, or an
+      // inset that drew the art back in. Edges that already carry the full
+      // bleed get no band (placeArt), so a file with real bleed is untouched.
+      if (abm && (art.ownBleed < layout.bleed - SYNTH_TOL || inset > 0)) {
         let gaps = null;
         try {
           if (!inkDoc) inkDoc = await pdfjsLib.getDocument({ data: artBytes.slice(0) }).promise;
@@ -4161,21 +4270,25 @@ async function imposeCore(artBytes, backBytes, spec, gangFiles) {
           const ring = await detectBleedInk(await inkDocFor(w0), ref.pno, art);
           if (ring && ring.empty) {
             art.bleedEmpty = true;
-            // ownBleed is GEOMETRIC — it reports the allowance as coverage, so
-            // covX/covY come out at the full bleed and the synth band computes
-            // to zero width, drawing nothing. The ink really stops at the trim,
-            // so say so: coverage 0, band = the whole bleed, mirrored about the
-            // trim edge. Without this the tool reports "synthesized" and emits
-            // byte-identical output.
-            art.ownBleed = 0;
+            // The ring is GEOMETRIC — it reports the allowance as coverage, so
+            // the synth band would compute to zero width and draw nothing. The
+            // ink really stops at the trim, so say so: coverage 0 on every
+            // edge, band = the whole bleed, mirrored about the trim edge.
+            markRingEmpty(art, null);
             art.notes.push(`page is bleed-sized but the bleed area is EMPTY — the art stops at the cut line, so every edge will cut paper white. Set "Add bleed" to Auto, Mirror or Scale to fill it, or supply art extended past the trim.`);
           } else if (ring && ring.blank.length) {
             art.bleedEmptyEdges = ring.blank;
-            art.notes.push(`bleed is missing on the ${ring.blank.join("/")} edge(s) — art stops at the cut line there`);
+            // Those edges end at the cut; the fill starts there, the others keep their own bleed.
+            markRingEmpty(art, ring.blank);
+            art.notes.push(`bleed is missing on the ${ring.blank.join("/")} edge(s) — art stops at the cut line there${abm ? "; the bleed fill starts at the cut on those edges" : ""}`);
           }
         } catch (e) { /* best-effort */ }
       }
-      if (abm && (!art.hasBleed || art.bleedEmpty || inset > 0)) {
+      // Fill whenever any edge falls short of the job's bleed — no bleed, a
+      // thin or partial bleed, an empty allowance, a mis-sized design, or an
+      // inset that drew the art back in. Edges that already carry the full
+      // bleed get no band (placeArt), so a file with real bleed is untouched.
+      if (abm && (art.ownBleed < layout.bleed - SYNTH_TOL || inset > 0)) {
         const which = ref.gi != null ? "G" + ref.gi : ref.doc === backDoc ? "B" : "F";
         let gaps = null;
         if (spec.addBleedSmart !== false) {
@@ -6481,7 +6594,7 @@ function App() {
                    mirror: "Reflects each edge outward past the trim; content at the trim stays put.",
                    scale: "Enlarges the art just enough to cover the bleed box; the safety margin shrinks by the same amount.",
                    streak: "Stretches the outermost sliver of art into the bleed — nothing readable, a pure edge colour." }[addBleed]}
-                {" "}Only fires on pages that truly lack bleed.
+                {" "}The fill starts at the art's own edge on each side — a design that is smaller than the finished size gets bleed from where its ink stops, not from the finished size — and an edge that already carries the full bleed is left alone.
               </div>
               {addBleed === "off" && !Object.keys(addBleedPages).length && result && (result.warnings || []).some(w => /no bleed/i.test(w)) && (
                 <div style={{ fontSize: 11, color: "#e91e63", marginTop: 3 }}>
