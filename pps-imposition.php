@@ -354,6 +354,7 @@ function pps_impose_folder_files( $files ) {
         if ( ! $is_pdf && ! $is_raster ) continue;
         if ( pps_impose_is_output_name( $name ) )          $role = 'imposed';
         elseif ( preg_match( '/^CLEAN[_\s-]/i', $name ) )   $role = 'clean';
+        elseif ( preg_match( '/^RETOUCHED[_\s-]/i', $name ) ) $role = 'retouched';
         elseif ( preg_match( '/_preview/i', $name ) )       $role = 'preview';
         elseif ( preg_match( '/_print-ready\.pdf$/i', $name ) ) $role = 'print-ready';
         elseif ( $is_raster )                                $role = 'raster';
@@ -361,7 +362,7 @@ function pps_impose_folder_files( $files ) {
         $out[] = array( 'id' => $id, 'name' => $name, 'size' => intval( $f['size'] ?? 0 ), 'role' => $role );
     }
     // Candidates first (print-ready, pdf, raster), then previews, then our own outputs.
-    $rank = array( 'print-ready' => 0, 'pdf' => 1, 'raster' => 2, 'preview' => 3, 'clean' => 4, 'imposed' => 5 );
+    $rank = array( 'print-ready' => 0, 'retouched' => 1, 'pdf' => 2, 'raster' => 3, 'preview' => 4, 'clean' => 5, 'imposed' => 6 );
     usort( $out, function ( $a, $b ) use ( $rank ) {
         $d = $rank[ $a['role'] ] - $rank[ $b['role'] ];
         return $d !== 0 ? $d : strcasecmp( $a['name'], $b['name'] );
@@ -709,10 +710,12 @@ add_action( 'wp_ajax_pps_impose_upload', function() {
         wp_send_json_error( array( 'message' => 'No file received — if the PDF is large, PHP may have dropped the whole POST (post_max_size ' . ini_get( 'post_max_size' ) . ').' ) );
     }
     // IMPOSED_ = press-ready sheet layout; CLEAN_ = 1:1 sanitized copy of the
-    // customer file (active content stripped) — safe for staff to open.
+    // customer file (active content stripped) — safe for staff to open;
+    // RETOUCHED_ = the source with spot-healed pages rasterised (1.64) — the
+    // record of what prepress changed, filed beside the customer's file.
     $filename = sanitize_file_name( $_POST['filename'] ?? '' );
-    if ( ! $filename || ! preg_match( '/^(IMPOSED|CLEAN)_.*\.pdf$/', $filename ) ) {
-        wp_send_json_error( array( 'message' => 'Filename must be IMPOSED_*.pdf or CLEAN_*.pdf' ) );
+    if ( ! $filename || ! preg_match( '/^(IMPOSED|CLEAN|RETOUCHED)_.*\.pdf$/', $filename ) ) {
+        wp_send_json_error( array( 'message' => 'Filename must be IMPOSED_*.pdf, CLEAN_*.pdf or RETOUCHED_*.pdf' ) );
     }
     // Cheap validity check: PDF magic bytes
     $fh    = fopen( $_FILES['file']['tmp_name'], 'rb' );
@@ -730,7 +733,8 @@ add_action( 'wp_ajax_pps_impose_upload', function() {
 
     delete_transient( 'pps_impose_ls_' . md5( $folder_id ) ); // listing changed — new output file
     $is_clean = ( stripos( $filename, 'CLEAN_' ) === 0 );
-    $order->add_order_note( ( $is_clean ? 'Sanitized (CLEAN) copy filed to Drive: ' : 'Imposed press-ready PDF filed to Drive: ' ) . $filename );
+    $is_retouched = ( stripos( $filename, 'RETOUCHED_' ) === 0 );
+    $order->add_order_note( ( $is_retouched ? 'Retouched (spot-healed, rasterised) source filed to Drive — not the file the customer approved: ' : ( $is_clean ? 'Sanitized (CLEAN) copy filed to Drive: ' : 'Imposed press-ready PDF filed to Drive: ' ) ) . $filename );
 
     wp_send_json_success( array(
         'file_id' => $file_id,

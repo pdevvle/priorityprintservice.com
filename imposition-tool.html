@@ -48,6 +48,20 @@
   .imp-progress { position:relative; display:inline-block; width:240px; height:18px; background:rgba(255,255,255,.08); border-radius:9px; overflow:hidden; vertical-align:middle; }
   .imp-progress .fill { position:absolute; left:0; top:0; bottom:0; background:#4ea1ff; transition:width .15s linear; }
   .imp-progress .txt { position:relative; font-size:10.5px; line-height:18px; padding:0 9px; color:#fff; white-space:nowrap; font-weight:600; }
+  /* ── 1.64 Retouch modal ── */
+  .imp-rt-back { position:fixed; inset:0; background:rgba(0,0,0,.78); z-index:9000; display:flex; align-items:stretch; justify-content:center; padding:14px; }
+  .imp-rt { display:flex; flex-direction:column; flex:1; max-width:1700px; background:#1a1d23; border:1px solid rgba(255,255,255,.12); border-radius:12px; overflow:hidden; }
+  .imp-rt-bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:8px 12px; border-bottom:1px solid rgba(255,255,255,.08); font-size:12px; }
+  .imp-rt-bar .imp-btn { padding:5px 10px; font-size:12px; }
+  .imp-rt-bar input[type=number] { width:64px; padding:4px 6px; font-size:12px; }
+  .imp-rt-bar input[type=range] { width:140px; }
+  .imp-rt-wrap { flex:1; overflow:auto; background:#0f1115; position:relative; cursor:none; }
+  .imp-rt-stage { position:relative; display:inline-block; margin:20px; box-shadow:0 0 0 1px rgba(255,255,255,.12), 0 10px 40px rgba(0,0,0,.6); background:#fff; }
+  .imp-rt-stage canvas { display:block; position:absolute; left:0; top:0; image-rendering:auto; }
+  .imp-rt-stage canvas.work { position:relative; }
+  .imp-rt-cursor { position:absolute; border:1.5px solid #e91e8c; border-radius:50%; pointer-events:none; box-shadow:0 0 0 1px rgba(255,255,255,.7), inset 0 0 0 1px rgba(255,255,255,.7); transform:translate(-50%,-50%); }
+  .imp-rt-foot { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:8px 12px; border-top:1px solid rgba(255,255,255,.08); font-size:12px; color:rgba(255,255,255,.65); }
+  .imp-rt-foot .imp-btn { padding:6px 11px; font-size:12px; }
   .imp-setups { display:flex; gap:6px; align-items:center; padding:0 6px 6px; }
   .imp-setups select { flex:1; min-width:0; font-size:12px; }
   .imp-setups .imp-btn { padding:5px 9px; font-size:11.5px; white-space:nowrap; }
@@ -121,7 +135,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-29 06:00 UTC · IMPOSE-V1.63</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-29 09:00 UTC · IMPOSE-V1.64</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -2629,6 +2643,7 @@ function drawSlug(page, layout, font, info, cells) {
       : layout.gutter !== 0.25 ? (layout.gutter === 0 ? "BUTT-CUT" : `gutter ${layout.gutter}in`) : null,
     Math.abs(layout.bleed - BLEED) > EPS ? `bleed ${layout.bleed}in` : null,
     info.artInset ? `PULLED OFF TRIM ${info.artInset}in` : null,
+    info.retouch ? String(info.retouch).replace(/[^\x20-\x7E]/g, "?") : null,
     (info.artScale && info.artScale !== 1) ? `ART ${(info.artScale * 100).toFixed(2)}%` : null,
     info.creep ? `CREEP ${info.creep}in total (this sig ${(info.creepAt || 0).toFixed(4)}in)` : null,
     info.qty ? `qty ${info.qty} = ${info.sheets} sheet${info.sheets === 1 ? "" : "s"}` : null,
@@ -3034,7 +3049,7 @@ async function imposeSaddle(artBytes, spec, layout) {
         const placed = drawSlug(page, layout, font, {
           duplex: true, flip: spec.sheetFlip || "short",
           side: label + (sheetsPerForm ? ` · run ${sheetsPerForm} sheets` : ""),
-          orderRef: spec.orderRef, jobName: spec.jobName, artInset: inset || 0,
+          orderRef: spec.orderRef, jobName: spec.jobName, artInset: inset || 0, retouch: spec.retouchSlug,
           artScale: userScale, creep, creepAt: creepShift(creep, sigs[sigs.length - 1], S),
           qty, sheets: totalSheets, date: dateStr,
         }, cells);
@@ -3562,7 +3577,24 @@ function parsePageList(txt, max) {
 // page size are untouched; downstream never knows the difference. The cost is
 // that those pages are no longer vector — said plainly in the warning.
 const GREY_DPI = 300, GREY_MAX_PX = 40e6;
-async function forceGreyPagesBytes(bytes, pages, colour) {
+// The ONE page render the raster passes and the Retouch modal share: rotation
+// 0 (the raw page frame, /Rotate left on the page object so the image lands
+// the right way up), the CropBox view, 300 DPI capped by pixel count. Stroke
+// coordinates are stored in this frame in points, so a stroke painted in the
+// modal and the pass that applies it at impose time cannot disagree.
+async function renderPageRaw(pdfjsPage, dpi) {
+  let scale = (dpi || GREY_DPI) / 72;
+  const v0 = pdfjsPage.getViewport({ scale, rotation: 0 });
+  if (v0.width * v0.height > GREY_MAX_PX) scale *= Math.sqrt(GREY_MAX_PX / (v0.width * v0.height));
+  const vp = pdfjsPage.getViewport({ scale, rotation: 0 });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(vp.width); canvas.height = Math.round(vp.height);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await pdfjsPage.render({ canvasContext: ctx, viewport: vp }).promise;
+  return { canvas, ctx, scale };
+}
+async function forceGreyPagesBytes(bytes, pages, colour, process) {
   const doc = await loadPdf(bytes, "artwork");
   const n = doc.getPageCount();
   const want = pages.filter(p => p >= 1 && p <= n);
@@ -3573,15 +3605,8 @@ async function forceGreyPagesBytes(bytes, pages, colour) {
     const page = doc.getPage(pno - 1);
     const mb = pageBox(page);                  // pdf.js renders the CropBox view — draw the raster over the same box
     const src = await pdfjs.getPage(pno);
-    let scale = GREY_DPI / 72;
-    const v0 = src.getViewport({ scale, rotation: 0 });
-    if (v0.width * v0.height > GREY_MAX_PX) scale *= Math.sqrt(GREY_MAX_PX / (v0.width * v0.height));
-    const vp = src.getViewport({ scale, rotation: 0 });
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(vp.width); canvas.height = Math.round(vp.height);
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
-    await src.render({ canvasContext: ctx, viewport: vp }).promise;
+    const { canvas, ctx, scale } = await renderPageRaw(src, GREY_DPI);
+    if (process) await process(pno, canvas, ctx, scale);
     const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
     let img;
     if (colour) {
@@ -3608,6 +3633,216 @@ async function forceGreyPagesBytes(bytes, pages, colour) {
       : `Force greyscale: page${want.length === 1 ? "" : "s"} ${want.join(", ")} rasterised at ${GREY_DPI} DPI as DeviceGray (K only) — no longer vector on those pages.`,
   };
 }
+
+// ── Spot healing (1.64) ─────────────────────────────────────────────────────
+// Owner: "real spot healing across the whole art … a page is rasterised
+// whenever the tool is activated upon it." So a retouched page goes through
+// the same 300 DPI colour raster as "Rasterise pages", with the operator's
+// strokes healed into the pixels first: no mixed vector/raster page, no
+// colour step around a patch — the whole page is one image. The pass runs on
+// the SOURCE file before anything reads it, so every copy of the page on the
+// sheet carries the fix and every downstream feature (bleed synthesis,
+// duplex, marks, preflight) sees an ordinary page.
+//
+// inpaintFMM: Telea's fast-marching inpainting on an RGBA buffer. Pixels under
+// the mask are filled in order of distance from the mask boundary; each new
+// pixel is a weighted average of the already-known pixels within INPAINT_R,
+// weighted by direction (along the marching front), distance and level-set
+// closeness, so isophotes continue into the hole instead of smearing. Right
+// for what spot healing is used on — dust, hairs, scratches, a stray mark —
+// and small enough to run instantly on a brush-sized region.
+const INPAINT_R = 5;            // px, source window radius
+const HEAL_DPI = GREY_DPI;      // retouched pages raster at the same DPI as the raster pass
+const HEAL_BRUSH_DEFAULT = 0.03, HEAL_BRUSH_MIN = 0.005, HEAL_BRUSH_MAX = 0.5; // inches
+function inpaintFMM(data, W, H, mask, radius) {
+  const KNOWN = 0, BAND = 1, INSIDE = 2, INF = 1e6, r = radius || INPAINT_R;
+  const N = W * H, flag = new Uint8Array(N), T = new Float32Array(N);
+  for (let i = 0; i < N; i++) { if (mask[i]) { flag[i] = INSIDE; T[i] = INF; } }
+  // binary min-heap of [T, idx]
+  const heapT = [], heapI = [];
+  const push = (t, i) => { heapT.push(t); heapI.push(i); let k = heapT.length - 1; while (k > 0) { const pk = (k - 1) >> 1; if (heapT[pk] <= heapT[k]) break; [heapT[pk], heapT[k]] = [heapT[k], heapT[pk]]; [heapI[pk], heapI[k]] = [heapI[k], heapI[pk]]; k = pk; } };
+  const pop = () => { const t = heapT[0], i = heapI[0]; const lt = heapT.pop(), li = heapI.pop(); if (heapT.length) { heapT[0] = lt; heapI[0] = li; let k = 0; for (;;) { const a = 2 * k + 1, b = a + 1; let m = k; if (a < heapT.length && heapT[a] < heapT[m]) m = a; if (b < heapT.length && heapT[b] < heapT[m]) m = b; if (m === k) break; [heapT[m], heapT[k]] = [heapT[k], heapT[m]]; [heapI[m], heapI[k]] = [heapI[k], heapI[m]]; k = m; } } return [t, i]; };
+  // initial band: KNOWN pixels touching the hole
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x; if (flag[i] === INSIDE) continue;
+    if ((x > 0 && flag[i - 1] === INSIDE) || (x < W - 1 && flag[i + 1] === INSIDE) || (y > 0 && flag[i - W] === INSIDE) || (y < H - 1 && flag[i + W] === INSIDE)) { flag[i] = BAND; push(0, i); }
+  }
+  const tAt = i => (i < 0 || flag[i] === INSIDE) ? INF : T[i];
+  const solve = (t1, t2) => {
+    if (t1 >= INF && t2 >= INF) return INF;
+    if (t1 >= INF || t2 >= INF) return Math.min(t1, t2) + 1;
+    const d = t1 - t2; if (Math.abs(d) < 1) return (t1 + t2 + Math.sqrt(2 - d * d)) / 2;
+    return Math.min(t1, t2) + 1;
+  };
+  const r2 = r * r;
+  const inpaint = (qx, qy) => {
+    const q = qy * W + qx;
+    // gradient of T at q from non-INSIDE neighbours (one-sided where needed)
+    const tl = qx > 0 ? tAt(q - 1) : INF, tr = qx < W - 1 ? tAt(q + 1) : INF, tu = qy > 0 ? tAt(q - W) : INF, td = qy < H - 1 ? tAt(q + W) : INF;
+    const gx = (tl < INF && tr < INF) ? (tr - tl) / 2 : tl < INF ? T[q] - tl : tr < INF ? tr - T[q] : 0;
+    const gy = (tu < INF && td < INF) ? (td - tu) / 2 : tu < INF ? T[q] - tu : td < INF ? td - T[q] : 0;
+    let sr = 0, sg = 0, sb = 0, sw = 0;
+    for (let ky = Math.max(0, qy - r); ky <= Math.min(H - 1, qy + r); ky++) for (let kx = Math.max(0, qx - r); kx <= Math.min(W - 1, qx + r); kx++) {
+      const k = ky * W + kx; if (flag[k] === INSIDE) continue;
+      const rx = qx - kx, ry = qy - ky, d2 = rx * rx + ry * ry; if (!d2 || d2 > r2) continue;
+      const len = Math.sqrt(d2);
+      let dir = Math.abs(rx * gx + ry * gy) / len; if (dir < 1e-6) dir = 1e-6;
+      const w = dir * (1 / d2) * (1 / (1 + Math.abs(T[k] - T[q])));
+      const o = k * 4; sr += w * data[o]; sg += w * data[o + 1]; sb += w * data[o + 2]; sw += w;
+    }
+    if (sw > 0) { const o = q * 4; data[o] = sr / sw; data[o + 1] = sg / sw; data[o + 2] = sb / sw; data[o + 3] = 255; }
+  };
+  while (heapT.length) {
+    const [, p] = pop(); flag[p] = KNOWN;
+    const px = p % W, py = (p - px) / W;
+    const nb = [[px - 1, py], [px + 1, py], [px, py - 1], [px, py + 1]];
+    for (const [nx, ny] of nb) {
+      if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+      const q = ny * W + nx; if (flag[q] !== INSIDE) continue;
+      const L = nx > 0 ? tAt(q - 1) : INF, R = nx < W - 1 ? tAt(q + 1) : INF, U = ny > 0 ? tAt(q - W) : INF, D = ny < H - 1 ? tAt(q + W) : INF;
+      T[q] = Math.min(solve(L, U), solve(R, U), solve(L, D), solve(R, D));
+      inpaint(nx, ny);
+      flag[q] = BAND; push(T[q], q);
+    }
+  }
+}
+// Texture pass. Telea alone gives a smooth, isophote-continued fill: right
+// for a dust speck on a sky, visibly "painted" on anything with grain, weave,
+// halftone or hatching (a cross where the fronts meet, stairs along a thin
+// hole). What a spot-healing brush actually does is borrow nearby TEXTURE and
+// keep the local COLOUR. So, per tile of the hole: find the nearby offset
+// whose pixels best match the known ring around the tile (SSD on the ring,
+// source pixels must all be known), then write hole = L(p) + F(p+off) −
+// L(p+off): the Telea fill's low-pass carries the colour, the matched patch's
+// high-pass carries the grain. Tiles with no usable ring keep the Telea fill.
+function boxBlurRGB(data, W, H, r) {
+  // summed-area table per channel → mean over a (2r+1)² window, edge-clamped
+  const SW = W + 1, S = [new Float64Array(SW * (H + 1)), new Float64Array(SW * (H + 1)), new Float64Array(SW * (H + 1))];
+  for (let y = 1; y <= H; y++) for (let x = 1; x <= W; x++) {
+    const o = ((y - 1) * W + (x - 1)) * 4, i = y * SW + x;
+    for (let c = 0; c < 3; c++) S[c][i] = data[o + c] + S[c][i - 1] + S[c][i - SW] - S[c][i - SW - 1];
+  }
+  const L = new Float32Array(W * H * 3);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const x0 = Math.max(0, x - r), x1 = Math.min(W, x + r + 1), y0 = Math.max(0, y - r), y1 = Math.min(H, y + r + 1);
+    const n = (x1 - x0) * (y1 - y0), o = (y * W + x) * 3;
+    for (let c = 0; c < 3; c++) L[o + c] = (S[c][y1 * SW + x1] - S[c][y0 * SW + x1] - S[c][y1 * SW + x0] + S[c][y0 * SW + x0]) / n;
+  }
+  return L;
+}
+function healTexture(data, W, H, mask, tile) {
+  tile = Math.max(16, Math.min(96, tile | 0));
+  const L = boxBlurRGB(data, W, H, Math.max(2, tile >> 2));
+  const out = new Uint8ClampedArray(data);
+  let bx0 = W, by0 = H, bx1 = -1, by1 = -1;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (mask[y * W + x]) { if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y; }
+  if (bx1 < 0) return 0;
+  const m = Math.max(4, tile >> 2), R = Math.round(tile * 1.5), step = tile > 48 ? 2 : 1;
+  let tilesDone = 0;
+  for (let ty = by0; ty <= by1; ty += tile) for (let tx = bx0; tx <= bx1; tx += tile) {
+    const x0 = tx, y0 = ty, x1 = Math.min(bx1 + 1, tx + tile), y1 = Math.min(by1 + 1, ty + tile);
+    const hole = [];
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (mask[y * W + x]) hole.push(y * W + x);
+    if (!hole.length) continue;
+    const ring = [];
+    const wx0 = Math.max(0, x0 - m), wy0 = Math.max(0, y0 - m), wx1 = Math.min(W, x1 + m), wy1 = Math.min(H, y1 + m);
+    for (let y = wy0; y < wy1; y += 2) for (let x = wx0; x < wx1; x += 2) if (!mask[y * W + x]) ring.push(y * W + x);
+    if (ring.length < 16) continue;
+    const probe = hole.filter((_, i) => i % 3 === 0);
+    const cands = [];
+    for (let dy = -R; dy <= R; dy += step) for (let dx = -R; dx <= R; dx += step) {
+      if (!dx && !dy) continue;
+      if (wx0 + dx < 0 || wy0 + dy < 0 || wx1 + dx > W || wy1 + dy > H) continue;
+      const off = dy * W + dx;
+      let bad = false;
+      for (let i = 0; i < probe.length; i++) if (mask[probe[i] + off]) { bad = true; break; }
+      if (bad) continue;
+      let ssd = 0;
+      for (let i = 0; i < ring.length; i++) {
+        const a = ring[i] * 4, b = (ring[i] + off) * 4;
+        const dr = data[a] - data[b], dg = data[a + 1] - data[b + 1], db = data[a + 2] - data[b + 2];
+        ssd += dr * dr + dg * dg + db * db;
+      }
+      cands.push([ssd, off]);
+    }
+    if (!cands.length) continue;
+    cands.sort((a, b) => a[0] - b[0]);
+    let off = null;
+    for (const [, o] of cands.slice(0, 12)) {   // full validity on the few best
+      let bad = false;
+      for (let i = 0; i < hole.length; i++) if (mask[hole[i] + o]) { bad = true; break; }
+      if (!bad) { off = o; break; }
+    }
+    if (off === null) continue;
+    for (const p of hole) {
+      const q = p + off, a = p * 4, b = q * 4, la = p * 3, lb = q * 3;
+      out[a] = L[la] + data[b] - L[lb]; out[a + 1] = L[la + 1] + data[b + 1] - L[lb + 1]; out[a + 2] = L[la + 2] + data[b + 2] - L[lb + 2]; out[a + 3] = 255;
+    }
+    tilesDone++;
+  }
+  if (tilesDone) data.set(out);
+  return tilesDone;
+}
+// A stroke: { pts: [[x, y], …], r } in POINTS of the raw page frame (top-left
+// origin, as renderPageRaw lays it out), r = brush radius in points. Paint it
+// onto a mask at `scale` px/pt, dilated by a pixel so the blemish's own
+// antialiased rim goes with it, and heal that region in place on `ctx`.
+function strokeMaskBox(stroke, scale, W, H) {
+  const r = stroke.r * scale + 1;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of stroke.pts) { x0 = Math.min(x0, x * scale); x1 = Math.max(x1, x * scale); y0 = Math.min(y0, y * scale); y1 = Math.max(y1, y * scale); }
+  // room for the texture search (1.5 tiles each way) plus the Telea window
+  const tile = Math.max(16, Math.min(96, Math.round(2 * r) + 8));
+  const pad = Math.ceil(r) + INPAINT_R + Math.round(tile * 1.5) + tile + 4;
+  return { tile, x: Math.max(0, Math.floor(x0 - pad)), y: Math.max(0, Math.floor(y0 - pad)),
+           x1: Math.min(W, Math.ceil(x1 + pad)), y1: Math.min(H, Math.ceil(y1 + pad)) };
+}
+function applyStroke(ctx, W, H, stroke, scale) {
+  if (!stroke || !stroke.pts || !stroke.pts.length) return null;
+  const b = strokeMaskBox(stroke, scale, W, H);
+  const bw = b.x1 - b.x, bh = b.y1 - b.y;
+  if (bw < 3 || bh < 3) return null;
+  const mc = document.createElement("canvas"); mc.width = bw; mc.height = bh;
+  const m = mc.getContext("2d", { willReadFrequently: true });
+  m.lineCap = "round"; m.lineJoin = "round"; m.strokeStyle = "#000"; m.fillStyle = "#000";
+  m.lineWidth = 2 * stroke.r * scale + 2;              // +2 px: take the rim
+  m.beginPath();
+  stroke.pts.forEach(([x, y], i) => { const X = x * scale - b.x, Y = y * scale - b.y; i ? m.lineTo(X, Y) : m.moveTo(X, Y); });
+  if (stroke.pts.length === 1) { const [x, y] = stroke.pts[0]; m.arc(x * scale - b.x, y * scale - b.y, stroke.r * scale + 1, 0, Math.PI * 2); m.fill(); }
+  else m.stroke();
+  const md = m.getImageData(0, 0, bw, bh).data;
+  const mask = new Uint8Array(bw * bh); let n = 0;
+  for (let i = 0, j = 3; i < mask.length; i++, j += 4) if (md[j] > 127) { mask[i] = 1; n++; }
+  if (!n) return null;
+  const img = ctx.getImageData(b.x, b.y, bw, bh);
+  inpaintFMM(img.data, bw, bh, mask, INPAINT_R);
+  const tiles = healTexture(img.data, bw, bh, mask, b.tile);
+  ctx.putImageData(img, b.x, b.y);
+  return { box: b, px: n, tiles };
+}
+function applyStrokes(ctx, W, H, strokes, scale) {
+  let n = 0;
+  for (const st of strokes || []) if (applyStroke(ctx, W, H, st, scale)) n++;
+  return n;
+}
+// heal = { [pno 1-based]: strokes[] }. Returns the healed, rasterised file.
+async function healPagesBytes(bytes, heal) {
+  const pages = Object.keys(heal || {}).map(Number).filter(p => p >= 1 && (heal[p] || []).length).sort((a, b) => a - b);
+  if (!pages.length) return { bytes, note: null, pages: [] };
+  const r = await forceGreyPagesBytes(bytes, pages, true, (pno, canvas, ctx, scale) => { applyStrokes(ctx, canvas.width, canvas.height, heal[pno], scale); });
+  const spots = pages.map(p => `${p} (${heal[p].length} spot${heal[p].length === 1 ? "" : "s"})`);
+  return { bytes: r.bytes, pages,
+           note: `RETOUCHED: page${pages.length === 1 ? "" : "s"} ${spots.join(", ")} spot-healed and rasterised at ${HEAL_DPI} DPI as an RGB JPEG — no longer vector on ${pages.length === 1 ? "that page" : "those pages"}. This is not the file the customer approved; the output is flagged _RETOUCHED.` };
+}
+const healSlug = (heal) => {
+  const bits = [];
+  for (const slot of ["F", "B"]) {
+    const h = heal && heal[slot]; if (!h) continue;
+    const pages = Object.keys(h).map(Number).filter(p => (h[p] || []).length).sort((a, b) => a - b);
+    if (pages.length) bits.push((slot === "B" ? "back " : "") + pages.map(p => `p${p}(${h[p].length})`).join(" "));
+  }
+  return bits.length ? `RETOUCHED ${bits.join(" · ")}` : null;
+};
 
 // Insert full-size slipsheets into an imposed output. Sheet numbers refer to
 // the PHYSICAL sheets of the output (sheet 1 = its first front/back pair on a
@@ -4030,13 +4265,32 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
   }
   lastRaster = null;                                    // gang-file conversions above must not leak a note
   let greyNote = null;
+  // Spot healing FIRST (1.64): the healed page is a raster, so greyscale /
+  // rasterise below see pixels, and the heal strokes refer to the file as
+  // dropped. Retouched pages drop out of the raster list — they already are.
+  const healedPages = new Set();
+  let retouched = null;
+  if (spec.heal && (spec.heal.F || spec.heal.B)) {
+    if (artBytes && spec.heal.F) {
+      await progress("Spot-healing pages", 0.08);
+      const r = await healPagesBytes(artBytes, spec.heal.F);
+      if (r.pages.length) { artBytes = r.bytes; greyNote = r.note; r.pages.forEach(p => healedPages.add(p)); }
+    }
+    if (backBytes && spec.heal.B) {
+      await progress("Spot-healing the back file", 0.09);
+      const r = await healPagesBytes(backBytes, spec.heal.B);
+      if (r.pages.length) { backBytes = r.bytes; greyNote = (greyNote ? greyNote + " " : "") + "Back file — " + r.note; }
+    }
+    retouched = healSlug(spec.heal);
+    if (retouched) spec = { ...spec, retouchSlug: retouched };
+  }
   const grey = parsePageList(spec.greyPages);
   if (grey.length && artBytes) {
     await progress(`Rasterising ${grey.length} greyscale page${grey.length === 1 ? "" : "s"}`, 0.1);
     const r = await forceGreyPagesBytes(artBytes, grey);
-    artBytes = r.bytes; greyNote = r.note;
+    artBytes = r.bytes; greyNote = greyNote ? greyNote + " " + r.note : r.note;
   }
-  const rast = parsePageList(spec.rasterPages);
+  const rast = parsePageList(spec.rasterPages).filter(p => !healedPages.has(p));
   if (rast.length && artBytes) {
     await progress(`Rasterising ${rast.length} page${rast.length === 1 ? "" : "s"}`, 0.12);
     const r = await forceGreyPagesBytes(artBytes, rast, true);
@@ -4079,6 +4333,7 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
       }
     } catch (e) { if (/NO INK/.test(e.message)) throw e; /* render failures are not verdicts */ }
     if (greyNote) p.warnings = [greyNote, ...(p.warnings || [])];
+    if (retouched) p.retouched = retouched;
     if (seqNote) p.warnings = [seqNote, ...(p.warnings || [])];
     // Sheet sequence BEFORE slipsheets, so a slipsheet's sheet number refers to
     // the physical sheets that will actually come off the press.
@@ -4369,7 +4624,7 @@ async function imposeCore(artBytes, backBytes, spec, gangFiles) {
       if (showSlug) {
         const placed = drawSlug(page, layout, font, {
           duplex: sides === 2, flip: sides === 2 ? (spec.sheetFlip || "short") : null,
-          side: label, orderRef: spec.orderRef, jobName: spec.jobName, artInset: inset || 0, artScale: userScale,
+          side: label, orderRef: spec.orderRef, jobName: spec.jobName, artInset: inset || 0, artScale: userScale, retouch: spec.retouchSlug,
           qty: spec.qty, sheets, date: dateStr,
         }, cellsForMarks);
         if (!placed && !slugWarned) { slugWarned = true; warnings.push("no clear space inside the printable area for the slug line — omitted"); }
@@ -4548,7 +4803,7 @@ function imposedFilename(spec, layout) {
 }
 
 // Engine surface for headless tests / console debugging
-window.__ppsImpose = { parseSeq, imposePdf, computeLayout, flatImp, stickerImp, parseManifest, specFromRow, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf, sha256Hex, approvalState, BOOK_CALCS, isBoundCalc, isBookCalc, loadPdf, convertAlphaMasks, flattenVectorMasks };
+window.__ppsImpose = { parseSeq, imposePdf, computeLayout, flatImp, stickerImp, parseManifest, specFromRow, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf, sha256Hex, approvalState, BOOK_CALCS, isBoundCalc, isBookCalc, loadPdf, convertAlphaMasks, flattenVectorMasks, inpaintFMM, healTexture, applyStrokes, healPagesBytes, renderPageRaw };
 
 // ═══════════════════════════════════════════════════════════════
 // UI
@@ -4793,6 +5048,210 @@ function dlBytes(bytes, name) {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
+// ── Retouch modal (1.64): spot healing on the source page ──────────────────
+// Shows one page of the dropped file at 300 DPI (renderPageRaw — the exact
+// raster the impose pass will heal), takes brush strokes, heals each on
+// release and keeps the strokes per page in points, so the pass at impose
+// time replays them identically. Undo replays the page from the pristine
+// render. The page is shown as stored (rotation 0), like the raster pass.
+function Retouch({ slot, art, strokesBySlot, onChange, onClose, order, cfg, onNotice, onError }) {
+  const [pdf, setPdf] = useState(null);
+  const [pageNo, setPageNo] = useState(1);
+  const [count, setCount] = useState(0);
+  const [zoom, setZoom] = useState(null);                 // CSS px per canvas px
+  const [brush, setBrush] = useState(HEAL_BRUSH_DEFAULT); // inches, radius
+  const [busy, setBusy] = useState("");
+  const [rot, setRot] = useState(0);
+  const [cur, setCur] = useState(null);                   // brush cursor, CSS px inside the stage
+  const [painting, setPainting] = useState(false);
+  const baseRef = useRef(null);   // { img: pristine ImageData, scale, W, H }
+  const [rev, setRev] = useState(0);                      // bumps when a page render lands, so the canvases (mounted on it) get drawn
+  const workRef = useRef(null);
+  const overRef = useRef(null);
+  const wrapRef = useRef(null);
+  const strokeRef = useRef(null); // in-progress stroke, canvas px
+  const strokes = (strokesBySlot && strokesBySlot[pageNo]) || [];
+  const pagesDone = Object.keys(strokesBySlot || {}).map(Number).filter(p => (strokesBySlot[p] || []).length).sort((a, b) => a - b);
+  const totalSpots = pagesDone.reduce((n, p) => n + strokesBySlot[p].length, 0);
+
+  useEffect(() => {
+    let dead = false;
+    (async () => {
+      setBusy("Opening the file…");
+      try {
+        const bytes = await ppsToPdfBytes(art.bytes, slot === "B" ? "back" : "front");
+        const doc = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+        if (dead) return;
+        setPdf(doc); setCount(doc.numPages); setPageNo(1);
+      } catch (e) { onError("Retouch could not open the file: " + e.message); onClose(); }
+      setBusy("");
+    })();
+    return () => { dead = true; };
+  }, [art, slot]);
+
+  const redraw = () => {
+    const b = baseRef.current, wc = workRef.current; if (!b || !wc) return;
+    if (wc.width !== b.W || wc.height !== b.H) { wc.width = b.W; wc.height = b.H; }
+    const ctx = wc.getContext("2d", { willReadFrequently: true });
+    ctx.putImageData(b.img, 0, 0);
+    applyStrokes(ctx, b.W, b.H, (strokesBySlot && strokesBySlot[pageNo]) || [], b.scale);
+    const oc = overRef.current; if (oc && (oc.width !== b.W || oc.height !== b.H)) { oc.width = b.W; oc.height = b.H; }
+  };
+  useEffect(() => {
+    if (!pdf) return;
+    let dead = false;
+    (async () => {
+      setBusy(`Rendering page ${pageNo} at ${HEAL_DPI} DPI…`);
+      try {
+        const page = await pdf.getPage(pageNo);
+        const { canvas, ctx, scale } = await renderPageRaw(page, HEAL_DPI);
+        if (dead) return;
+        setRot(page.rotate || 0);
+        baseRef.current = { img: ctx.getImageData(0, 0, canvas.width, canvas.height), scale, W: canvas.width, H: canvas.height };
+        if (zoom == null && wrapRef.current) {
+          const z = Math.min((wrapRef.current.clientWidth - 48) / canvas.width, (wrapRef.current.clientHeight - 48) / canvas.height, 1);
+          setZoom(Math.max(0.05, z));
+        }
+        setRev(r => r + 1);   // the stage mounts on this render; the effect below paints it
+      } catch (e) { onError("Retouch could not render page " + pageNo + ": " + e.message); }
+      setBusy("");
+    })();
+    return () => { dead = true; };
+  }, [pdf, pageNo]);
+  useEffect(() => { redraw(); }, [rev, strokes.length]);
+
+  useEffect(() => {
+    const onKey = e => {
+      if (e.key === "Escape") { e.preventDefault(); onClose(); }
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); }
+      else if (e.key === "[") setBrush(b => Math.max(HEAL_BRUSH_MIN, +(b / 1.25).toFixed(4)));
+      else if (e.key === "]") setBrush(b => Math.min(HEAL_BRUSH_MAX, +(b * 1.25).toFixed(4)));
+      else if (e.key === "+" || e.key === "=") setZoom(z => Math.min(8, (z || 1) * 1.25));
+      else if (e.key === "-") setZoom(z => Math.max(0.05, (z || 1) / 1.25));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  const toCanvas = e => { const r = overRef.current.getBoundingClientRect(); return [(e.clientX - r.left) / zoom, (e.clientY - r.top) / zoom]; };
+  const drawOverlay = () => {
+    const oc = overRef.current, b = baseRef.current, pts = strokeRef.current; if (!oc || !b) return;
+    const c = oc.getContext("2d"); c.clearRect(0, 0, oc.width, oc.height);
+    if (!pts || !pts.length) return;
+    c.strokeStyle = "rgba(233,30,140,.55)"; c.fillStyle = c.strokeStyle; c.lineCap = "round"; c.lineJoin = "round";
+    c.lineWidth = 2 * brush * PT * b.scale;
+    c.beginPath(); pts.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y));
+    if (pts.length === 1) { c.arc(pts[0][0], pts[0][1], brush * PT * b.scale, 0, Math.PI * 2); c.fill(); } else c.stroke();
+  };
+  const onDown = e => {
+    if (e.button !== 0 || !baseRef.current || busy) return;
+    e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId);
+    strokeRef.current = [toCanvas(e)]; setPainting(true); drawOverlay();
+  };
+  const onMove = e => {
+    const r = overRef.current && overRef.current.getBoundingClientRect();
+    if (r) setCur({ x: e.clientX - r.left, y: e.clientY - r.top });
+    if (!strokeRef.current) return;
+    const p = toCanvas(e), last = strokeRef.current[strokeRef.current.length - 1];
+    if (Math.hypot(p[0] - last[0], p[1] - last[1]) >= 1.5) { strokeRef.current.push(p); drawOverlay(); }
+  };
+  const onUp = e => {
+    const pts = strokeRef.current; strokeRef.current = null; setPainting(false);
+    const b = baseRef.current; if (!pts || !b) return;
+    const oc = overRef.current; if (oc) oc.getContext("2d").clearRect(0, 0, oc.width, oc.height);
+    const stroke = { pts: pts.map(([x, y]) => [+(x / b.scale).toFixed(3), +(y / b.scale).toFixed(3)]), r: +(brush * PT).toFixed(3) };
+    onChange(pageNo, [...strokes, stroke]);
+  };
+  const undo = () => { if (strokes.length) onChange(pageNo, strokes.slice(0, -1)); };
+  const clearPage = () => { if (strokes.length) onChange(pageNo, []); };
+
+  const healed = async () => {
+    const bytes = await ppsToPdfBytes(art.bytes, slot === "B" ? "back" : "front");
+    return healPagesBytes(bytes, strokesBySlot);
+  };
+  const base = () => art.name.replace(/\.(pdf|jpe?g|png)$/i, "").replace(/[^\w.-]+/g, "_").slice(0, 80);
+  const download = async () => {
+    setBusy("Healing and rasterising…");
+    try { const r = await healed(); dlBytes(r.bytes, "RETOUCHED_" + base() + ".pdf"); onNotice(`Retouched file downloaded — ${r.note}`); }
+    catch (e) { onError("Retouch export failed: " + e.message); }
+    setBusy("");
+  };
+  const toDrive = async () => {
+    if (!order || !cfg) return;
+    setBusy("Healing, rasterising and filing to Drive…");
+    try {
+      const r = await healed();
+      const fname = `RETOUCHED_Order-${order.order_id}${order.item_id ? "-i" + order.item_id : ""}_${base()}.pdf`;
+      const fd = new FormData();
+      fd.append("action", "pps_impose_upload"); fd.append("nonce", cfg.nonce); fd.append("order_id", order.order_id); fd.append("filename", fname);
+      fd.append("file", new Blob([r.bytes], { type: "application/pdf" }), fname);
+      const resp = await fetch(cfg.ajaxUrl, { method: "POST", body: fd, credentials: "same-origin" });
+      if (!resp.ok) throw await ajaxFail(resp, "upload");
+      const j = await resp.json();
+      if (!j.success) throw new Error((j.data && j.data.message) || "upload failed");
+      onNotice(`Retouched source filed to order #${order.order_id}'s Drive folder as ${fname} — ${r.note}`);
+    } catch (e) { onError("Retouched upload failed: " + e.message); }
+    setBusy("");
+  };
+
+  const b = baseRef.current;
+  const cssW = b ? b.W * (zoom || 1) : 0, cssH = b ? b.H * (zoom || 1) : 0;
+  const brushCss = b ? 2 * brush * PT * b.scale * (zoom || 1) : 0;
+  const zoomPct = Math.round((zoom || 1) * 100);
+  return (
+    <div className="imp-rt-back" data-retouch-modal>
+      <div className="imp-rt">
+        <div className="imp-rt-bar">
+          <b style={{ fontSize: 13 }}>🩹 Retouch — {slot === "B" ? "back file" : "artwork"}: {art.name}</b>
+          <span style={{ marginLeft: "auto" }} />
+          <button type="button" className="imp-btn sec" data-rt-prev disabled={pageNo <= 1} onClick={() => setPageNo(p => Math.max(1, p - 1))}>‹</button>
+          <span>page <input type="number" min="1" max={count || 1} value={pageNo} data-rt-page onChange={e => { const v = Math.max(1, Math.min(count || 1, +e.target.value || 1)); setPageNo(v); }} /> of {count || "…"}</span>
+          <button type="button" className="imp-btn sec" data-rt-next disabled={!count || pageNo >= count} onClick={() => setPageNo(p => Math.min(count, p + 1))}>›</button>
+          <span style={{ width: 10 }} />
+          <span>brush</span>
+          <input type="range" min={Math.log(HEAL_BRUSH_MIN)} max={Math.log(HEAL_BRUSH_MAX)} step="0.01" value={Math.log(brush)} data-rt-brush
+                 onChange={e => setBrush(+Math.exp(+e.target.value).toFixed(4))} />
+          <span style={{ minWidth: 54 }}>{(brush * 2).toFixed(3)}″</span>
+          <span style={{ width: 10 }} />
+          <button type="button" className="imp-btn sec" onClick={() => setZoom(z => Math.max(0.05, (z || 1) / 1.25))}>−</button>
+          <span style={{ minWidth: 44, textAlign: "center" }}>{zoomPct}%</span>
+          <button type="button" className="imp-btn sec" onClick={() => setZoom(z => Math.min(8, (z || 1) * 1.25))}>+</button>
+          <button type="button" className="imp-btn sec" onClick={() => setZoom(1)}>100%</button>
+          <button type="button" className="imp-btn sec" onClick={() => { if (wrapRef.current && b) setZoom(Math.max(0.05, Math.min((wrapRef.current.clientWidth - 48) / b.W, (wrapRef.current.clientHeight - 48) / b.H, 1))); }}>Fit</button>
+        </div>
+        <div className="imp-rt-wrap" ref={wrapRef} onPointerLeave={() => setCur(null)}>
+          {b && (
+            <div className="imp-rt-stage" style={{ width: cssW, height: cssH }}>
+              <canvas ref={workRef} className="work" style={{ width: cssW, height: cssH }} />
+              <canvas ref={overRef} data-rt-paint style={{ width: cssW, height: cssH, touchAction: "none" }}
+                      onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} />
+              {cur && <div className="imp-rt-cursor" style={{ left: cur.x, top: cur.y, width: brushCss, height: brushCss }} />}
+            </div>
+          )}
+          {!b && <div style={{ padding: 40, color: "rgba(255,255,255,.5)" }}>{busy || "…"}</div>}
+          {busy && b && <div style={{ position: "sticky", left: 12, bottom: 12, display: "inline-block", background: "rgba(0,0,0,.7)", padding: "6px 10px", borderRadius: 8, fontSize: 12 }}>{busy}</div>}
+        </div>
+        <div className="imp-rt-foot">
+          <span data-rt-status>
+            Page {pageNo}: <b style={{ color: "#fff" }}>{strokes.length} spot{strokes.length === 1 ? "" : "s"}</b>
+            {pagesDone.length ? <> · retouched page{pagesDone.length === 1 ? "" : "s"} {pagesDone.join(", ")} ({totalSpots} spot{totalSpots === 1 ? "" : "s"})</> : " · nothing retouched yet"}
+            {rot ? <> · page is stored with /Rotate {rot} and shown as stored</> : null}
+          </span>
+          <span style={{ marginLeft: "auto" }} />
+          <button type="button" className="imp-btn sec" data-rt-undo disabled={!strokes.length} onClick={undo}>↶ Undo (Ctrl+Z)</button>
+          <button type="button" className="imp-btn sec" data-rt-clear disabled={!strokes.length} onClick={clearPage}>Clear page</button>
+          <button type="button" className="imp-btn sec" data-rt-download disabled={!totalSpots || !!busy} onClick={download}>⬇ RETOUCHED PDF</button>
+          {cfg && order && <button type="button" className="imp-btn sec" data-rt-drive disabled={!totalSpots || !!busy} onClick={toDrive}>☁ File RETOUCHED source to Drive</button>}
+          <button type="button" className="imp-btn" data-rt-done onClick={onClose}>Done</button>
+        </div>
+        <div style={{ padding: "4px 12px 8px", fontSize: 11, color: "rgba(255,255,255,.4)" }}>
+          Paint over dust, hairs, scratches and stray marks; each stroke is filled from its surroundings on release. Every retouched page is <b>rasterised at {HEAL_DPI} DPI</b> when imposed (no longer vector, RGB) and the output is flagged <b>_RETOUCHED</b> — this is not the file the customer approved. Keys: [ ] brush · + − zoom · Esc close.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── WP-admin queue (only rendered when PPS_IMPOSE_CFG is injected) ──
 function ajax(action, params, opts) {
   const fd = new FormData();
@@ -4844,7 +5303,7 @@ function rowPending(r) {
 // else the first candidate in the folder (never an output or a preview unless
 // chosen by hand). Owner, 2026-10-18: "I want it to read any file in the
 // directed folder" — the match is a default, not a gate.
-const ROLE_TAG = { "print-ready": "print-ready", pdf: "PDF", raster: "image", preview: "preview", clean: "CLEAN copy", imposed: "imposed output" };
+const ROLE_TAG = { "print-ready": "print-ready", retouched: "RETOUCHED source", pdf: "PDF", raster: "image", preview: "preview", clean: "CLEAN copy", imposed: "imposed output" };
 function rowFiles(r) { return Array.isArray(r.files) ? r.files : []; }
 function rowPick(r, picks) {
   const files = rowFiles(r);
@@ -5403,6 +5862,12 @@ function App() {
   }, [isBound, detTrim, activeOrder]);
 
   useEffect(() => { setAllowMissingFonts(false); }, [art, backArt, gangFiles]);
+  // Spot healing strokes (1.64): { F: { [pno]: strokes[] }, B: {…} } — a fact
+  // about this job's files, so never in a setup and dropped with the artwork.
+  const [heal, setHeal] = useState({ F: {}, B: {} });
+  const [retouchOpen, setRetouchOpen] = useState(null);   // "F" | "B" | null
+  useEffect(() => { setHeal({ F: {}, B: {} }); setRetouchOpen(null); }, [art, backArt]);
+  const healSummary = healSlug(heal);
 
   const spec = useMemo(() => ({
     calc, trimLong: +trimLong || 0, trimShort: +trimShort || 0, allowMissingFonts,
@@ -5435,6 +5900,7 @@ function App() {
     sheetSeq: sheetSeqTxt.trim() || null,
     splitSpreads, artFit, stripOverprint, fixHairlines, flattenAnnots,
     rasterPages: rasterPagesTxt.trim() || null,
+    heal: healSummary ? heal : null,
     slip: slipOn ? { on: true, when: slipWhen, sheets: slipSheets, design: slipDesign,
                      customBytes: slipCustom && slipCustom.bytes, customName: slipCustom && slipCustom.name } : null,
     // Per-half layout controls. Shaped for the engine (pbPartOverrides), which
@@ -5444,7 +5910,7 @@ function App() {
   }), [calc, trimLong, trimShort, allowMissingFonts, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
        sheetSel, sheetLong, sheetShort, sheetMargin, sheetPortrait,
        efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, artRotate, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, artScale, creep, addBleedPages,
-       gapCols, gapRows, gapFill, isSaddle, isBook, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGutsOrder, pbGrids, greyPagesTxt, pageSeqTxt, sheetSeqTxt, splitSpreads, artFit, stripOverprint, fixHairlines, flattenAnnots, rasterPagesTxt, slipOn, slipWhen, slipSheets, slipDesign, slipCustom]);
+       gapCols, gapRows, gapFill, isSaddle, isBook, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGutsOrder, pbGrids, greyPagesTxt, pageSeqTxt, sheetSeqTxt, splitSpreads, artFit, stripOverprint, fixHairlines, flattenAnnots, rasterPagesTxt, heal, healSummary, slipOn, slipWhen, slipSheets, slipDesign, slipCustom]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -5541,8 +6007,10 @@ function App() {
         if (seq !== genSeq.current) return null;
         const unappr = art && art.approval && art.approval.state === "mismatch";
         const fontsFlag = !!(res.fontsMissing && res.fontsMissing.length);
+        const retouchFlag = !!(res.retouched || (res.parts && res.parts.some(p => p.retouched)));
         const flagIt = (n, L) => {
           if (L && L.overflow) n = n.replace(/\.pdf$/i, "_OVERFLOW.pdf");
+          if (retouchFlag) n = n.replace(/\.pdf$/i, "_RETOUCHED.pdf");
           if (fontsFlag) n = n.replace(/\.pdf$/i, "_FONTS.pdf");
           if (unappr) n = n.replace(/\.pdf$/i, "_UNAPPROVED.pdf");
           return n;
@@ -5942,6 +6410,11 @@ function App() {
         </button>
       </div>
       {refOpen && <MetaRef onClose={() => setRefOpen(false)} />}
+      {retouchOpen && (retouchOpen === "B" ? backArt : art) && (
+        <Retouch slot={retouchOpen} art={retouchOpen === "B" ? backArt : art} strokesBySlot={heal[retouchOpen] || {}}
+                 onChange={(pno, strokes) => setHeal(h => ({ ...h, [retouchOpen]: { ...(h[retouchOpen] || {}), [pno]: strokes } }))}
+                 onClose={() => setRetouchOpen(null)} order={activeOrder} cfg={CFG} onNotice={setNotice} onError={setError} />
+      )}
 
       <div className="imp-shell">
         {/* ══ LEFT — imposition controls (accordion) ══ */}
@@ -6024,7 +6497,7 @@ function App() {
           </Acc>
 
           <Acc id="artwork" title="Artwork" open={secOpen.artwork} onToggle={() => toggleSec("artwork")}
-               badge={gangFiles.length >= 2 ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>GANG</span> : (art && art.pageCount > 1 && !isBook && multiMode !== "repeat") ? <span className="imp-badge ok" style={{ marginLeft: 8 }}>{art.pageCount} PAGES</span> : null}>
+               badge={healSummary ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>RETOUCHED</span> : gangFiles.length >= 2 ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>GANG</span> : (art && art.pageCount > 1 && !isBook && multiMode !== "repeat") ? <span className="imp-badge ok" style={{ marginLeft: 8 }}>{art.pageCount} PAGES</span> : null}>
             {(() => { const C = sheetCtx(); return (<>
             <Field label="When the artwork is not the finished size">
               <Seg value={artFit} onChange={setArtFit} dataAttr="data-art-fit" block
@@ -6032,6 +6505,21 @@ function App() {
               <div className="imp-hint">{fitWords[artFit] || fitWords.crop}</div>
             </Field>
             </>); })()}
+            {art && (
+              <div style={{ margin: "2px 0 10px" }}>
+                <span className="lbl">Spot healing</span>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                  <button type="button" className="imp-btn sec" data-retouch="F" style={{ padding: "6px 10px", fontSize: 12 }} onClick={() => setRetouchOpen("F")}>🩹 Retouch {backArt ? "front file" : "artwork"}…</button>
+                  {backArt && <button type="button" className="imp-btn sec" data-retouch="B" style={{ padding: "6px 10px", fontSize: 12 }} onClick={() => setRetouchOpen("B")}>🩹 Retouch back file…</button>}
+                  {healSummary && <button type="button" className="imp-btn sec" data-retouch-clear style={{ padding: "6px 10px", fontSize: 12 }} onClick={() => setHeal({ F: {}, B: {} })}>✕ discard retouching</button>}
+                </div>
+                <div className="imp-hint" data-retouch-summary>
+                  {healSummary
+                    ? `${healSummary} — each retouched page is rasterised at ${HEAL_DPI} DPI when imposed (no longer vector) and the output is flagged _RETOUCHED.`
+                    : `Paint over dust, hairs, scratches or stray marks; each spot is filled from its surroundings. A retouched page is rasterised at ${HEAL_DPI} DPI (no longer vector) when imposed.`}
+                </div>
+              </div>
+            )}
             <Check checked={splitSpreads} onChange={setSplitSpreads} label="Split 2-page spreads into single pages"
                    hint="for a file exported as reader spreads (page 1 alone, then 2|3, 4|5 …) — each spread-sized page is cut at its centre line; bound products refuse a spreads file until this is ticked" />
             {showProduct && (<div>
@@ -6931,6 +7419,7 @@ function App() {
             )}
             <div className="grp" style={{ fontSize: 12, color: "rgba(255,255,255,.55)", gap: 8 }}>
               {viewLay && viewLay.overflow && <span className="imp-badge err" data-overflow title="The block is larger than the printable area — laid out as asked and centred; the outer pieces print cut short.">OVERFLOW {viewLay.overflow.offLong > EPS ? `${viewLay.overflow.offLong.toFixed(2)}″ WIDE` : ""}{viewLay.overflow.offLong > EPS && viewLay.overflow.offShort > EPS ? " · " : ""}{viewLay.overflow.offShort > EPS ? `${viewLay.overflow.offShort.toFixed(2)}″ TALL` : ""}</span>}
+              {viewRes && viewRes.retouched && <span className="imp-badge warn" data-retouched title={viewRes.retouched + " — spot-healed pages are rasterised at 300 DPI; this is not the file the customer approved. The filename carries _RETOUCHED."}>RETOUCHED</span>}
               {parityBadge}
               <span>{sheetSummary}</span>
               {layoutInfo.error && <span style={{ color: "#f87171" }}>{layoutInfo.error}</span>}

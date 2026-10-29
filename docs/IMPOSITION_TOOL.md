@@ -743,6 +743,87 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### Spot healing — Retouch (1.64)
+
+  Owner: "are you able to add a spot-healing tool … real spot healing across
+  the whole art … let's just say that a page is rasterised whenever the tool
+  is activated upon it."
+
+  **What it is.** `🩹 Retouch…` in the Artwork section (front file, and the
+  back file on a 2-sided job) opens the source page at 300 DPI in a modal.
+  Paint over dust, hairs, scratches and stray marks; each stroke is healed on
+  release and the strokes are kept per page in points of the raw page frame.
+  Undo (Ctrl+Z), Clear page, zoom, brush size (`[` `]`, log slider 0.01–1″
+  diameter), page navigation. The modal can download `RETOUCHED_<name>.pdf`
+  or file `RETOUCHED_Order-<id>-i<item>_<name>.pdf` to the order's Drive
+  folder (the upload endpoint accepts the prefix; the folder listing tags it
+  `retouched`, ranked right after `print-ready`; the order note says it is
+  not the file the customer approved).
+
+  **The decision that keeps it simple.** A retouched page is **rasterised**
+  — the whole page, as "Rasterise pages" does, colour JPEG at 300 DPI — with
+  the strokes healed into the pixels first. No mixed vector/raster page, no
+  colour step around a patch, nothing for a RIP to misread. The cost is the
+  same as the raster pass: that page is no longer vector and its colour is
+  RGB. Said in the modal, the hint, the job report and the filename.
+
+  **Where it runs.** `healPagesBytes()` is the first pre-pass in
+  `imposePdfStages`, on the SOURCE bytes before greyscale / rasterise / page
+  sequence, so every copy of the page on the sheet carries the fix and every
+  downstream feature sees an ordinary page; strokes refer to the file as
+  dropped. `forceGreyPagesBytes` grew a per-page canvas hook and the render
+  moved into `renderPageRaw()` (rotation 0, CropBox view, 300 DPI capped by
+  pixel count) which the modal uses too, so a stroke painted in the modal
+  and the pass that applies it at impose time cannot disagree. Retouched
+  pages drop out of the Rasterise list (they already are). `spec.heal =
+  { F: { [pno]: strokes[] }, B: {…} }`; never in a setup; cleared when the
+  artwork changes; bulk impose never sends it. Result: `res.retouched`
+  (`RETOUCHED p3(4) · back p1(1)`), filename `_RETOUCHED` (composes with the
+  other flags), slug token, toolbar badge, note heading the warnings,
+  RETOUCHED badge on the Artwork section.
+
+  **The healing itself** (`applyStroke` → `inpaintFMM` → `healTexture`).
+  The stroke is painted onto a mask at the raster's scale (round caps, +2 px
+  so the blemish's own antialiased rim goes with it), the bounding region
+  cut out of the canvas with room for the texture search, and healed in
+  place:
+  1. **Telea fast-marching inpainting** (`inpaintFMM`): mask pixels filled in
+     order of distance from the boundary, each a weighted average of the
+     known pixels within 5 px, weighted by direction along the front,
+     distance and level-set closeness — isophotes continue into the hole.
+     Right on a smooth area; visibly painted on anything with grain, weave,
+     halftone or hatching (a cross where the fronts meet, stairs along a
+     thin hole — both seen on the striped fixture).
+  2. **Texture transfer** (`healTexture`): per tile of the hole (tile =
+     brush diameter + 8 px, 16–96), the nearby offset (±1.5 tiles) whose
+     pixels best match the KNOWN ring around the tile by SSD, with the
+     source pixels for the whole hole known, is chosen, and the hole becomes
+     `L(p) + F(p+off) − L(p+off)`: the Telea fill's box-blur low-pass carries
+     the local colour, the matched patch's high-pass carries the grain. Tiles
+     with no usable ring (a brush bigger than the tile's margin) keep the
+     Telea fill. This is what a spot-healing brush does: borrow texture,
+     keep colour.
+  Measured on a 4×6 gradient with 1 px stripe texture, three dust dots (2.5–4
+  pt) and a 0.8 pt hair (`ui_heal.mjs`, `fx_heal.pdf`): dot regions after
+  healing mean/sd 118/7.1, 121/7.2, 144/5.1 against clean neighbours
+  115/7.3, 120/7.6, 144/5.1 (were 26/47, 28/49, 29/55); along the hair 112/13
+  against 102/2.5 beside it (was 2/12) — the stripes continue through every
+  spot. Four strokes + the texture search + the 300 DPI raster: 1.9 s.
+
+  **UI harness** (`ui_heal.mjs`, 19): engine pass and note, result token,
+  Retouch button present (no back button on a 1-sided job), modal opens and
+  renders at the page's aspect, brush slider, dab and drag strokes counted,
+  undo, four strokes, RETOUCHED download from the modal, Done, Artwork
+  summary, imposed filename `_RETOUCHED`, toolbar badge, job report note,
+  discard drops the flag. Found on the way: the stage mounts on the render
+  that lands the page, so the first paint has to follow that mount (`rev`
+  state) — the canvases were blank until the first stroke.
+
+  **Not here.** Clone stamp, dodge/burn, colour correction, editing text.
+  The healed page is RGB (as every rasterised page is); a flat spot or CMYK
+  tint on a retouched page prints as its RGB conversion, which is the raster
+  pass's known cost, now page-wide by the owner's decision.
+
   ### The bleed starts at the art's own edge, never at the finished size (1.63)
 
   Owner, after 1.62: "The finished size shouldn't matter to the bleed
