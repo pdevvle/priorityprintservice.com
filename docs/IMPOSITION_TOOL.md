@@ -743,6 +743,55 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### Order 87898: "the bleed addition won't mirror the pages — no reaction" (1.62)
+
+  Owner, trying to impose order 87898 (Armadillo 8-page saddle booklet) with
+  bleed added. Three faults, found by loading the order through a mocked
+  queue with the customer's real file (`ui_87898.mjs`, `fx_87898.pdf` —
+  customer file, do not publish elsewhere):
+
+  **1. The order was the wrong way up, and the refusal swallowed every
+  setting change.** The preset's defaults blob carries `customLong: 6.125,
+  customShort: 9.25, bindDir: "long"`, so the queue sent the page as 6.125
+  wide × 9.25 tall (portrait); every page in the file is landscape (9.125×6.25
+  media, 8.875×6 after bleed). The 1.21/1.30 orientation guard refused with
+  "Set Page width 8.875″ and Page height 6″", and because every control
+  change re-runs into the same refusal, switching Add bleed to Mirror changed
+  nothing on screen — the "no reaction". Now `boundOrientationSwap()` runs in
+  `imposeCore` before any bound layout: when the artwork's pages are clearly
+  the other way up from the spec, the two sizes are swapped (dimensions kept,
+  only which is the width changes), the layout is built on the swapped pair,
+  and a warning heads the report. The queue load does the same to the size
+  boxes with a notice, so screen and engine agree. The in-function guards stay
+  as a safety net. Square-ish pages or specs are left alone.
+
+  **2. "Has bleed" meant bleed on ANY axis.** `hasBleed` was `page wider OR
+  taller than the trim`. This file into a 9.25×6.125 finished size has 1/16″
+  past the trim top and bottom and nothing at the sides, so the synthesizer
+  stood down on every page whose top ring carried ink — Mirror fired on 3 of
+  8 pages. The coverage model (`ownBleed`) always took the MIN over the four
+  sides; the gate now agrees: bleed is bleed on every edge (`minRingPt > 1`),
+  and the note names the axis that has none. Mirror now fires on all 8.
+
+  **3. The jog pushed the outer bleed off the sheet.** An 18.5″ spread
+  jogged 0.5″ from the right of a 19″ sheet sat at x = 0, so its left bleed
+  — synthesized or real — was off the printable area (the report did say
+  "outer bleed falls outside the printable area on the left"). `blockOrigin()`
+  now centres an axis when the jog would push the bleed off it and centring
+  keeps block + bleed inside, with a warning naming the axis; Custom position
+  still places by hand.
+
+  Measured on the order's output at 144 DPI (ink fraction in the 0.125″ ring
+  outside each spread's trim, page 1, both spreads): Mirror off L 0.00 / R
+  0.00 → Mirror on L 0.69 / R 0.65; before fix 3 the left ring was off the
+  sheet and read 0.00 whatever the setting. `ui_sidebar.mjs` 30, `ui_pick.mjs`
+  17, `ui_orient2.mjs` green.
+
+  Still true for this order and worth the operator's eye: the file is built
+  for 8.875×6 with full 0.125″ bleed; the order says 9.25×6.125. At the
+  order's size the art is 1/16″ narrower than the trim on each side and the
+  mirror fills the gap; at 8.875×6 it needs no synthesis at all.
+
   ### Orientation on the sheet beside the size, and a priced count that does not fit is placed, not refused (1.61)
 
   Owner: "When I have an 8.5×11 sheet and I put a 4.25×2.5 object on it, I

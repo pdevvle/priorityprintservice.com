@@ -121,7 +121,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-20 01:00 UTC · IMPOSE-V1.61</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-29 02:00 UTC · IMPOSE-V1.62</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -428,6 +428,19 @@ function blockOrigin(layout, offset, warnings) {
     const bottom = mode === "custom" && isFinite(offset.bottom) ? Math.max(+offset.bottom, 0) : 0.5;
     x = s.long - right - totalW;
     y = bottom;
+  }
+  // The jog keeps the TRIM inside the printable area but used to let the
+  // outer BLEED fall off it: an 18.5″ spread jogged 0.5″ from the right of a
+  // 19″ sheet sat at x = 0 and its left bleed was off the sheet — order 87898
+  // (2026-10-29), where the synthesized bleed then had nowhere to print on
+  // the left of every spread. When the jog would push bleed off an axis and
+  // centring keeps block + bleed inside, centre that axis and say so (1.62).
+  if (mode !== "center") {
+    const b = layout.bleed || 0;
+    const jogged = [];
+    if ((x - b < P.x0 - EPS || x + totalW + b > P.x1 + EPS) && totalW + 2 * b <= (P.x1 - P.x0) + EPS) { x = (s.long - totalW) / 2; jogged.push("across"); }
+    if ((y - b < P.y0 - EPS || y + totalH + b > P.y1 + EPS) && totalH + 2 * b <= (P.y1 - P.y0) + EPS) { y = (s.short - totalH) / 2; jogged.push("down"); }
+    if (jogged.length) warnings.push(`Block centred ${jogged.join(" and ")} instead of jogged to the corner — the jog would have pushed the outer bleed off the printable area${layout.fillSheet ? "" : " (set Position to Custom to place it by hand)"}.`);
   }
   // A block wider or taller than the printable area (layout.overflow, 1.56)
   // is centred on that axis so the spill splits evenly between the two edges
@@ -1856,8 +1869,18 @@ function resolveSideArt(page, pieceLong, pieceShort, cellLandscape, bleed, fitMo
       }
     }
   }
-  const hasBleed = (W - trimRaw.w > 1) || (H - trimRaw.h > 1);
-  if (!hasBleed) notes.push("no bleed available — cut lines may show paper white");
+  // Bleed means bleed on EVERY edge. The old test (page wider OR taller than
+  // the trim) called a page "bleed-inclusive" when only one axis carried any
+  // — order 87898 (2026-10-29): 9.125×6.25 pages into a 9.25×6.125 finished
+  // size had 1/16″ past the trim top and bottom and nothing at the sides, and
+  // the synthesizer stood down on every page whose top ring had ink, so
+  // "Mirror" did nothing on 5 of 8 pages. The coverage model below already
+  // takes the MIN over the four sides (ownBleed); the gate now agrees with it.
+  const minRingPt = Math.min(trimRaw.x, W - trimRaw.x - trimRaw.w, trimRaw.y, H - trimRaw.y - trimRaw.h);
+  const hasBleed = minRingPt > 1;
+  if (!hasBleed) notes.push(minRingPt < -1
+    ? `no bleed available — the art is smaller than the finished size on ${(trimRaw.x < -1 || W - trimRaw.x - trimRaw.w < -1) ? "the width" : "the height"}; cut lines may show paper white`
+    : (W - trimRaw.w > 1 || H - trimRaw.h > 1) ? "bleed on one axis only — the other edges have none; cut lines there may show paper white" : "no bleed available — cut lines may show paper white");
   // How far the art's own content runs past its trim, in PLACED inches — the
   // smallest of the four sides, so it is safe on every edge and needs no
   // rotation mapping (a min over all four is rotation-invariant). 0 for
@@ -2614,6 +2637,35 @@ function marksOf(spec) {
   const base = spec.marks !== false;
   const on = (v, d) => (v == null ? d : v !== false);
   return { showMarks: base, showFold: on(spec.foldMarks, base), showSlug: on(spec.slug, base) };
+}
+
+// A bound product's two sizes are width × height — the spine sits on the
+// height edge — and an order can arrive with them the wrong way round: order
+// 87898 (2026-10-29) came off the queue as 6.125 wide × 9.25 tall from a
+// preset whose customLong/customShort were stored swapped, while every page
+// in the file was landscape. The 1.21/1.30 guards refused that with "set Page
+// width … Page height …", and since every setting change re-ran into the same
+// refusal, the owner's add-bleed switch "did nothing". The spec's orientation
+// is a fact the artwork settles: when the pages are clearly the other way up,
+// the two sizes are swapped (the dimensions are kept — only which is the
+// width changes), the layout is built on the swapped pair, and a warning at
+// the top of the report says so. A square-ish page or spec leaves it alone.
+async function boundOrientationSwap(artBytes, spec) {
+  const w = +spec.trimLong, h = +spec.trimShort;
+  if (!(w > 0 && h > 0) || Math.abs(w - h) <= 0.03) return null;
+  let det = null;
+  try {
+    const bleed = isFinite(spec.bleed) && spec.bleed !== null && spec.bleed !== "" ? +spec.bleed : BLEED;
+    const d = await PL.PDFDocument.load(await ppsToPdfBytes(artBytes, "artwork"), { ignoreEncryption: true, updateMetadata: false });
+    det = detectTrim(d, bleed);
+  } catch (e) { return null; }   // detection is best-effort; the in-function guards still stand
+  if (!det || !(det.w > 0 && det.h > 0) || Math.abs(det.w - det.h) <= 0.03) return null;
+  const specPortrait = h > w, srcPortrait = det.h > det.w;
+  if (specPortrait === srcPortrait) return null;
+  return {
+    spec: { ...spec, trimLong: h, trimShort: w },
+    note: `⚠ PAGE ORIENTATION SWAPPED: the order says ${w} wide × ${h} tall (${specPortrait ? "portrait" : "landscape"}) but the artwork's pages are ${det.w}×${det.h}″ (${srcPortrait ? "portrait" : "landscape"}, ${det.method}). Imposed as ${h} wide × ${w} tall so the spine sits on the ${srcPortrait ? "long" : "short"} edge the file was built for — same two dimensions, swapped. Check the order if that is not the book the customer wants.`,
+  };
 }
 
 async function imposeSaddle(artBytes, spec, layout) {
@@ -3955,11 +4007,21 @@ async function imposeCore(artBytes, backBytes, spec, gangFiles) {
   // taking a share of the cells. Ignores multiMode; qty = press sheets.
   const gang = Array.isArray(gangFiles) && gangFiles.filter(g => g && g.bytes).length >= 2
     ? gangFiles.filter(g => g && g.bytes) : null;
+  // A bound spec whose orientation contradicts the artwork is turned to match
+  // (1.62) — see boundOrientationSwap. The swap note rides on the result.
+  let swapNote = null;
+  if (isBoundCalc(spec.calc) && artBytes && !gang) {
+    const sw = await boundOrientationSwap(artBytes, spec);
+    if (sw) { spec = sw.spec; swapNote = sw.note; }
+  }
   if (spec.calc === "perfect-bound") {
     if (gang) throw new Error("Gang combo is for flats/stickers — a perfect bound book is one document");
-    return imposePerfectBound(artBytes, backBytes, spec);
+    const r = await imposePerfectBound(artBytes, backBytes, spec);
+    if (swapNote && r && r.parts) r.parts.forEach(pt => { pt.warnings = [swapNote, ...(pt.warnings || [])]; });
+    return r;
   }
   const layout = computeLayout(spec.calc, spec.trimLong, spec.trimShort, layoutOpts(spec));
+  if (swapNote) layout.warnings.unshift(swapNote);
   if (spec.calc === "saddle") {
     if (gang) throw new Error("Gang combo is for flats/stickers — a saddle booklet is one document");
     return imposeSaddle(artBytes, spec, layout);
@@ -5590,6 +5652,13 @@ function App() {
         const specL = Math.max(s.trimLong, s.trimShort), specS = Math.min(s.trimLong, s.trimShort);
         if (Math.abs(Math.max(det.w, det.h) - specL) > 0.03 || Math.abs(Math.min(det.w, det.h) - specS) > 0.03) {
           note = `⚠ Artwork measures ${det.w}×${det.h}″ (${det.method}) but order #${row.order_id} is specced ${specL}×${specS}″ — verify before printing. ` + note;
+        }
+        // Bound product the wrong way up (1.62): the boxes follow the artwork,
+        // dimensions kept, so the engine's swap and the screen agree.
+        if (isBoundCalc(s.calc) && Math.abs(det.w - det.h) > 0.03 && Math.abs(s.trimLong - s.trimShort) > 0.03
+            && ((s.trimShort > s.trimLong) !== (det.h > det.w))) {
+          setTrimLong(s.trimShort); setTrimShort(s.trimLong);
+          note = `⚠ Order #${row.order_id} says ${s.trimLong} wide × ${s.trimShort} tall but the pages are ${det.h > det.w ? "portrait" : "landscape"} — size set to ${s.trimShort} wide × ${s.trimLong} tall to match the file (check the order). ` + note;
         }
       } catch (e2) { /* best-effort */ }
       setNotice(note);
