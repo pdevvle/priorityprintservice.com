@@ -2,6 +2,10 @@
 
 **Date:** 2026-07-29 · **Status:** spike complete, verdict below · **Code:** `designer/`
 
+> **2026-10-11:** the editor direction moved to DesignCraft's engine with the calculator as the
+> store — see `docs/DESIGNCRAFT_STORE_DESIGN.md`. This file's verdict, "what not to do" and
+> export assertions still stand; `designer/` is retired once that design's P1 ships.
+
 This is the pick-up-cold document. It is deliberately blunt about what does not
 work. If you are returning to this after months away, read this file and
 `designer/README.md`, then run `cd designer && npm test`.
