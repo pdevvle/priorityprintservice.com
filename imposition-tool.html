@@ -135,7 +135,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-10-29 09:00 UTC · IMPOSE-V1.64</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-11-02 00:00 UTC · IMPOSE-V1.65</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -3851,11 +3851,112 @@ const healSlug = (heal) => {
 // designs are a single DeviceCMYK fill so they separate cleanly; a custom
 // upload is embedded as a page and fitted to the sheet.
 const SLIP_DESIGNS = { C: [1, 0, 0, 0], M: [0, 1, 0, 0], Y: [0, 0, 1, 0], K: [0, 0, 0, 1] };
+// ── Insertion rules (1.65) ───────────────────────────────────────────────
+// One rule shape for blank PAGES into the source run and slipsheets / blank
+// SHEETS into the output, so the operator says where in plain terms instead
+// of typing a whole sequence:
+//   after  <list>     before <list>     every <N> [and after the last]
+//   start             end               pad to a multiple of <M> (pages only)
+// `list` takes numbers, runs and `last`; `count` is how many to put at each
+// spot. Everything resolves to explicit positions over the real total, and a
+// number past the end is an error, never a silent skip (the sequence rule).
+const RULE_MODES = ["after", "before", "every", "start", "end", "pad"];
+function ruleList(txt, total, noun) {
+  const out = new Set(), errors = [];
+  const toks = String(txt || "").split(/[,\s]+/).filter(Boolean);
+  for (const tok of toks) {
+    const m = tok.toLowerCase().match(/^(last|end|(\d+)(?:-(\d+))?)$/);
+    if (!m) { errors.push(`"${tok}" is not a ${noun} number`); continue; }
+    if (m[1] === "last" || m[1] === "end") { if (total) out.add(total); continue; }
+    let a = +m[2], b = m[3] ? +m[3] : a; if (b < a) [a, b] = [b, a];
+    for (let k = a; k <= b; k++) { if (k < 1 || (total && k > total)) { errors.push(`${noun} ${k} does not exist${total ? ` (there are ${total})` : ""}`); break; } out.add(k); }
+  }
+  if (!toks.length) errors.push(`no ${noun} numbers given`);
+  return { set: out, errors };
+}
+// → { items, errors, added, text }: items over 1..total with 0 = blank, as
+// parseSeq produces, so resequenceDoc applies them unchanged.
+function blankRuleItems(rule, total, noun) {
+  noun = noun || "page";
+  const mode = rule && rule.mode;
+  const count = Math.max(1, Math.min(50, Math.floor(+(rule && rule.count) || 1)));
+  const errors = [];
+  if (!mode || mode === "off") return { items: null, errors, added: 0, text: "" };
+  if (!total) return { items: null, errors: [`${noun} count unknown`], added: 0, text: "" };
+  const all = Array.from({ length: total }, (_, i) => i + 1);
+  const blanks = () => Array(count).fill(0);
+  let items = [];
+  if (mode === "after" || mode === "before") {
+    const L = ruleList(rule.list, total, noun); errors.push(...L.errors);
+    for (const p of all) { if (mode === "before" && L.set.has(p)) items.push(...blanks()); items.push(p); if (mode === "after" && L.set.has(p)) items.push(...blanks()); }
+  } else if (mode === "every") {
+    const N = Math.floor(+rule.every);
+    if (!(N >= 1)) errors.push("every N: N must be 1 or more");
+    else for (const p of all) { items.push(p); if (p % N === 0 && (p < total || rule.tail)) items.push(...blanks()); }
+  } else if (mode === "start") items = [...blanks(), ...all];
+  else if (mode === "end") items = [...all, ...blanks()];
+  else if (mode === "pad") {
+    const M = Math.floor(+rule.padTo);
+    if (!(M >= 2)) errors.push("pad: the multiple must be 2 or more");
+    else {
+      const need = (M - (total % M)) % M, pad = Array(need).fill(0);
+      items = rule.padWhere === "beforeLast" && total >= 1 ? [...all.slice(0, -1), ...pad, total] : [...all, ...pad];
+    }
+  } else errors.push(`unknown rule "${mode}"`);
+  if (items.length > SEQ_MAX) errors.push(`result longer than ${SEQ_MAX} ${noun}s`);
+  const added = items.filter(v => v === 0).length;
+  return { items: errors.length ? null : items, errors, added, text: describeSeq(items) };
+}
+function ruleWords(rule, noun) {
+  const c = Math.max(1, Math.floor(+(rule && rule.count) || 1)), each = c === 1 ? `a blank ${noun}` : `${c} blank ${noun}s`;
+  switch (rule && rule.mode) {
+    case "after": return `${each} after ${noun}${/[,\s-]/.test(String(rule.list || "").trim()) ? "s" : ""} ${rule.list}`;
+    case "before": return `${each} before ${noun}${/[,\s-]/.test(String(rule.list || "").trim()) ? "s" : ""} ${rule.list}`;
+    case "every": return `${each} after every ${+rule.every === 1 ? "" : rule.every + " "}${noun}${+rule.every === 1 ? "" : "s"}${rule.tail ? " including the last" : ""}`;
+    case "start": return `${each} at the start`;
+    case "end": return `${each} at the end`;
+    case "pad": return `blank ${noun}s to pad to a multiple of ${rule.padTo}${rule.padWhere === "beforeLast" ? " (before the last page)" : ""}`;
+    default: return "";
+  }
+}
+// Blank pages into the SOURCE run (after the page sequence, if any).
+async function insertBlankPagesBytes(bytes, rule) {
+  const doc = await loadPdf(bytes, "artwork"); ensurePageContents(doc);
+  const n = doc.getPageCount();
+  const r = blankRuleItems(rule, n, "page");
+  if (r.errors.length) throw new Error(`Blank pages: ${r.errors.join("; ")}. The run has ${n} page${n === 1 ? "" : "s"}.`);
+  if (!r.items || !r.added) return { bytes, count: n, added: 0, note: `Blank pages: ${ruleWords(rule, "page")} — nothing to add on a ${n}-page run.` };
+  resequenceDoc(doc, r.items, 1, null);
+  return { bytes: await doc.save({ useObjectStreams: false }), count: r.items.length, added: r.added,
+           note: `Blank pages: ${ruleWords(rule, "page")} — ${r.added} added, ${n} → ${r.items.length} pages (${r.text}). Page numbers in the notes below refer to this run.` };
+}
+// Slipsheets / blank sheets into the OUTPUT. `slip.when` is a rule mode
+// (before/after a list, every N, start, end); `slip.count` sheets per spot;
+// `slip.design` C/M/Y/K solid, blank (nothing drawn — paper white), custom.
+function slipTargets(slip, sheets) {
+  const when = slip.when || "after";
+  const out = [], errors = [];
+  if (when === "before" || when === "after") {
+    const L = ruleList(slip.sheets, sheets, "sheet"); errors.push(...L.errors);
+    for (const sNo of L.set) out.push({ sNo, where: when });
+  } else if (when === "every") {
+    const N = Math.floor(+slip.every);
+    if (!(N >= 1)) errors.push("every N: N must be 1 or more");
+    else for (let sNo = N; sNo <= sheets; sNo += N) if (sNo < sheets || slip.tail) out.push({ sNo, where: "after" });
+  } else if (when === "start") out.push({ sNo: 1, where: "before" });
+  else if (when === "end") out.push({ sNo: sheets, where: "after" });
+  else errors.push(`unknown placement "${when}"`);
+  return { targets: out, errors };
+}
 async function insertSlipsheets(bytes, slip, duplex, labels) {
   const doc = await PL.PDFDocument.load(bytes, { ignoreEncryption: true });
   const n = doc.getPageCount(), per = duplex ? 2 : 1, sheets = Math.ceil(n / per);
-  const targets = parsePageList(slip.sheets, sheets);
-  if (!targets.length) return { bytes, labels, note: `Slipsheet: no valid sheet number in "${slip.sheets || ""}" (output has ${sheets} sheet${sheets === 1 ? "" : "s"}) — nothing inserted.` };
+  const T = slipTargets(slip, sheets);
+  const isBlank = slip.design === "blank";
+  const what = isBlank ? "Blank sheet" : "Slipsheet";
+  if (T.errors.length) throw new Error(`${what}s: ${T.errors.join("; ")}. The imposed output has ${sheets} physical sheet${sheets === 1 ? "" : "s"}.`);
+  const count = Math.max(1, Math.min(50, Math.floor(+slip.count || 1)));
+  if (!T.targets.length) return { bytes, labels, note: `${what}s: ${ruleWords({ ...slip, mode: slip.when, list: slip.sheets }, "sheet")} — nothing to insert on a ${sheets}-sheet output.` };
   const { width, height } = doc.getPage(0).getSize();
   let custom = null;
   if (slip.design === "custom") {
@@ -3865,9 +3966,10 @@ async function insertSlipsheets(bytes, slip, duplex, labels) {
     const idx = cd.getPageCount() >= 2 ? [0, 1] : [0];
     custom = await doc.embedPdf(cd, idx);
   }
-  const designLabel = slip.design === "custom" ? `custom (${slip.customName || "upload"})` : `solid ${slip.design}`;
+  const designLabel = isBlank ? "blank (paper white)" : slip.design === "custom" ? `custom (${slip.customName || "upload"})` : `solid ${slip.design}`;
   const newLabels = Array.isArray(labels) ? labels.slice() : null;
   const draw = (page, face) => {
+    if (isBlank) return;
     if (custom) {
       const emb = custom[face] || custom[0];
       const sc = Math.min(width / emb.width, height / emb.height);
@@ -3877,19 +3979,22 @@ async function insertSlipsheets(bytes, slip, duplex, labels) {
       page.drawRectangle({ x: 0, y: 0, width, height, color: PL.cmyk(c, m, y, k) });
     }
   };
-  // Highest sheet first, so earlier insertion points are still valid.
-  for (const sNo of targets.slice().sort((a, b) => b - a)) {
-    const at = slip.when === "after" ? Math.min(n, sNo * per) : (sNo - 1) * per;
-    for (let face = per - 1; face >= 0; face--) {
-      const pg = doc.insertPage(at, [width, height]);
+  // Highest insertion point first, so earlier ones are still valid.
+  const spots = T.targets.map(t => ({ ...t, at: t.where === "after" ? Math.min(n, t.sNo * per) : (t.sNo - 1) * per }))
+                         .sort((a, b) => b.at - a.at);
+  for (const sp of spots) {
+    for (let k = 0; k < count; k++) for (let face = per - 1; face >= 0; face--) {
+      const pg = doc.insertPage(sp.at, [width, height]);
       draw(pg, face);
-      if (newLabels) newLabels.splice(at, 0, `SLIPSHEET ${per === 2 ? (face === 0 ? "FRONT" : "BACK") + " " : ""}— ${designLabel.toUpperCase()} (${slip.when} sheet ${sNo})`);
+      if (newLabels) newLabels.splice(sp.at, 0, `${isBlank ? "BLANK SHEET" : "SLIPSHEET"} ${per === 2 ? (face === 0 ? "FRONT" : "BACK") + " " : ""}— ${designLabel.toUpperCase()} (${sp.where} sheet ${sp.sNo})`);
     }
   }
+  const added = spots.length * count;
+  const list = spots.slice().sort((a, b) => a.sNo - b.sNo).map(t => `${t.where} ${t.sNo}`);
   return {
     bytes: await doc.save({ useObjectStreams: false }),
     labels: newLabels,
-    note: `Slipsheet (${designLabel}) inserted ${slip.when} sheet${targets.length === 1 ? "" : "s"} ${targets.join(", ")} — ${targets.length} physical sheet${targets.length === 1 ? "" : "s"} added (${targets.length * per} side${targets.length * per === 1 ? "" : "s"}); not counted in the run figures above.`,
+    note: `${what}${added === 1 ? "" : "s"} (${designLabel}): ${ruleWords({ ...slip, mode: slip.when, list: slip.sheets }, "sheet")} — ${added} physical sheet${added === 1 ? "" : "s"} added (${added * per} side${added * per === 1 ? "" : "s"}; ${list.length <= 12 ? list.join(", ") : list.slice(0, 12).join(", ") + " …"}); not counted in the run figures above.`,
   };
 }
 
@@ -4305,6 +4410,13 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
     const r = await remapPagesBytes(artBytes, spec.pageSeq);
     artBytes = r.bytes; seqNote = r.note;
   }
+  // Blank-page rule AFTER the page sequence: its positions refer to the run
+  // as it will be paginated. A rule that adds nothing still says so.
+  if (spec.blankPages && spec.blankPages.mode && spec.blankPages.mode !== "off" && artBytes) {
+    await progress("Inserting blank pages", 0.18);
+    const r = await insertBlankPagesBytes(artBytes, spec.blankPages);
+    artBytes = r.bytes; seqNote = seqNote ? seqNote + " " + r.note : r.note;
+  }
   await progress("Laying out", 0.2);
   const res = await imposeCore(artBytes, backBytes, spec, gangFiles);
   const parts = res.parts || [res];
@@ -4338,7 +4450,7 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
     // Sheet sequence BEFORE slipsheets, so a slipsheet's sheet number refers to
     // the physical sheets that will actually come off the press.
     if (p.preview && (spec.sheetSeq || (spec.slip && spec.slip.on))) {
-      p.warnings = [...(p.warnings || []), `Preview shows the first ${p.preview.shown} of ${p.preview.total} sheets — the sheet sequence / slipsheets are applied on the full run (Impose all, Download or Send to Drive).`];
+      p.warnings = [...(p.warnings || []), `Preview shows the first ${p.preview.shown} of ${p.preview.total} sheets — the sheet sequence / slipsheets / blank sheets are applied on the full run (Impose all, Download or Send to Drive).`];
     }
     if (spec.sheetSeq && !p.preview) {
       await progress("Applying sheet sequence", 0.94);
@@ -4347,7 +4459,7 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
       p.warnings = [...(p.warnings || []), r.note];
     }
     if (spec.slip && spec.slip.on && !p.preview) {
-      await progress("Inserting slipsheets", 0.96);
+      await progress(spec.slip.design === "blank" ? "Inserting blank sheets" : "Inserting slipsheets", 0.96);
       const r = await insertSlipsheets(p.bytes, spec.slip, duplex, p.pageLabels);
       p.bytes = r.bytes; if (r.labels) p.pageLabels = r.labels;
       p.warnings = [...(p.warnings || []), r.note];
@@ -4803,7 +4915,7 @@ function imposedFilename(spec, layout) {
 }
 
 // Engine surface for headless tests / console debugging
-window.__ppsImpose = { parseSeq, imposePdf, computeLayout, flatImp, stickerImp, parseManifest, specFromRow, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf, sha256Hex, approvalState, BOOK_CALCS, isBoundCalc, isBookCalc, loadPdf, convertAlphaMasks, flattenVectorMasks, inpaintFMM, healTexture, applyStrokes, healPagesBytes, renderPageRaw };
+window.__ppsImpose = { parseSeq, imposePdf, computeLayout, flatImp, stickerImp, parseManifest, specFromRow, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf, sha256Hex, approvalState, BOOK_CALCS, isBoundCalc, isBookCalc, loadPdf, convertAlphaMasks, flattenVectorMasks, inpaintFMM, healTexture, applyStrokes, healPagesBytes, renderPageRaw, blankRuleItems, insertBlankPagesBytes, slipTargets, insertSlipsheets };
 
 // ═══════════════════════════════════════════════════════════════
 // UI
@@ -4821,6 +4933,15 @@ function SeqNote({ txt, total, noun, what }) {
   const r = parseSeq(txt, total, noun);
   if (r.errors.length) return <div style={{ fontSize: 11.5, color: "#f87171", marginTop: 3 }}>✕ {r.errors.join("; ")}{total == null ? ` — ${noun === "sheet" ? "impose a file" : "drop the artwork"} to check against the ${noun} count` : ""}</div>;
   return <div style={{ fontSize: 11.5, color: "#4ade80", marginTop: 3 }}>→ {r.items.length} {what}{total != null ? ` (from ${total})` : ""}: {r.text}</div>;
+}
+
+// Live readout for an insertion rule (blank pages / slipsheets).
+function RuleNote({ rule, total, noun, what }) {
+  if (!rule || !rule.mode || rule.mode === "off") return null;
+  const r = blankRuleItems(rule, total, noun);
+  if (r.errors.length) return <div style={{ fontSize: 11.5, color: "#f87171", marginTop: 3 }} data-rule-note="err">✕ {r.errors.join("; ")}{!total ? ` — ${noun === "sheet" ? "impose a file" : "drop the artwork"} to check against the ${noun} count` : ""}</div>;
+  if (!r.added) return <div style={{ fontSize: 11.5, color: "#fbbf24", marginTop: 3 }} data-rule-note="none">→ nothing to add on {total} {noun}s</div>;
+  return <div style={{ fontSize: 11.5, color: "#4ade80", marginTop: 3 }} data-rule-note="ok">→ {r.added} {what}{r.added === 1 ? "" : "s"} added, {total} → {r.items.length} {noun}s: {r.text}</div>;
 }
 
 function Field({ label, children, style }) {
@@ -5695,6 +5816,17 @@ function App() {
   const [flattenAnnots, setFlattenAnnots] = useState(true);
   const [rasterPagesTxt, setRasterPagesTxt] = useState("");     // last-resort page rasteriser (job-specific, not a setup field)        // a page larger than the finished size with no TrimBox: crop at 100% (centred) | scale to fit
   const [slipOn, setSlipOn] = useState(false);
+  const [slipEvery, setSlipEvery] = useState("2");       // 1.65: every N sheets
+  const [slipCount, setSlipCount] = useState("1");       // sheets per insertion
+  const [slipTail, setSlipTail] = useState(false);       // every N: also after the last
+  const [blankMode, setBlankMode] = useState("off");     // 1.65: blank pages into the source run
+  const [blankList, setBlankList] = useState("");
+  const [blankEvery, setBlankEvery] = useState("2");
+  const [blankCount, setBlankCount] = useState("1");
+  const [blankTail, setBlankTail] = useState(false);
+  const [blankPadTo, setBlankPadTo] = useState("4");
+  const [blankPadWhere, setBlankPadWhere] = useState("end");
+  const blankRule = blankMode === "off" ? null : { mode: blankMode, list: blankList, every: +blankEvery || 0, count: +blankCount || 1, tail: blankTail, padTo: +blankPadTo || 0, padWhere: blankPadWhere };
   const [slipWhen, setSlipWhen] = useState("before");
   const [slipSheets, setSlipSheets] = useState("");
   const [slipDesign, setSlipDesign] = useState("K");       // C | M | Y | K | custom
@@ -5725,6 +5857,9 @@ function App() {
     greyPagesTxt: [greyPagesTxt, setGreyPagesTxt], splitSpreads: [splitSpreads, setSplitSpreads], artFit: [artFit, setArtFit],
     stripOverprint: [stripOverprint, setStripOverprint], fixHairlines: [fixHairlines, setFixHairlines], flattenAnnots: [flattenAnnots, setFlattenAnnots],
     slipOn: [slipOn, setSlipOn], slipWhen: [slipWhen, setSlipWhen], slipSheets: [slipSheets, setSlipSheets], slipDesign: [slipDesign, setSlipDesign],
+    slipEvery: [slipEvery, setSlipEvery], slipCount: [slipCount, setSlipCount], slipTail: [slipTail, setSlipTail],
+    blankMode: [blankMode, setBlankMode], blankList: [blankList, setBlankList], blankEvery: [blankEvery, setBlankEvery], blankCount: [blankCount, setBlankCount],
+    blankTail: [blankTail, setBlankTail], blankPadTo: [blankPadTo, setBlankPadTo], blankPadWhere: [blankPadWhere, setBlankPadWhere],
   };
   const SETUP_JOB_KEYS = ["calc", "trimLong", "trimShort", "sides", "spine", "pbPart"];
   const captureSetup = () => { const o = {}; for (const k in SETUP_FIELDS) o[k] = SETUP_FIELDS[k][0]; return JSON.parse(JSON.stringify(o)); };
@@ -5901,7 +6036,8 @@ function App() {
     splitSpreads, artFit, stripOverprint, fixHairlines, flattenAnnots,
     rasterPages: rasterPagesTxt.trim() || null,
     heal: healSummary ? heal : null,
-    slip: slipOn ? { on: true, when: slipWhen, sheets: slipSheets, design: slipDesign,
+    blankPages: blankRule,
+    slip: slipOn ? { on: true, when: slipWhen, sheets: slipSheets, design: slipDesign, every: +slipEvery || 0, count: +slipCount || 1, tail: slipTail,
                      customBytes: slipCustom && slipCustom.bytes, customName: slipCustom && slipCustom.name } : null,
     // Per-half layout controls. Shaped for the engine (pbPartOverrides), which
     // ignores anything null, so a half the operator never touched behaves
@@ -5910,7 +6046,7 @@ function App() {
   }), [calc, trimLong, trimShort, allowMissingFonts, sides, qty, sheetFlip, backRotate, jobName, orderRef, itemRef, marks, foldMarks, slugOn, allowBestFit,
        sheetSel, sheetLong, sheetShort, sheetMargin, sheetPortrait,
        efficient, gutterMode, offsetMode, offsetRight, offsetBottom, pattern, manualPattern, forceRotated, artRotate, bleedIn, multiMode, addBleed, addBleedSmart, streakEps, artInset, artScale, creep, addBleedPages,
-       gapCols, gapRows, gapFill, isSaddle, isBook, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGutsOrder, pbGrids, greyPagesTxt, pageSeqTxt, sheetSeqTxt, splitSpreads, artFit, stripOverprint, fixHairlines, flattenAnnots, rasterPagesTxt, heal, healSummary, slipOn, slipWhen, slipSheets, slipDesign, slipCustom]);
+       gapCols, gapRows, gapFill, isSaddle, isBook, gridOn, gridAcross, gridDown, gridSheet, repOn, repN, sigOrder, spine, isPB, pbPart, pbGutsOrder, pbGrids, greyPagesTxt, pageSeqTxt, sheetSeqTxt, splitSpreads, artFit, stripOverprint, fixHairlines, flattenAnnots, rasterPagesTxt, heal, healSummary, slipOn, slipWhen, slipSheets, slipDesign, slipCustom, slipEvery, slipCount, slipTail, blankMode, blankList, blankEvery, blankCount, blankTail, blankPadTo, blankPadWhere]);
   const debSpec = useDebounced(spec, 450);
 
   // Live layout (no artwork needed) — schematic + parity badge
@@ -7182,7 +7318,7 @@ function App() {
           </Acc>
 
           <Acc id="press" title="Press prep" open={secOpen.press} onToggle={() => toggleSec("press")}
-               badge={(greyPagesTxt.trim() || slipOn || pageSeqTxt.trim() || sheetSeqTxt.trim() || rasterPagesTxt.trim()) ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>ON</span> : null}>
+               badge={(greyPagesTxt.trim() || slipOn || blankMode !== "off" || pageSeqTxt.trim() || sheetSeqTxt.trim() || rasterPagesTxt.trim()) ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>ON</span> : null}>
             <div style={{ border: "1px solid rgba(255,255,255,.12)", borderRadius: 8, padding: "10px 12px", marginBottom: 10, background: "rgba(255,255,255,.02)" }}>
               <span className="lbl" style={{ margin: "0 0 6px", display: "block" }}>Press safety <span style={{ color: "rgba(255,255,255,.4)", fontWeight: 400 }}>— fixes for things that look right on screen and print wrong on the RIP; each is reported in the Job report</span></span>
               {[["stripOverprint", stripOverprint, setStripOverprint, "Remove overprint", "white or light objects set to overprint vanish on the press"],
@@ -7211,6 +7347,44 @@ function App() {
               </div>
             </Field>
             <div style={{ borderTop: "1px solid rgba(255,255,255,.08)", paddingTop: 10, marginTop: 4 }}>
+              <Field label="Insert blank pages — into the source run">
+                <Seg value={blankMode} onChange={setBlankMode} dataAttr="data-blank-mode" block
+                     options={[{ v: "off", l: "Off" }, { v: "after", l: "After…" }, { v: "before", l: "Before…" }, { v: "every", l: "Every N" }, { v: "start", l: "Start" }, { v: "end", l: "End" }, { v: "pad", l: "Pad to…" }]} />
+                {blankMode !== "off" && (
+                  <div className="imp-row" style={{ gap: 10, alignItems: "flex-end", marginTop: 8, flexWrap: "wrap" }}>
+                    {(blankMode === "after" || blankMode === "before") && (
+                      <Field label={`${blankMode === "after" ? "After" : "Before"} page(s)`} style={{ flex: 1, minWidth: 140, marginBottom: 0 }}>
+                        <input type="text" value={blankList} data-blank-list onChange={e => setBlankList(e.target.value)} placeholder="e.g. 3, 7, 10-12, last" />
+                      </Field>
+                    )}
+                    {blankMode === "every" && (
+                      <Field label="Every N pages" style={{ flex: "0 0 auto", marginBottom: 0 }}>
+                        <input type="number" min="1" step="1" value={blankEvery} data-blank-every style={{ width: 70 }} onChange={e => setBlankEvery(e.target.value)} />
+                      </Field>
+                    )}
+                    {blankMode === "pad" && (<>
+                      <Field label="Multiple of" style={{ flex: "0 0 auto", marginBottom: 0 }}>
+                        <input type="number" min="2" step="1" value={blankPadTo} data-blank-padto style={{ width: 70 }} onChange={e => setBlankPadTo(e.target.value)} />
+                      </Field>
+                      <Field label="Put the padding" style={{ flex: "0 0 auto", marginBottom: 0 }}>
+                        <Seg value={blankPadWhere} onChange={setBlankPadWhere} dataAttr="data-blank-padwhere" options={[{ v: "end", l: "At the end" }, { v: "beforeLast", l: "Before the last page" }]} />
+                      </Field>
+                    </>)}
+                    {blankMode !== "pad" && (
+                      <Field label="Blanks per spot" style={{ flex: "0 0 auto", marginBottom: 0 }}>
+                        <input type="number" min="1" max="50" step="1" value={blankCount} data-blank-count style={{ width: 70 }} onChange={e => setBlankCount(e.target.value)} />
+                      </Field>
+                    )}
+                    {blankMode === "every" && <Check checked={blankTail} onChange={setBlankTail} label="also after the last page" dataAttr="data-blank-tail" style={{ marginBottom: 6 }} />}
+                  </div>
+                )}
+                <RuleNote rule={blankRule} total={art ? (pageSeqTxt.trim() ? (parseSeq(pageSeqTxt, art.pageCount, "page").items.length || null) : art.pageCount) : null} noun="page" what="blank page" />
+                <div className="imp-hint">
+                  Blank pages go into the run the imposition paginates — every other page for one-sided reading, a blank after a chapter end, or <b>Pad to 4</b> to bring a booklet to a signature multiple (put the padding before the last page to keep the back cover last). Applied after the page sequence above, so its numbers refer to that run.
+                </div>
+              </Field>
+            </div>
+            <div style={{ borderTop: "1px solid rgba(255,255,255,.08)", paddingTop: 10, marginTop: 4 }}>
               <Field label="Sheet sequence — imposed sheets (repeat or reorder physical sheets)">
                 <input type="text" value={sheetSeqTxt} onChange={e => setSheetSeqTxt(e.target.value)} placeholder="e.g. 1x3, 2-4, blank   (empty = sheets as imposed)" />
                 <SeqNote txt={sheetSeqTxt} total={viewRes && viewRes.sheetsImposed != null ? viewRes.sheetsImposed : null} noun="sheet" what="sheets" />
@@ -7221,20 +7395,34 @@ function App() {
               </Field>
             </div>
             <div style={{ borderTop: "1px solid rgba(255,255,255,.08)", paddingTop: 10, marginTop: 4 }}>
-              <Check checked={slipOn} onChange={setSlipOn} label={<b>Insert slipsheets</b>} hint="a coloured or custom sheet before or after chosen output sheets" />
+              <Check checked={slipOn} onChange={setSlipOn} label={<b>Insert blank sheets / slipsheets</b>} hint="a blank, coloured or custom physical sheet into the output — after chosen sheets, every N, at the start or the end" dataAttr="data-slip-on" />
               {slipOn && (
                 <div>
-                  <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
-                    <Field label="When" style={{ flex: "0 0 auto" }}>
-                      <Seg value={slipWhen} onChange={setSlipWhen} options={[{ v: "before", l: "Before" }, { v: "after", l: "After" }]} />
+                  <Field label="Where">
+                    <Seg value={slipWhen} onChange={setSlipWhen} dataAttr="data-slip-when" block
+                         options={[{ v: "after", l: "After…" }, { v: "before", l: "Before…" }, { v: "every", l: "Every N" }, { v: "start", l: "Start" }, { v: "end", l: "End" }]} />
+                  </Field>
+                  <div className="imp-row" style={{ gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+                    {(slipWhen === "before" || slipWhen === "after") && (
+                      <Field label={`${slipWhen === "after" ? "After" : "Before"} sheet(s) — imposed output`} style={{ flex: 1, minWidth: 140 }}>
+                        <input type="text" value={slipSheets} data-slip-sheets onChange={e => setSlipSheets(e.target.value)} placeholder="e.g. 1, 5, 10-12, last" />
+                      </Field>
+                    )}
+                    {slipWhen === "every" && (
+                      <Field label="Every N sheets" style={{ flex: "0 0 auto" }}>
+                        <input type="number" min="1" step="1" value={slipEvery} data-slip-every style={{ width: 70 }} onChange={e => setSlipEvery(e.target.value)} />
+                      </Field>
+                    )}
+                    <Field label="Sheets per spot" style={{ flex: "0 0 auto" }}>
+                      <input type="number" min="1" max="50" step="1" value={slipCount} data-slip-count style={{ width: 70 }} onChange={e => setSlipCount(e.target.value)} />
                     </Field>
-                    <Field label="Sheet(s) — imposed output" style={{ flex: 1 }}>
-                      <input type="text" value={slipSheets} onChange={e => setSlipSheets(e.target.value)} placeholder="e.g. 1, 5, 10-12" />
-                    </Field>
+                    {slipWhen === "every" && <Check checked={slipTail} onChange={setSlipTail} label="also after the last sheet" dataAttr="data-slip-tail" style={{ marginBottom: 14 }} />}
                   </div>
-                  <Field label="Slipsheet design">
-                    <Seg value={slipDesign} onChange={setSlipDesign}
-                         options={[{ v: "C", l: "Solid C" }, { v: "M", l: "Solid M" }, { v: "Y", l: "Solid Y" }, { v: "K", l: "Solid K" }, { v: "custom", l: "Custom upload…" }]} />
+                  <RuleNote rule={{ mode: slipWhen, list: slipSheets, every: +slipEvery || 0, count: +slipCount || 1, tail: slipTail }}
+                            total={viewRes && viewRes.sheetsImposed != null ? viewRes.sheetsImposed : null} noun="sheet" what={slipDesign === "blank" ? "blank sheet" : "slipsheet"} />
+                  <Field label="Sheet design" style={{ marginTop: 8 }}>
+                    <Seg value={slipDesign} onChange={setSlipDesign} dataAttr="data-slip-design"
+                         options={[{ v: "blank", l: "Blank (white)" }, { v: "C", l: "Solid C" }, { v: "M", l: "Solid M" }, { v: "Y", l: "Solid Y" }, { v: "K", l: "Solid K" }, { v: "custom", l: "Custom upload…" }]} />
                     {slipDesign === "custom" && (
                       <div style={{ marginTop: 6 }}>
                         <input type="file" accept=".pdf,.jpg,.jpeg,.png"
@@ -7246,7 +7434,7 @@ function App() {
                   </Field>
                   <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>
                     Sheet numbers are the <b>physical sheets of the imposed output</b> (sheet 1 = the first front/back pair on a duplex job).
-                    A slipsheet is one physical sheet — both faces carry the design on a duplex job — and is not counted in the run figures.
+                    Each inserted sheet is one physical sheet — both faces blank or carrying the design on a duplex job — and is not counted in the run figures. Inserted after the sheet sequence above, so its numbers refer to that result.
                   </div>
                 </div>
               )}
