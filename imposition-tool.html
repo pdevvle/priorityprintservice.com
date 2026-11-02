@@ -135,7 +135,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-11-02 00:00 UTC · IMPOSE-V1.65</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-11-02 08:00 UTC · IMPOSE-V1.66</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -4008,7 +4008,12 @@ async function insertSlipsheets(bytes, slip, duplex, labels) {
 // is a new page object sharing the original's content and resources, so the
 // document's /OCProperties, fonts and images are untouched (a copy into a new
 // document would drop the optional-content state — the 1.2x hidden-layer bug).
-const SEQ_MAX = 2000;
+// Ceiling on a page / sheet run (sequences and the blank-insertion rules).
+// Raised from 2000 at the owner's request (2026-11-02): a long book with a
+// blank after every page, or a big sheet run, passed it. The cost of a long
+// run is memory in the browser, not correctness — resequenceDoc clones
+// page leaves in place and never copies content.
+const SEQ_MAX = 20000;
 function describeSeq(items) {
   const parts = []; let i = 0;
   while (i < items.length) {
