@@ -743,6 +743,14 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### Run ceiling raised to 20,000 (1.66)
+
+  Owner: "up the cap from 2000 pages." `SEQ_MAX` governs the page sequence,
+  the sheet sequence and both blank-insertion rules; it is now 20,000 items.
+  Past it the sequence is still refused naming the limit. Nothing else in
+  the tool caps a page count — the per-page bleed overrides list stops at 64
+  pages for the UI only.
+
   ### Blank pages and blank sheets by rule (1.65)
 
   Owner: "amend to be able to insert blank pages in the pdf and blank sheets
