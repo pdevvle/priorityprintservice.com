@@ -743,6 +743,54 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### Blank pages and blank sheets by rule (1.65)
+
+  Owner: "amend to be able to insert blank pages in the pdf and blank sheets
+  as well. Easily being able to insert blanks across the file (every other
+  page, after ___, etc) — logical stuff."
+
+  The sequence boxes could already do it (`1, blank, 2, blank, …`), but only
+  by typing the whole run. Now one **rule shape** says where, for both:
+
+  | rule | pages (source run) | sheets (imposed output) |
+  |---|---|---|
+  | After… `3, 7, 10-12, last` | ✓ | ✓ |
+  | Before… | ✓ | ✓ |
+  | Every N (+ "also after the last") | ✓ | ✓ |
+  | Start / End | ✓ | ✓ |
+  | Pad to a multiple of M (at the end / before the last page) | ✓ | — |
+  | count per spot (1–50) | ✓ | ✓ |
+
+  - **Blank pages** — Press prep › "Insert blank pages — into the source
+    run" (`spec.blankPages = {mode, list, every, count, tail, padTo,
+    padWhere}`). `blankRuleItems(rule, total)` resolves the rule to the same
+    items `parseSeq` produces (0 = blank) and `insertBlankPagesBytes` applies
+    them through `resequenceDoc` in place (so /OCProperties, fonts and images
+    are untouched, as for the page sequence). Runs in the wrapper **after**
+    the page sequence, so its numbers refer to the run as it will be
+    paginated; a position past the end is an error, never a skip; a rule that
+    adds nothing says so. **Pad to 4** is the booklet case — "before the last
+    page" keeps the back cover last.
+  - **Blank sheets** — the slipsheet inserter grew the same placement rules
+    (`slip.when` = after/before/every/start/end, `slip.every`, `slip.count`,
+    `slip.tail`) and a **Blank (white)** design (nothing drawn). The card is
+    now "Insert blank sheets / slipsheets". `slipTargets()` resolves the
+    rule; insertion is highest point first; labels read `BLANK SHEET FRONT —
+    BLANK (PAPER WHITE) (after sheet 2)`; the note names the rule and the
+    spots. Still after the sheet sequence and on the full run only (preview
+    note updated).
+  - `RuleNote` gives the live readout under each card against the real
+    count (the file's pages after any page sequence; the imposed sheets).
+    New fields are setup-saveable (a "blank after every sheet" house rule).
+
+  Verified (`ui_blank.mjs`, 30, `fx_num10.pdf`): every rule's items on a
+  10-page run (after `3, last` → `1 2 3 ▢ 4 … 10 ▢`; every page → 19 pages
+  without a trailing blank, 20 with; pad to 4 → `… 9 ▢ ▢ 10` before the
+  last page; pad to 5 adds nothing; page 11 refuses); the file itself 10 →
+  19 pages; a 10-sheet output with a blank sheet every 2 comes out 14 sheets
+  with the blanks at positions 3, 6, 9, 12; the UI readouts and the job
+  report notes for both cards.
+
   ### Spot healing — Retouch (1.64)
 
   Owner: "are you able to add a spot-healing tool … real spot healing across
