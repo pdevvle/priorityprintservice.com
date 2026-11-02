@@ -199,5 +199,34 @@ foreach (array('pending', 'on-hold', 'failed', 'processing', 'completed') as $st
 }
 ok('no order is not dead', pps_quote_order_is_dead(null), false);
 
+// --- the order history of a quote
+// Found 2026-11-02 reading a real production quote: _q_orders held
+// a:2:{i:0;i:0;i:1;i:87906;} -- one order, two entries. (array) '' on a meta
+// key that was never written is array( '' ), and that empty string became 0.
+// The count is customer-facing on a reusable link, so one order read as two.
+ok('unwritten history is empty', pps_quote_order_history(''), array());
+ok('null history is empty',      pps_quote_order_history(null), array());
+ok('no phantom zero',            pps_quote_order_history(array('', 87906)), array(87906));
+ok('zero is not an order',       pps_quote_order_history(array(0, 0, 12)), array(12));
+ok('negatives dropped',          pps_quote_order_history(array(-5, 12)), array(12));
+ok('duplicates collapse',        pps_quote_order_history(array(12, 12, 13)), array(12, 13));
+ok('order preserved',            pps_quote_order_history(array(99, 12)), array(99, 12));
+ok('strings coerce',             pps_quote_order_history(array('87906')), array(87906));
+// A scalar is not a crash and is not silently a list of one digit.
+ok('scalar wraps',               pps_quote_order_history(87906), array(87906));
+
+// The count the page shows must equal the orders actually placed. Driving it
+// through the real append path is the point: testing the helper alone is what
+// let the phantom through the first time.
+$GLOBALS['meta'] = array();
+$h = pps_quote_order_history(get_post_meta(9, '_q_orders', true));
+$h[] = 87906;
+$GLOBALS['meta']['_q_orders'] = pps_quote_order_history($h);
+ok('first order counts once', count(pps_quote_order_history($GLOBALS['meta']['_q_orders'])), 1);
+$h = pps_quote_order_history($GLOBALS['meta']['_q_orders']);
+$h[] = 87910;
+$GLOBALS['meta']['_q_orders'] = pps_quote_order_history($h);
+ok('second order counts twice', count($GLOBALS['meta']['_q_orders']), 2);
+
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);

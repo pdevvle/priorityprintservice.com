@@ -207,6 +207,29 @@ function pps_quote_create( array $a ) {
     return $id;
 }
 
+/**
+ * The orders a quote has produced, as order IDs.
+ *
+ * get_post_meta() returns '' for a key never written, and (array) '' is
+ * array( '' ) -- one empty element, which intval() turns into 0. So the FIRST
+ * order placed from any quote left a phantom 0 ahead of it in the history.
+ * Invisible in storage; not invisible on the page. A reusable link counts this
+ * list to tell the customer how many times they have ordered before, so one
+ * order read as two, and the page invited them to order again having told them
+ * something untrue about what they had already done.
+ *
+ * Filtering on read heals the rows already stored, so there is nothing to
+ * migrate -- 0 is not an order ID any more than '' is.
+ */
+function pps_quote_order_history( $raw ) {
+    $out = array();
+    foreach ( (array) $raw as $id ) {
+        $id = (int) $id;
+        if ( $id > 0 ) $out[] = $id;
+    }
+    return array_values( array_unique( $out ) );
+}
+
 function pps_quote_get( $token ) {
     $token = sanitize_title( (string) $token );
     if ( ! $token ) return null;
@@ -230,7 +253,7 @@ function pps_quote_get( $token ) {
         'pay_source' => (string) get_post_meta( $id, '_q_pay_source', true ),
         'pay_link'   => (string) get_post_meta( $id, '_q_pay_link', true ),
         'order'      => (int) get_post_meta( $id, '_q_order', true ),
-        'orders'     => array_values( (array) get_post_meta( $id, '_q_orders', true ) ),
+        'orders'     => pps_quote_order_history( get_post_meta( $id, '_q_orders', true ) ),
         'reusable'   => (bool) get_post_meta( $id, '_q_reusable', true ),
         'noship'     => (bool) get_post_meta( $id, '_q_noship', true ),
         'revoked'    => (bool) get_post_meta( $id, '_q_revoked', true ),
@@ -578,9 +601,9 @@ function pps_quote_to_order( array $q, array $p ) {
     // needs. A reusable link can produce many, so the full list is kept too --
     // otherwise the second order would erase any trace of the first.
     update_post_meta( $q['id'], '_q_order', $order->get_id() );
-    $history   = array_values( (array) get_post_meta( $q['id'], '_q_orders', true ) );
+    $history   = pps_quote_order_history( get_post_meta( $q['id'], '_q_orders', true ) );
     $history[] = $order->get_id();
-    update_post_meta( $q['id'], '_q_orders', array_values( array_unique( array_map( 'intval', $history ) ) ) );
+    update_post_meta( $q['id'], '_q_orders', pps_quote_order_history( $history ) );
     return $order;
 }
 
