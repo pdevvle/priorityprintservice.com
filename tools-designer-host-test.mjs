@@ -1,0 +1,540 @@
+// "Design it online" on the postcard calculator, end to end, against a fake WordPress.
+//
+// The online designer (PPS Designer, pdevvle/priorityprintpad) opens in a same-origin
+// frame, gets the job's size and the price to show, and hands back a print-ready PDF.
+// This proves the calculator's side of that handshake (ppsOpenDesigner, brief §6) where
+// a customer meets it, on the COMPILED postcard build:
+//
+//   off       — no designer_url: no button, the upload path is unchanged;
+//   foreign   — a cross-origin designer_url: still no button (same origin only);
+//   on        — the button opens the designer at the job's size and sides, with the
+//               calculator's price on its chip; Print hands back a PDF that lands on
+//               the front and back exactly as an upload would; "Edit design" reopens
+//               the work and Back keeps it; then the normal proof, APPROVE NOW and
+//               Add to Order, with the designer's PDF as the order's artwork and the
+//               previews and manifest listed for Drive.
+//               Order options: the designer's slide-out panel offers this calculator's
+//               size, sides and quantity (plus orientation); a change there sets the
+//               calculator's own fields, its new price comes back to the designer, and
+//               a new size resizes the open design, so the print file and the order
+//               agree.
+//   portrait  — a card designed standing up: the print-ready file is the wide sheet with
+//               the front turned 90° and the back 270° (it is turned over left to right),
+//               recorded in the manifest; after a size change "Edit design" reopens the
+//               work resized, each design has its own file name (Drive and the imposition
+//               tool find artwork by name), and approving then changing the size clears
+//               the approval, so the order can never carry a file of another size.
+//               PPS_PRINT_READY=<path> keeps that print-ready PDF to look at.
+//   own back  — "design the front online, upload my own back" (2026-10-13): a one-sided design,
+//               then Both Sides and the customer's own file in the Back box, is approved as it
+//               stands (it was refused as an out-of-date design); "Edit design" then Print asks
+//               before the design's page 2 replaces the uploaded back, and OK keeps it.
+//
+// Setup (everything is served on 127.0.0.1:8139 by this script):
+//   1. compile:  BABEL_DIR=<dir with @babel/core, @babel/preset-react> node tools-compile-calcs.mjs
+//   2. a built designer site: the `designer-site-<sha>` artefact of priorityprintpad's
+//      wasm.yml (designer.html, designer.js, designer.css, pps_bridge.js,
+//      pps_bridge_bg.wasm, designer-manifest.json), unpacked into a directory.
+//
+// Run: PPS_DEPS_DIR=<node_modules with react, react-dom, jspdf, pdfjs-dist@4.10.38, pdf-lib@1.17.1> \
+//      PPS_DESIGNER_DIR=<designer site> node tools-designer-host-test.mjs
+
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+
+const PW = process.env.PPS_PLAYWRIGHT || '/opt/node22/lib/node_modules/playwright';
+const { chromium } = await import(PW + '/index.mjs');
+const HERE = path.dirname(new URL(import.meta.url).pathname);
+const DEPS = process.env.PPS_DEPS_DIR || path.join(HERE, 'node_modules');
+const DESIGNER = process.env.PPS_DESIGNER_DIR;
+const CALC = process.env.PPS_CALC_FILE || path.join(HERE, 'dist', 'calc-postcard.html');
+if (!DESIGNER || !fs.existsSync(path.join(DESIGNER, 'designer.html'))) { console.error('PPS_DESIGNER_DIR must hold a built designer site'); process.exit(2); }
+if (!fs.existsSync(CALC)) { console.error('no compiled calculator at ' + CALC + ' (run tools-compile-calcs.mjs)'); process.exit(2); }
+
+// The harness: the compiled calculator with its CDN scripts vendored, and the designer
+// under /designer/ on the same origin, as the site serves it from the plugin directory.
+const H = fs.mkdtempSync('/tmp/pps-designer-host-');
+execFileSync(process.execPath, [path.join(HERE, 'tools-harness-prep.mjs'), CALC, path.join(H, 'calc.html')], { stdio: 'ignore' });
+fs.writeFileSync(path.join(H, 'theme-main.css'), '');
+fs.symlinkSync(DEPS, path.join(H, 'node_modules'));
+fs.symlinkSync(path.resolve(DESIGNER), path.join(H, 'designer'));
+
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.wasm': 'application/wasm', '.json': 'application/json', '.pdf': 'application/pdf' };
+const server = http.createServer((req, res) => {
+  const rel = decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '');
+  const file = path.join(H, path.normalize(rel));
+  if (!file.startsWith(H)) { res.writeHead(403); res.end(); return; }
+  fs.readFile(file, (e, b) => {
+    if (e) { res.writeHead(404); res.end(); return; }
+    res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream' });
+    res.end(b);
+  });
+});
+await new Promise(r => server.listen(8139, '127.0.0.1', r));
+const BASE = 'http://127.0.0.1:8139';
+
+let checks = 0, failed = 0;
+const ok = (label, cond, detail) => {
+  checks++;
+  if (cond) { console.log('PASS ' + label + (detail ? '  ' + detail : '')); return; }
+  failed++;
+  console.log('FAIL ' + label + (detail ? '\n       ' + detail : ''));
+};
+
+// One uploaded file's PDF out of its multipart body (kept as latin1 text by the route).
+const pdfOf = body => { const b = Buffer.from(body || '', 'latin1'); const i = b.indexOf('%PDF'), j = b.lastIndexOf('%%EOF'); return i < 0 || j < 0 ? Buffer.alloc(0) : b.subarray(i, j + 5); };
+// Each design gets its own name, so two designed jobs in one order can't be confused on Drive.
+const DESIGN_NAME = /^online-design-[a-z0-9]+\.pdf$/;
+const writeTmp = buf => { const f = path.join(fs.mkdtempSync('/tmp/pps-pr-'), 'f.pdf'); fs.writeFileSync(f, buf); return f; };
+const field = (body, name) => { const m = body.match(new RegExp('name="' + name + '"\\r\\n\\r\\n([^\\r]*)')); return m ? m[1] : null; };
+const fileName = (body) => { const m = body.match(/name="artwork"; filename="([^"]*)"/); return m ? m[1] : null; };
+const reorder = Buffer.from(JSON.stringify({ shipState: 'AZ', shipAddr: { name: 'Test', street1: '1 Main St', city: 'Phoenix', zip: '85087' } }))
+  .toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+async function open(b, designerUrl, query = '', acceptDialogs = false) {
+  const ctx = await b.newContext({ viewport: { width: 1400, height: 1000 } });
+  const p = await ctx.newPage();
+  const dialogs = []; p.on('dialog', async d => { dialogs.push(d.message()); if (acceptDialogs) await d.accept(); else await d.dismiss(); });
+  const errs = []; p.on('pageerror', e => errs.push(String(e).slice(0, 200)));
+  const uploads = [], bodies = {}; let cartPost = null;
+  await p.addInitScript(([r, u]) => {
+    window.PPS_CONFIG = { ajaxUrl: location.origin + '/wp-admin/admin-ajax.php', cartUrl: location.origin + '/cart.html',
+      cartNonce: 'cartBaked', uploadNonce: 'upBaked', productId: 33670, maxUpload: 200 * 1048576, reorder: r,
+      calc: { pcf: u ? { designer_url: u } : {} } };
+    // Every frame (the designer's too) keeps the last job it was sent, for the checks below.
+  }, [reorder, designerUrl]);
+  await p.addInitScript(() => { addEventListener('message', e => { if (e.data && e.data.type === 'pps-design:job') window.__ppsJob = e.data.spec; }); });
+  await p.route('**/wp-admin/admin-ajax.php**', async (route) => {
+    const req = route.request();
+    const body = (req.postDataBuffer() || Buffer.alloc(0)).toString('latin1');
+    const action = field(body, 'action');
+    if (action === 'pps_upload_artwork') {
+      const name = fileName(body);
+      uploads.push(name);
+      bodies[name] = body;
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { path: 'pps-artwork/2026/10/' + uploads.length + '-' + name } }) });
+    }
+    if (action === 'pps_add_to_cart') {
+      cartPost = { product_id: field(body, 'product_id'), files: field(body, 'pps_artwork_files'), path: field(body, 'pps_artwork_path'), metadata: field(body, 'pps_metadata') };
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { cart_item_key: 'k1' } }) });
+    }
+    return route.fulfill({ status: 400, body: '0' });
+  });
+  await p.route('**/cart.html', route => route.fulfill({ status: 200, contentType: 'text/html', body: '<h1 id="cart">CART</h1>' }));
+  await p.goto(BASE + '/calc.html' + query, { waitUntil: 'domcontentloaded' });
+  await p.waitForSelector('select'); await p.waitForTimeout(2500);
+  return { ctx, p, dialogs, errs, uploads, bodies, cart: () => cartPost };
+}
+
+const b = await chromium.launch({ executablePath: process.env.PPS_CHROME || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'] });
+
+// ── off: no designer_url, no button ──
+{
+  const t = await open(b, '');
+  ok('off: no "Design it online" button without designer_url', (await t.p.locator('[data-pps-design]').count()) === 0);
+  ok('off: the upload drop zone is still there', (await t.p.getByText('Drop your artwork here or click to upload').count()) === 1);
+  ok('off: no page errors', t.errs.length === 0, t.errs.join(' | '));
+  await t.ctx.close();
+}
+
+// ── foreign: a cross-origin designer_url is refused ──
+{
+  const t = await open(b, 'https://example.com/designer/designer.html');
+  ok('foreign: a cross-origin designer_url shows no button', (await t.p.locator('[data-pps-design]').count()) === 0);
+  await t.ctx.close();
+}
+
+// ── on: design, print, edit, back, proof, approve, order ──
+{
+  const t = await open(b, '/designer/designer.html');
+  const { p } = t;
+  ok('on: the "Design it online" button is offered', await p.locator('[data-pps-design="open"]').isVisible());
+  await p.click('[data-pps-design="open"]');
+  const frame = p.frameLocator('.pps-designer-overlay iframe');
+  await frame.locator('#print:not([disabled])').waitFor({ timeout: 120000 });
+  ok('on: the designer opens over the calculator', await p.locator('.pps-designer-overlay').isVisible());
+  const size = await frame.locator('#productSize').textContent();
+  const dims = (size || '').match(/^([\d.]+) × ([\d.]+) in$/);
+  ok('on: the designer gets the job\'s size, landscape (the default preset is 3.5 × 2)', dims && +dims[1] === 3.5 && +dims[2] === 2, size);
+  ok('on: two-sided job → Front and Back', (await frame.locator('#sides button').allTextContents()).join(',') === 'Front,Back');
+  const chip = await frame.locator('#price').textContent();
+  ok('on: the price chip shows the calculator\'s price (display only)', /^\$\d[\d,]*\.\d\d · [\d,]+ pcs$/.test(chip || ''), chip);
+  ok('on: no demo notice inside the calculator', !(await frame.locator('#demo').isVisible()));
+
+  // Order options: the calculator's own fields, from inside the designer.
+  ok('on: the designer offers Order options', await frame.locator('#orderTab').isVisible());
+  await frame.locator('#orderTab').click();
+  ok('on: …size, orientation, sides, folding, perforation and quantity, from the calculator', (await frame.locator('#orderFields label > span:first-child').allTextContents()).join(',') === 'Size,Orientation,Sides printed,Folding,Perforation,Quantity');
+  await frame.locator('#orderFields select[data-key="size"]').selectOption('4×6');
+  await frame.locator('#productSize', { hasText: '6 × 4 in' }).waitFor({ timeout: 10000 });
+  ok('on: a size picked in the designer resizes the design (4×6 → 6 × 4 in, landscape)', (await frame.locator('#productSize').textContent()) === '6 × 4 in');
+  await p.waitForFunction(() => [...document.querySelectorAll('select')].some(s => s.value === '4×6'), null, { timeout: 5000 }).catch(() => {});
+  ok('on: …and sets the calculator\'s own size field', await p.evaluate(() => [...document.querySelectorAll('select')].some(s => s.value === '4×6')));
+  await frame.locator('#orderFields input[data-key="qty"]').fill('500');
+  await frame.locator('#orderFields input[data-key="qty"]').press('Enter');
+  await frame.locator('#price', { hasText: '500 pcs' }).waitFor({ timeout: 10000 });
+  const chip2 = await frame.locator('#price').textContent();
+  ok('on: a quantity change comes back as the calculator\'s new price', /· 500 pcs$/.test(chip2 || '') && chip2 !== chip, chip + ' → ' + chip2);
+  ok('on: …shown in the panel too', /\$[\d,]+\.\d\d/.test(await frame.locator('#orderPrice').textContent()));
+  // Folding and perforation from the designer: the calculator's fields change, and the
+  // designer draws the calculator's fold and perforation lines (as guides).
+  await frame.locator('#orderFields select[data-key="fold"]').selectOption('trifold');
+  await frame.locator('#sides button', { hasText: 'Outside' }).waitFor({ timeout: 10000 });
+  ok('on: picking Trifold in the designer folds the job (Outside / Inside)', (await frame.locator('#sides button').allTextContents()).join(',') === 'Outside,Inside');
+  ok('on: …sets the calculator\'s own fold field', await p.evaluate(() => [...document.querySelectorAll('select')].some(s => s.value === 'trifold')));
+  ok('on: …and offers no portrait for a folded sheet', (await frame.locator('#orderFields select[data-key="orientation"]').count()) === 0);
+  // A fold the calculator can't price at this size (accordion: 1.5 in panels) is said in the
+  // designer, not left showing the last price.
+  await frame.locator('#orderFields select[data-key="fold"]').selectOption('accordion4');
+  await frame.locator('#orderPrice.cant').waitFor({ timeout: 10000 }).catch(() => {});
+  const cant = await frame.locator('#orderPrice').textContent();
+  ok('on: a fold that can\'t be priced at this size says so in the designer', /can't be priced/.test(cant) && /too small/i.test(cant), cant);
+  await frame.locator('#orderFields select[data-key="fold"]').selectOption('trifold');
+  await frame.locator('#orderPrice:not(.cant)').waitFor({ timeout: 10000 });
+  await frame.locator('#orderFields select[data-key="perforation"]').selectOption({ index: 1 });
+  await frame.locator('#legendPerf:not([hidden])').waitFor({ timeout: 10000 });
+  ok('on: a perforation picked in the designer is drawn there and shows in the legend', await frame.locator('#legendFold').isVisible() && await frame.locator('#legendPerf').isVisible());
+  ok('on: …and the calculator offers its direction', (await frame.locator('#orderFields select[data-key="perfDir"]').count()) === 1);
+  await frame.locator('#orderClose').click();
+
+  await frame.locator('[data-text="heading"]').click();
+  await frame.locator('#textInput').fill('Grand Opening');
+  await frame.locator('#textDone').click();
+  // Half see-through, set in Advanced: the designer's canvas shows it as it prints.
+  await frame.locator('#modeAdv').click();
+  await frame.locator('#ctlOpacity').fill('50');
+  await frame.locator('#ctlOpacity').press('Enter');
+  await frame.locator('#modeSimple').click();
+  await frame.locator('[data-cat="background"]').click();
+  await frame.locator('#bgSwatches button[title="Teal"]').click();
+  await frame.locator('#sides button:nth-child(2)').click();
+  await frame.locator('[data-cat="text"]').click();
+  await frame.locator('[data-text="body"]').click();
+  await frame.locator('#textInput').fill('Saturday 10 to 4');
+  await frame.locator('#textDone').click();
+  await frame.locator('#print').click();
+  await frame.locator('#sheetGo').click();
+  await p.locator('.pps-designer-overlay').waitFor({ state: 'detached', timeout: 60000 });
+  ok('on: Print closes the designer', true);
+  await p.waitForTimeout(4000);
+  ok('on: the design lands as the artwork (file name shown)', (await p.getByText(DESIGN_NAME).count()) >= 1);
+  ok('on: "Edit design" is offered once a design is on the job', await p.locator('[data-pps-design="edit"]').isVisible());
+  ok('on: the proof button is there, unapproved', (await p.locator('button', { hasText: '🔍 Proof' }).count()) >= 1);
+  ok('on: no surprise dialogs from the intake (the PDF is the size the order now is)', t.dialogs.length === 0, t.dialogs.join(' || '));
+
+  // Edit, then Back: the work comes back, and Back leaves the artwork as it was.
+  await p.click('[data-pps-design="edit"]');
+  await frame.locator('#print:not([disabled])').waitFor({ timeout: 120000 });
+  ok('on: "Edit design" reopens the work, not a blank card', !(await frame.locator('#emptyHint').isVisible()));
+  await frame.locator('#back').click();
+  await p.locator('.pps-designer-overlay').waitFor({ state: 'detached', timeout: 20000 });
+  ok('on: Back closes the designer and keeps the artwork', (await p.getByText(DESIGN_NAME).count()) >= 1);
+
+  // The normal proof and approval, then the order.
+  await p.evaluate(() => { window.__manifests = 0; const OB = window.Blob; window.Blob = function (parts, opts) { const bl = new OB(parts, opts); if (opts && opts.type === 'text/plain') window.__manifests++; return bl; }; window.Blob.prototype = OB.prototype; });
+  await p.evaluate(() => { const x = [...document.querySelectorAll('button')].find(y => /🔍 Proof/.test(y.textContent || '')); x && x.click(); });
+  await p.waitForTimeout(2500);
+  ok('on: the designer\'s own transparency raises no "contact us before approving" banner', !/Uses [^\n]*transparen/.test(await p.evaluate(() => document.body.innerText)));
+  await p.evaluate(() => { const ack = [...document.querySelectorAll('label')].find(l => /print anyway/i.test(l.textContent || '')); const cb = ack && ack.querySelector('input[type=checkbox]'); cb && cb.click(); });
+  await p.waitForTimeout(300);
+  await p.evaluate(() => { const btn = [...document.querySelectorAll('button')].find(y => /APPROVE NOW|^\s*Approve (artwork|Now)\s*$/i.test(y.textContent || '')); btn && btn.click(); });
+  let man = 0;
+  for (let i = 0; i < 90 && man < 1; i++) { await p.waitForTimeout(1000); man = await p.evaluate(() => window.__manifests); }
+  ok('on: the approval package is generated from the designer\'s PDF', man >= 1);
+  await p.keyboard.press('Escape'); await p.waitForTimeout(500);
+  const clicked = await p.evaluate(() => {
+    const btns = [...document.querySelectorAll('button')].filter(x => /^Add to Order$/.test((x.textContent || '').trim()));
+    const bt = btns.find(x => x.offsetParent !== null && !x.disabled) || btns.find(x => !x.disabled);
+    if (!bt) return false; bt.click(); return true;
+  });
+  ok('on: Add to Order is clickable', clicked);
+  let landed = false;
+  for (let i = 0; i < 60 && !landed; i++) { await p.waitForTimeout(1000); landed = /cart\.html$/.test(p.url()); }
+  ok('on: the order lands in the cart', landed, 'url=' + p.url() + ' dialogs=' + t.dialogs.join(' || '));
+  const cartPost = t.cart();
+  const listed = cartPost && cartPost.files ? JSON.parse(cartPost.files).map(f => f.name) : [];
+  ok('on: the designer\'s PDF is the order\'s artwork', DESIGN_NAME.test(t.uploads[0] || '') && cartPost && /^pps-artwork\/2026\/10\/1-online-design-[a-z0-9]+\.pdf$/.test(cartPost.path || ''), JSON.stringify({ first: t.uploads[0], path: cartPost && cartPost.path }));
+  // Nothing was changed in the proof, so the print file is the designer's own PDF, byte for byte:
+  // vector, CMYK, PDF/X-4, not a picture of it.
+  const rawPdf = pdfOf(t.bodies[t.uploads[0]]);
+  const prName0 = t.uploads.find(n => /_print-ready\.pdf$/.test(n)) || '';
+  const prPdf0 = pdfOf(t.bodies[prName0]);
+  ok('on: the print-ready file is the designer\'s own PDF, unchanged (vector, PDF/X-4)', rawPdf.length > 1000 && Buffer.compare(rawPdf, prPdf0) === 0 && prPdf0.includes('GTS_PDFX'), rawPdf.length + ' vs ' + prPdf0.length + ' bytes');
+  const man0 = Buffer.from(t.bodies[t.uploads.find(n => /manifest\.txt$/.test(n)) || ''] || '', 'latin1').toString('utf8');
+  ok('on: …and the manifest says so', /the online designer's own PDF\/X-4, 2 side\(s\)/.test(man0) && /print source: the designer's own PDF, page 2, vector, unchanged/.test(man0), (man0.match(/2\. Print-ready PDF:[^\n]*/) || [''])[0]);
+  ok('on: previews and the manifest are listed for Drive', listed.some(n => /preview/.test(n)) && listed.some(n => /manifest\.txt$/.test(n)), listed.join(','));
+  ok('on: no page errors', t.errs.length === 0, t.errs.join(' | '));
+  await t.ctx.close();
+}
+
+// The proof's APPROVE NOW, waiting for the package (its manifest) to be made.
+async function approve(p) {
+  await p.evaluate(() => { window.__manifests = 0; if (!window.__blobHooked) { window.__blobHooked = true; const OB = window.Blob; window.Blob = function (parts, opts) { const bl = new OB(parts, opts); if (opts && opts.type === 'text/plain') window.__manifests++; return bl; }; window.Blob.prototype = OB.prototype; } });
+  await p.evaluate(() => { const x = [...document.querySelectorAll('button')].find(y => /🔍 Proof/.test(y.textContent || '')); x && x.click(); });
+  await p.waitForTimeout(2500);
+  await p.evaluate(() => { const ack = [...document.querySelectorAll('label')].find(l => /print anyway/i.test(l.textContent || '')); const cb = ack && ack.querySelector('input[type=checkbox]'); cb && cb.click(); });
+  await p.waitForTimeout(300);
+  await p.evaluate(() => { const btn = [...document.querySelectorAll('button')].find(y => /APPROVE NOW|^\s*Approve (artwork|Now)\s*$/i.test(y.textContent || '')); btn && btn.click(); });
+  let man = 0;
+  for (let i = 0; i < 90 && man < 1; i++) { await p.waitForTimeout(1000); man = await p.evaluate(() => window.__manifests); }
+  await p.keyboard.press('Escape'); await p.waitForTimeout(500);
+  return man >= 1;
+}
+const approvedShown = p => p.evaluate(() => [...document.querySelectorAll('button')].some(x => (x.textContent || '').trim() === 'Review' && x.offsetParent !== null));
+
+// ── portrait: a card designed standing up prints the right way round on the wide sheet ──
+{
+  const t = await open(b, '/designer/designer.html');
+  const { p } = t;
+  await p.locator('select:has(option[value="4×6"])').first().selectOption('4×6');
+  await p.waitForTimeout(800);
+  await p.click('[data-pps-design="portrait"]');
+  const frame = p.frameLocator('.pps-designer-overlay iframe');
+  await frame.locator('#print:not([disabled])').waitFor({ timeout: 120000 });
+  ok('portrait: the designer opens the card standing up (4 × 6 in)', (await frame.locator('#productSize').textContent()) === '4 × 6 in');
+  await frame.locator('[data-text="heading"]').click();
+  await frame.locator('#textInput').fill('Tall card');
+  await frame.locator('#textDone').click();
+  await frame.locator('[data-cat="background"]').click();
+  await frame.locator('#bgSwatches button[title="Teal"]').click();
+  await frame.locator('#sides button:nth-child(2)').click();
+  await frame.locator('[data-cat="text"]').click();
+  await frame.locator('[data-text="heading"]').click();
+  await frame.locator('#textInput').fill('Back top');
+  await frame.locator('#textDone').click();
+  await frame.locator('#print').click();
+  await frame.locator('#sheetGo').click();
+  await p.locator('.pps-designer-overlay').waitFor({ state: 'detached', timeout: 60000 });
+  await p.waitForTimeout(4000);
+  const first = await p.getByText(DESIGN_NAME).first().textContent().catch(() => '');
+  ok('portrait: the design lands under its own name', DESIGN_NAME.test((first || '').trim()), first);
+  ok('portrait: …with no dialogs', t.dialogs.length === 0, t.dialogs.join(' || '));
+
+  // The order changes size after the design: "Edit design" reopens the work at the new size.
+  await p.locator('select:has(option[value="5×7"])').first().selectOption('5×7');
+  await p.waitForTimeout(800);
+  ok('portrait: after a size change the job says the design is out of date', await p.locator('[data-pps-design="stale"]').isVisible());
+  await p.click('[data-pps-design="edit"]');
+  await frame.locator('#print:not([disabled])').waitFor({ timeout: 120000 });
+  ok('portrait: after a size change, "Edit design" reopens the work, not a blank card', !(await frame.locator('#emptyHint').isVisible()));
+  ok('portrait: …resized to the order (5 × 7 in, still standing up)', (await frame.locator('#productSize').textContent()) === '5 × 7 in');
+  await frame.locator('#print').click();
+  await frame.locator('#sheetGo').click();
+  await p.locator('.pps-designer-overlay').waitFor({ state: 'detached', timeout: 60000 });
+  await p.waitForTimeout(4000);
+  const second = await p.getByText(DESIGN_NAME).first().textContent().catch(() => '');
+  ok('portrait: a second design gets a name of its own', DESIGN_NAME.test((second || '').trim()) && second !== first, first + ' → ' + second);
+
+  ok('portrait: …and once printed again, it is up to date', !(await p.locator('[data-pps-design="stale"]').isVisible()));
+  ok('portrait: approving makes the package', await approve(p));
+  ok('portrait: …and the job shows as approved', await approvedShown(p));
+  // A change to the job's size after approval clears it: the approved file is the old size.
+  await p.locator('select:has(option[value="4×6"])').first().selectOption('4×6');
+  await p.waitForTimeout(1500);
+  ok('portrait: changing the size after approving clears the approval', !(await approvedShown(p)));
+  await p.locator('select:has(option[value="5×7"])').first().selectOption('5×7');
+  await p.waitForTimeout(1500);
+  ok('portrait: …and approving again makes a new package', await approve(p) && await approvedShown(p));
+  const clicked = await p.evaluate(() => {
+    const btns = [...document.querySelectorAll('button')].filter(x => /^Add to Order$/.test((x.textContent || '').trim()));
+    const bt = btns.find(x => x.offsetParent !== null && !x.disabled) || btns.find(x => !x.disabled);
+    if (!bt) return false; bt.click(); return true;
+  });
+  let landed = false;
+  for (let i = 0; i < 60 && clicked && !landed; i++) { await p.waitForTimeout(1000); landed = /cart\.html$/.test(p.url()); }
+  ok('portrait: the order lands in the cart', landed, t.dialogs.join(' || '));
+  const manName = Object.keys(t.bodies).find(n => /manifest\.txt$/.test(n)) || '';
+  const man = Buffer.from(t.bodies[manName] || '', 'latin1').toString('utf8');   // the manifest is UTF-8 text
+  ok('portrait: the manifest records the front turned 90° and the back 270° onto the sheet', /1: Front[\s\S]*?rotate=90°/.test(man) && /2: Back[\s\S]*?rotate=270°/.test(man), (man.match(/rotate=\d+°/g) || []).join(','));
+  ok('portrait: …at the order\'s size', /Trim size: 7″ × 5″/.test(man), (man.match(/Trim size: [^\r\n]*/) || [''])[0]);
+  const prName = Object.keys(t.bodies).find(n => /_print-ready\.pdf$/.test(n)) || '';
+  // The print file is the designer's PDF with each page turned onto the wide sheet by /Rotate
+  // (front 90°, back 270°): still vector, and 7.25 × 5.25 in as it sits on the sheet.
+  const pr = pdfOf(t.bodies[prName]);
+  const prPages = execFileSync('python3', ['-I', '-c', 'import sys,pikepdf,json; p=pikepdf.open(sys.argv[1]); print(json.dumps([[int(pg.obj.get("/Rotate",0))]+[float(x) for x in pg.obj.MediaBox] for pg in p.pages]+[[str(p.Root.get("/OutputIntents") is not None)]]))', writeTmp(pr)]).toString();
+  const info = JSON.parse(prPages), pagesInfo = info.slice(0, -1);
+  ok('portrait: the print-ready file is the designer\'s PDF turned onto the sheet by page rotation (front 90°, back 270°)', pagesInfo.length === 2 && pagesInfo[0][0] === 90 && pagesInfo[1][0] === 270, prPages.trim());
+  ok('portrait: …which sits on the sheet as 7.25 × 5.25 in (a 5.25 × 7.25 page turned)', pagesInfo.every(r => Math.abs(r[3] - r[1] - 378) < 1 && Math.abs(r[4] - r[2] - 522) < 1), prPages.trim());
+  ok('portrait: …and keeps its PDF/X output intent (nothing redrawn)', info[info.length - 1][0] === 'True' && pr.includes('GTS_PDFX'));
+  ok('portrait: …and its PDF/X-4 version (1.6), not pdf-lib\'s 1.7', Buffer.from(pr).subarray(0, 8).toString('latin1') === '%PDF-1.6', Buffer.from(pr).subarray(0, 8).toString('latin1'));
+  ok('portrait: the manifest says the output intent is the designer\'s placeholder (and claims no RGB photos on a card without any)', /own PDF\/X-4/.test(man) && /not the press profile/.test(man) && !/RGB/.test(man), (man.match(/2\. Print-ready PDF:[^\r\n]*/) || [''])[0]);
+  // The server's Print File Check (pps-job-health.php) reads it as production will: 2 pages on a
+  // 7.25 × 5.25 in sheet. It reads pages and boxes straight out of the file, so a PDF saved with
+  // object streams read as "0 pages, sheet size unknown".
+  const jh = JSON.parse(execFileSync('php', ['-r', "define('ABSPATH','/'); preg_match('/function pps_print_file_check\\(.*?\\n}\\n/s', file_get_contents($argv[1]), $m); eval($m[0]); echo json_encode(pps_print_file_check($argv[2]));", path.join(HERE, 'pps-job-health.php'), writeTmp(pr)]).toString());
+  ok('portrait: the Print File Check reads it as 2 pages on the 7.25 × 5.25 in sheet, with no warning', jh.pages === 2 && JSON.stringify(jh.sheet_in) === '[7.25,5.25]' && jh.warn === '', jh.summary);
+  if (process.env.PPS_PRINT_READY) fs.writeFileSync(process.env.PPS_PRINT_READY, pr);
+  ok('portrait: no page errors', t.errs.length === 0, t.errs.join(' | '));
+  await t.ctx.close();
+}
+
+// ── a dead designer link: the customer can always get out, and is told at once ──
+{
+  const t = await open(b, '/designer/not-there.html');
+  const { p } = t;
+  await p.click('[data-pps-design="open"]');
+  await p.locator('.pps-designer-overlay').waitFor({ state: 'detached', timeout: 10000 }).catch(() => {});
+  ok('dead link: a designer page that isn\'t there closes at once with a message (not two minutes)', !(await p.locator('.pps-designer-overlay').count()) && t.dialogs.some(d => /couldn't open/.test(d)), t.dialogs.join(' || '));
+  await t.ctx.close();
+}
+{
+  // A designer that loads but never says ready: Close and Escape get the customer out.
+  const t = await open(b, '/designer/designer.html');
+  const { p } = t;
+  await p.route('**/designer/designer.js', route => route.fulfill({ status: 200, contentType: 'text/javascript', body: '/* never ready */' }));
+  await p.click('[data-pps-design="open"]');
+  await p.locator('.pps-designer-overlay button', { hasText: 'Close' }).waitFor({ timeout: 10000 });
+  await p.keyboard.press('Escape');
+  await p.locator('.pps-designer-overlay').waitFor({ state: 'detached', timeout: 5000 }).catch(() => {});
+  ok('stuck designer: Escape closes the overlay before it is ready', !(await p.locator('.pps-designer-overlay').count()));
+  await t.ctx.close();
+}
+
+// ── a portrait design on a staff-proof order: its print file still goes with it, turned as approval turns it ──
+{
+  // Nobody approves online on a staff (or hardcopy) proof, so no approval package is made. Until
+  // 2026-10-23 the order carried only the standing design, which the imposition tool turns onto the
+  // sheet the other way to the approved print file; an off-centre perforation then landed at the
+  // other end. Now the designer's print file, front /Rotate 90 and back 270, rides with it.
+  const t = await open(b, '/designer/designer.html');
+  const { p } = t;
+  await p.locator('select:has(option[value="4×6"])').first().selectOption('4×6');
+  await p.locator('select', { has: p.locator('option', { hasText: 'Manual Digital Proof' }) }).first().selectOption('0.01');
+  await p.waitForTimeout(800);
+  await p.click('[data-pps-design="portrait"]');
+  const frame = p.frameLocator('.pps-designer-overlay iframe');
+  await frame.locator('#print:not([disabled])').waitFor({ timeout: 120000 });
+  await frame.locator('[data-text="heading"]').click();
+  await frame.locator('#textInput').fill('Staff proof card');
+  await frame.locator('#textDone').click();
+  await frame.locator('#print').click();
+  await frame.locator('#sheetGo').click();
+  await p.locator('.pps-designer-overlay').waitFor({ state: 'detached', timeout: 60000 });
+  await p.waitForTimeout(5000);
+  const clicked = await p.evaluate(() => {
+    const btns = [...document.querySelectorAll('button')].filter(x => /^Add to Order$/.test((x.textContent || '').trim()));
+    const bt = btns.find(x => x.offsetParent !== null && !x.disabled) || btns.find(x => !x.disabled);
+    if (!bt) return false; bt.click(); return true;
+  });
+  let landed = false;
+  for (let i = 0; i < 60 && clicked && !landed; i++) { await p.waitForTimeout(1000); landed = /cart\.html$/.test(p.url()); }
+  ok('staff proof: the portrait design orders', landed, t.dialogs.join(' || '));
+  const design = t.uploads.find(n => DESIGN_NAME.test(n)) || '';
+  const prName = t.uploads.find(n => /_print-ready\.pdf$/.test(n)) || '';
+  ok('staff proof: the order carries the design, then its print file named for it', t.uploads[0] === design && prName === design.replace(/\.pdf$/, '_print-ready.pdf'), JSON.stringify(t.uploads));
+  if (prName) {
+    const pr = pdfOf(t.bodies[prName]);
+    const rot = JSON.parse(execFileSync('python3', ['-I', '-c', 'import sys,pikepdf,json; p=pikepdf.open(sys.argv[1]); print(json.dumps([int(pg.obj.get("/Rotate",0)) for pg in p.pages]))', writeTmp(pr)]).toString());
+    ok('staff proof: …turned onto the sheet as an approved one is (front 90°, back 270°), still PDF/X 1.6', JSON.stringify(rot) === '[90,270]' && Buffer.from(pr).subarray(0, 8).toString('latin1') === '%PDF-1.6', JSON.stringify(rot));
+  }
+  ok('staff proof: no page errors', t.errs.length === 0, t.errs.join(' | '));
+  await t.ctx.close();
+}
+
+// ── a portrait card perforated off-centre: the designer's guide is where the order perforates ──
+{
+  // A 4 × 9 rack card, one perforation across the long edge at 78% (7.02 in from the sheet's left).
+  // Its print file turns the front 90° clockwise onto the sheet, so on the standing card the line
+  // is 1.98 in (142.56 pt) from the top, front and back. The pre-2026-10-13 build put it at 505.44.
+  const t = await open(b, '/designer/designer.html', '?size=4x9&sides=2&perf=2000&perfdir=length&perfpos=78');
+  const { p } = t;
+  await p.click('[data-pps-design="portrait"]');
+  const frame = p.frameLocator('.pps-designer-overlay iframe');
+  await frame.locator('#print:not([disabled])').waitFor({ timeout: 120000 });
+  const job = await p.frames().find(f => /designer\.html/.test(f.url())).evaluate(() => window.__ppsJob);
+  const perfs = (job && job.perfs) || [];
+  ok('portrait perforation: the designer shows it where the order perforates (142.56 pt from the top, both sides)',
+    job && job.trimW === 288 && job.trimH === 648 && perfs.length === 2 && perfs.every(g => g.axis === 'h' && Math.abs(g.at - 142.56) < 0.01), JSON.stringify(perfs));
+  await t.ctx.close();
+}
+
+// ── a portrait design, then the customer's own landscape PDF: it prints square-on ──
+{
+  const t = await open(b, '/designer/designer.html');
+  const { p } = t;
+  await p.locator('select:has(option[value="4×6"])').first().selectOption('4×6');
+  await p.waitForTimeout(800);
+  await p.click('[data-pps-design="portrait"]');
+  const frame = p.frameLocator('.pps-designer-overlay iframe');
+  await frame.locator('#print:not([disabled])').waitFor({ timeout: 120000 });
+  await frame.locator('[data-text="heading"]').click();
+  await frame.locator('#textDone').click();
+  await frame.locator('#print').click();
+  await frame.locator('#sheetGo').click();
+  await p.locator('.pps-designer-overlay').waitFor({ state: 'detached', timeout: 60000 });
+  await p.waitForTimeout(3000);
+  // Remove the front, then drop a landscape two-pager on the upload zone.
+  await p.locator('button[title="Remove"]').first().click();
+  await p.waitForTimeout(500);
+  const { jsPDF } = (await import('node:module')).createRequire(import.meta.url)(DEPS + '/jspdf/dist/jspdf.node.min.js');
+  const doc = new jsPDF({ unit: 'in', format: [6.25, 4.25], orientation: 'landscape' });
+  doc.text('UP FRONT', 2, 2); doc.addPage([6.25, 4.25], 'landscape'); doc.text('UP BACK', 2, 2);
+  const land = writeTmp(Buffer.from(doc.output('arraybuffer')));
+  await p.locator('input[type=file][accept=".pdf,.jpg,.jpeg,.png"]').first().setInputFiles(land);
+  await p.waitForTimeout(4000);
+  ok('upload after a portrait design: approving makes the package', await approve(p));
+  const clicked = await p.evaluate(() => { const bt = [...document.querySelectorAll('button')].find(x => /^Add to Order$/.test((x.textContent || '').trim()) && !x.disabled); if (!bt) return false; bt.click(); return true; });
+  for (let i = 0; i < 60 && clicked && !/cart\.html$/.test(p.url()); i++) await p.waitForTimeout(1000);
+  const man = Buffer.from(t.bodies[Object.keys(t.bodies).find(n => /manifest\.txt$/.test(n)) || ''] || '', 'latin1').toString('utf8');
+  ok('upload after a portrait design: the upload prints square-on (no turn carried over)', /rotate=0°/.test(man) && !/rotate=(90|270)°/.test(man), (man.match(/rotate=\d+°/g) || []).join(','));
+  await t.ctx.close();
+}
+
+// ── own back: design the front online, upload my own back ──
+{
+  const t = await open(b, '/designer/designer.html', '?size=4x6&sides=1', true);
+  const { p } = t;
+  const printDesign = async () => {
+    const frame = p.frameLocator('.pps-designer-overlay iframe');
+    await frame.locator('#print:not([disabled])').waitFor({ timeout: 120000 });
+    await frame.locator('#print').click();
+    await frame.locator('#sheetGo').click();
+    await p.locator('.pps-designer-overlay').waitFor({ state: 'detached', timeout: 60000 });
+    await p.waitForTimeout(3000);
+  };
+  await p.click('[data-pps-design="open"]');
+  {
+    const frame = p.frameLocator('.pps-designer-overlay iframe');
+    await frame.locator('#print:not([disabled])').waitFor({ timeout: 120000 });
+    await frame.locator('[data-text="heading"]').click();
+    await frame.locator('#textInput').fill('Designed front');
+    await frame.locator('#textDone').click();
+  }
+  await printDesign();
+  await p.evaluate(() => { const bt = [...document.querySelectorAll('button')].find(x => (x.textContent || '').trim() === 'Both Sides'); bt && bt.click(); });
+  await p.waitForTimeout(1000);
+  const { jsPDF } = (await import('node:module')).createRequire(import.meta.url)(DEPS + '/jspdf/dist/jspdf.node.min.js');
+  const doc = new jsPDF({ unit: 'in', format: [6.25, 4.25], orientation: 'landscape' });
+  doc.text('MY OWN BACK', 2, 2);
+  const myBack = path.join(fs.mkdtempSync('/tmp/pps-pr-'), 'my-back.pdf'); fs.writeFileSync(myBack, Buffer.from(doc.output('arraybuffer')));
+  const boxes = p.locator('input[type=file][accept=".pdf,.jpg,.jpeg,.png"]:not([multiple])');
+  await boxes.nth((await boxes.count()) - 1).setInputFiles(myBack);
+  await p.waitForTimeout(3000);
+  ok('own back: a one-page design with my own back is not called out of date', (await p.locator('[data-pps-design="stale"]').count()) === 0,
+    await p.locator('[data-pps-design="stale"]').textContent().catch(() => ''));
+  ok('own back: approving it makes the package (it was refused as a stale design)', await approve(p), t.dialogs.slice(-1).join(' ').slice(0, 160));
+  t.dialogs.length = 0;
+  // A proof left open by a refused approval must not stop the run here.
+  await p.keyboard.press('Escape');
+  await p.evaluate(() => { const x = [...document.querySelectorAll('button')].filter(y => (y.textContent || '').trim() === '✕' && y.offsetParent && y.closest('[style*="z-index: 9999"]')); x.length && x[x.length - 1].click(); });
+  await p.waitForTimeout(500);
+  await p.evaluate(() => { const e = document.querySelector('[data-pps-design="edit"]'); e && e.click(); });
+  await printDesign().catch(e => t.dialogs.push('(designer did not print: ' + String(e.message).slice(0, 80) + ')'));
+  ok('own back: printing the design again asks before its page 2 replaces my back', t.dialogs.some(d => /You uploaded your own back \("my-back\.pdf"\)/.test(d)), t.dialogs.join(' | ').slice(0, 200));
+  ok('own back: …and OK keeps it, approved with the new design', await approve(p));
+  const clicked = await p.evaluate(() => { const bt = [...document.querySelectorAll('button')].find(x => /^Add to Order$/.test((x.textContent || '').trim()) && !x.disabled); if (!bt) return false; bt.click(); return true; });
+  for (let i = 0; i < 60 && clicked && !/cart\.html$/.test(p.url()); i++) await p.waitForTimeout(1000);
+  const man = Buffer.from(t.bodies[Object.keys(t.bodies).find(n => /manifest\.txt$/.test(n)) || ''] || '', 'latin1').toString('utf8');
+  ok('own back: the order carries my back, and the manifest prints the back from it', t.uploads.includes('my-back.pdf') && /2: Back[^\n]*\n[^\n]*\n    source file: my-back\.pdf/.test(man),
+    t.uploads.join(',') + ' | ' + (man.match(/source file:[^\n]*/g) || []).join(' | '));
+  await t.ctx.close();
+}
+
+await b.close();
+server.close();
+fs.rmSync(H, { recursive: true, force: true });
+console.log('\n' + checks + ' checks, ' + failed + ' failed');
+console.log(failed ? '>>> DESIGNER HOST FAILED' : '>>> DESIGNER HOST OK');
+process.exit(failed ? 1 : 0);

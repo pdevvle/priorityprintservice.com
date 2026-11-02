@@ -175,6 +175,11 @@ function pps_default_config() {
             // modal, which is the default. Same-origin only; the calculator
             // refuses anything else because the handshake is same-origin.
             'proof_url'                         => '',
+            // URL of the online designer ("Design it online" on the flat
+            // calculators): PPS Designer, pdevvle/priorityprintpad, deployed
+            // pinned by commit. Empty = off, the default. Same-origin only, like
+            // proof_url, because the handshake carries the customer's artwork.
+            'designer_url'                      => '',
             'non_inventory_fee'                 => 35,
             'backend_base_rate'                 => 10,    // flat per-order fee for brochures
             // Outfold (PB fold-out page tipped into the spine) — Tier C aggressive defaults
@@ -692,7 +697,7 @@ function pps_config_render_page() {
                 if ( ! array_key_exists( $key, $cfg['pcf'] ) ) continue;
                 if ( $key === 'shop_timezone' ) {
                     $cfg['pcf'][ $key ] = sanitize_text_field( $val );
-                } elseif ( $key === 'proof_url' ) {
+                } elseif ( $key === 'proof_url' || $key === 'designer_url' ) {
                     $cfg['pcf'][ $key ] = esc_url_raw( trim( (string) $val ) );
                 } elseif ( in_array( $key, array( 'shippo_api_token', 'shippo_origin_zip', 'rc_all4_vals', 'google_address_api_key' ) ) ) {
                     $cfg['pcf'][ $key ] = sanitize_text_field( $val );
@@ -1601,6 +1606,7 @@ function pps_config_tab_production( $cfg ) {
         ),
         'Artwork' => array(
             'proof_url'              => array( 'New Proof URL', '' ),
+            'designer_url'           => array( 'Online Designer URL', '' ),
             'art_pagesperhour'       => array( 'Art Pages/Hour', 'pages' ),
             'art_newdesignmodifier'  => array( 'New Design Modifier', '×' ),
         ),
@@ -1626,7 +1632,7 @@ function pps_config_tab_production( $cfg ) {
         echo '<table class="pps-ss"><tbody>';
         foreach ( $fields as $key => $meta ) {
             $val  = $pcf[ $key ] ?? '';
-            $type = in_array( $key, array( 'shop_timezone', 'shippo_api_token', 'shippo_origin_zip', 'sale_label', 'question_recipient_email', 'proof_url', 'google_address_api_key' ) ) ? 'text' : 'number';
+            $type = in_array( $key, array( 'shop_timezone', 'shippo_api_token', 'shippo_origin_zip', 'sale_label', 'question_recipient_email', 'proof_url', 'designer_url', 'google_address_api_key' ) ) ? 'text' : 'number';
             $step = ( is_numeric( $val ) && ( is_float( $val + 0 ) || strpos( (string) $val, '.' ) !== false ) ) ? '0.001' : '1';
             echo '<tr>';
             echo '<td style="font-weight:600;white-space:nowrap;width:1%;padding-right:10px;font-size:12px">' . esc_html( $meta[0] ) . '</td>';

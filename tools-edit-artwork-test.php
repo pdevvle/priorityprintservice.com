@@ -12,6 +12,12 @@
  * add-to-cart handler calls it for an edit. PPS_CALC_PHP points at another copy —
  * how the pre-fix file was run to prove it fails.
  *
+ * 2026-10-13: an edit that changes the job (size, sides, folds, perforations) kept
+ * the old line's approval package, so a 4×6 edited to 5×7 reached production with
+ * the 4×6 print file. Now the customer's own files are kept, the package is not, and
+ * an online-approved job is marked NOT APPROVED (pps_edit_shape_changed). The
+ * 21bb4ae file fails those checks.
+ *
  * Run: php tools-edit-artwork-test.php
  */
 $GLOBALS['t_checks'] = 0; $GLOBALS['t_failed'] = 0;
@@ -35,6 +41,9 @@ function lift( $src, $name ) {
 $fn = lift( $src, 'pps_carry_edit_artwork' );
 ok( 'the plugin has a function that carries artwork across an edit', $fn !== '' );
 if ( $fn === '' ) $fn = 'function pps_carry_edit_artwork( array $n, $o ) { return $n; }';   // the old behaviour, to show what it did
+$shape_fn = lift( $src, 'pps_edit_shape_changed' );
+if ( $shape_fn === '' ) $shape_fn = 'function pps_edit_shape_changed( $o, $n ) { return false; }';   // absent before 2026-10-13
+eval( $shape_fn );
 eval( $fn );
 
 // The handler must call it for an edit, before the new line is added.
@@ -65,6 +74,63 @@ ok( 'a job the customer could not approve is still marked NOT APPROVED after an 
 
 $new = pps_carry_edit_artwork( array( 'pps_artwork_path' => 'pps-artwork/2026/09/f1.jpg' ), null );
 ok( 'no old line → nothing changes', $new === array( 'pps_artwork_path' => 'pps-artwork/2026/09/f1.jpg' ) );
+
+// ── 2026-10-13: an edit that changes the job does not keep the old job's approval ──
+$pkg = array(
+    array( 'path' => 'pps-artwork/2026/10/a.pdf', 'name' => 'card.pdf' ),
+    array( 'path' => 'pps-artwork/2026/10/b.pdf', 'name' => 'card-back.pdf' ),
+    array( 'path' => 'pps-artwork/2026/10/c.pdf', 'name' => 'card_print-ready.pdf' ),
+    array( 'path' => 'pps-artwork/2026/10/d.jpg', 'name' => 'card_preview_front.jpg' ),
+    array( 'path' => 'pps-artwork/2026/10/e.jpg', 'name' => 'card_preview_back.jpg' ),
+    array( 'path' => 'pps-artwork/2026/10/f.txt', 'name' => 'card_manipulation_manifest.txt' ),
+);
+$m4x6 = array( 'calcType' => 'postcard', 'qty' => 100, 'sizeMode' => 'preset', 'sizeLabel' => '4×6', 'longEdge' => 3.5, 'shortEdge' => 2,
+    'sides' => 2, 'foldType' => 'none', 'foldDir' => 'long', 'perforation' => 0, 'perfDir' => 'length', 'perfPositions' => array( 50 ), 'proof' => 0 );
+$line = function( $meta, $files = null ) {
+    $l = array( 'pps_artwork_path' => 'pps-artwork/2026/10/a.pdf', 'pps_metadata' => json_encode( $meta ) );
+    if ( $files !== null ) $l['pps_artwork_files'] = $files;
+    return $l;
+};
+$names = function( $l ) { return array_map( function( $f ) { return $f['name']; }, $l['pps_artwork_files'] ?? array() ); };
+$old_line = $line( $m4x6, $pkg ); $old_line['pps_proof_hash'] = str_repeat( 'b', 64 );
+
+$new = pps_carry_edit_artwork( $line( array_merge( $m4x6, array( 'qty' => 250 ) ) ), $old_line );
+ok( 'an edit of the quantity only keeps the whole approval package', count( $names( $new ) ) === 6, implode( ',', $names( $new ) ) );
+ok( '… and is not marked for review', empty( $new['pps_prepress_review'] ) );
+
+$new = pps_carry_edit_artwork( $line( array_merge( $m4x6, array( 'sizeLabel' => '5×7' ) ) ), $old_line );
+ok( 'a size change keeps the customer\'s own files but not the print file, previews or manifest',
+    $names( $new ) === array( 'card.pdf', 'card-back.pdf' ), implode( ',', $names( $new ) ) );
+ok( '… and an online-approved job is marked NOT APPROVED', strpos( (string) ( $new['pps_prepress_review'] ?? '' ), 'Edited in the cart after approval' ) === 0, (string) ( $new['pps_prepress_review'] ?? '(none)' ) );
+ok( '… with no approval hash', ! isset( $new['pps_proof_hash'] ) );
+
+$new = pps_carry_edit_artwork( $line( array_merge( $m4x6, array( 'sizeLabel' => '5×7', 'proof' => 0.01 ) ) ), $old_line );
+ok( 'a staff-proof job that changed size drops the old package too, and is left to the staff proof',
+    $names( $new ) === array( 'card.pdf', 'card-back.pdf' ) && empty( $new['pps_prepress_review'] ), implode( ',', $names( $new ) ) );
+
+$cases = array(
+    'two sides to one'             => array( 'sides' => 1 ),
+    'a fold added'                 => array( 'foldType' => 'bifold' ),
+    'the fold direction'           => array( 'foldDir' => 'short' ),
+    'a perforation added'          => array( 'perforation' => 2000, 'perfPositions' => array( 50 ) ),
+    'a custom size'                => array( 'sizeMode' => 'custom', 'sizeLabel' => '6×4" custom', 'longEdge' => 6, 'shortEdge' => 4 ),
+);
+foreach ( $cases as $what => $d ) {
+    $new = pps_carry_edit_artwork( $line( array_merge( $m4x6, $d ) ), $old_line );
+    ok( "the package is not carried across $what", ! in_array( 'card_print-ready.pdf', $names( $new ), true ), implode( ',', $names( $new ) ) );
+}
+$perf = array_merge( $m4x6, array( 'perforation' => 2000, 'perfPositions' => array( 25 ) ) );
+$new = pps_carry_edit_artwork( $line( array_merge( $perf, array( 'perfPositions' => array( 60 ) ) ) ), $line( $perf, $pkg ) );
+ok( 'a moved perforation is a different job', ! in_array( 'card_print-ready.pdf', $names( $new ), true ) );
+$cust = array_merge( $m4x6, array( 'sizeMode' => 'custom', 'longEdge' => 6, 'shortEdge' => 4 ) );
+$new = pps_carry_edit_artwork( $line( array_merge( $cust, array( 'longEdge' => 7 ) ) ), $line( $cust, $pkg ) );
+ok( 'a custom size changed by an inch is a different job', ! in_array( 'card_print-ready.pdf', $names( $new ), true ) );
+$new = pps_carry_edit_artwork( $line( array_merge( $m4x6, array( 'longEdge' => 6, 'shortEdge' => 4 ) ) ), $old_line );
+ok( 'a preset\'s stale inches are not a change (the label is the size)', count( $names( $new ) ) === 6 );
+$new = pps_carry_edit_artwork( $line( array( 'sizeLabel' => '8.5×11', 'proof' => 0 ) ), $line( array( 'sizeLabel' => '5.5×8.5', 'proof' => 0 ), $pkg ) );
+ok( 'a booklet whose size changed drops the package as well', ! in_array( 'card_print-ready.pdf', $names( $new ), true ) );
+$new = pps_carry_edit_artwork( $line( array( 'qty' => 5 ) ), $line( array( 'sizeLabel' => '4×6' ), $pkg ) );
+ok( 'a line from an older build without the keys is not called changed', count( $names( $new ) ) === 6 );
 
 echo "\n{$GLOBALS['t_checks']} checks, {$GLOBALS['t_failed']} failed\n";
 echo $GLOBALS['t_failed'] ? ">>> EDIT ARTWORK FAILED\n" : ">>> EDIT ARTWORK OK\n";
