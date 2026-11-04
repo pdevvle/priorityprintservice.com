@@ -297,6 +297,30 @@ cost, as its own shipping line.
 Full rationale and the differences from the calculators' plan:
 `docs/NONCONTIGUOUS_SHIPPING_SPEC.md` § "Implemented for pay links".
 
+### Pay links: a choice of quantities
+
+`/ppspay [Trifold] @50 $151.49 @100 $287.83 @250 $485.88` gives the customer a
+quantity dropdown — each price the total for that quantity. The quote engine
+always supported tiers; until 2026-11-04 the parser never built them, so every
+price after the first `$` was **silently dropped** and a six-price command
+minted a one-price link. `pps_paylink_parse_tiers()` now reads the pairs:
+
+- **Strict, because a mispaired price is a real charge.** With two or more
+  quantities or prices, every `@qty` must be followed by exactly one price. A
+  price straight after its `@qty` may omit the `$` (the pairing is positional);
+  a stray number, a price with no quantity, a quantity with no price or a
+  repeated quantity refuses the whole link, naming the token. Two `$` prices
+  with no `@` refuse too — that used to charge the first.
+- **The minted note lists every pair as read**, so a misreading shows in the
+  thread rather than on the customer's page.
+- **Not with `~weight`** — one weight cannot rate the freight of every
+  quantity. One quantity per link to ship abroad.
+- **One item only.** On a multi-item link a row with two prices refuses
+  (`line_tiers`); the page has one quantity dropdown, not one per row.
+- `tiers` is on the REST handler's allow-list and in the outcome log, and
+  `tools-tests/paylinkroute.php` asserts it arrives — the guard over parser
+  fields cannot see it, because the quote always receives a `tiers` key.
+
 ### Pay links tell you when they are broken — ask them first
 
 `GET /wp-json/pps/v1/pay-link` is the one-call diagnosis, unauthenticated on

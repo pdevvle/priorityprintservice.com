@@ -752,15 +752,81 @@ ok('with everything: days',   $r['min_days'], 5);
 ok('with everything: ref',    $r['reference'], 'acme');
 ok('with everything: reuse',  $r['reusable'], true);
 ok('with everything: price',  $r['price'], 140.0);
-// FOUND 2026-11-04, PRE-EXISTING AND NOT FIXED HERE: a one-item command
-// returns no 'qty' at all, so the @500 above is silently dropped and the quote
-// is stored as one unit at $140. @qty works on a MULTI-item command, where
-// parse_lines reads it per row. Pinned as it actually behaves rather than as it
-// reads, so the day somebody fixes it this assertion is what tells them the
-// behaviour changed. The customer never sees a single tier's quantity, so the
-// visible cost is a reorder dividing a frozen price by 1 instead of 500.
-ok('single @qty is dropped',  array_key_exists('qty', $r), false);
+// Found 2026-11-04 and pinned as a bug; FIXED the same day by
+// pps_paylink_parse_tiers(). A one-item @qty used to be dropped, storing the
+// quote as one unit at $140 -- a reorder then divided the frozen price by 1.
+ok('single @qty is kept',     $r['qty'], 500);
+ok('single @qty tier',        $r['tiers'], array(array('qty' => 500, 'price' => 140.0)));
 ok('multi @qty is not',       parse('/ppspay [A] @250 $10 [B] @7 $20')['lines'][1]['qty'], 7);
+
+// --- a choice of quantities: [desc] @qty $price @qty $price ...
+// THE COMMAND THAT FOUND IT, verbatim from Missive, 2026-11-04. It minted a
+// one-price link at $287.83 -- the first $ -- and every other quantity vanished
+// without a word. Note "151.49" has no $: a price straight after its @qty is
+// paired positionally.
+$r = parse('/ppspay [Reorder: 5.5x16.5 Trifold 100lb text Gloss 4-4] *qbo @50pcs 151.49 @100pcs $287.83 @150pcs $324.13 @200pcs $444.77 @250 $485.88 @500 $725.41');
+ok('tiers: parses',           pcode($r), 'ok');
+ok('tiers: all six',          count($r['tiers']), 6);
+ok('tiers: first, no $',      $r['tiers'][0], array('qty' => 50, 'price' => 151.49));
+ok('tiers: pcs unit',         $r['tiers'][1], array('qty' => 100, 'price' => 287.83));
+ok('tiers: bare @250',        $r['tiers'][4], array('qty' => 250, 'price' => 485.88));
+ok('tiers: last',             $r['tiers'][5], array('qty' => 500, 'price' => 725.41));
+ok('tiers: description',      $r['description'], 'Reorder: 5.5x16.5 Trifold 100lb text Gloss 4-4');
+ok('tiers: qbo',              $r['qbo'], true);
+ok('tiers: price mirrors 1st',$r['price'], 151.49);
+ok('tiers: qty mirrors 1st',  $r['qty'], 50);
+ok('tiers: not lines',        array_key_exists('lines', $r), false);
+
+$r = parse('/ppspay [Trifold] @50 pcs $151.49 @1,000 $1,287.83 #acme !3');
+ok('tiers: spaced unit',      $r['tiers'][0], array('qty' => 50, 'price' => 151.49));
+ok('tiers: comma thousands',  $r['tiers'][1], array('qty' => 1000, 'price' => 1287.83));
+ok('tiers: flags survive',    array($r['reference'], $r['min_days']), array('acme', 3));
+// Order as typed; the quote engine sorts by quantity.
+ok('tiers: typed order kept', array_column(parse('[X] @500 $90 @100 $30')['tiers'], 'qty'), array(500, 100));
+
+// No @ at all keeps the old shape exactly: no qty key, no tiers key.
+$r = parse('/ppspay [Cards] $140');
+ok('plain: no tiers key',     array_key_exists('tiers', $r), false);
+ok('plain: no qty key',       array_key_exists('qty', $r), false);
+ok('plain: one @ bare price', parse('/ppspay [Cards] @500 95')['tiers'], array(array('qty' => 500, 'price' => 95.0)));
+ok('plain: unbracketed',      parse('/ppspay 500 postcards $250')['price'], 250.0);
+
+// Refusals -- each one a shape that used to charge the first price silently.
+ok('two $ no @ refuses',      pcode(parse('/ppspay [Cards] $140 $180')), 'several_prices');
+ok('duplicate qty refuses',   pcode(parse('/ppspay [Cards] @50 $10 @50 $12')), 'tier_duplicate');
+ok('qty without price',       pcode(parse('/ppspay [Cards] @50 $10 @100')), 'tier_no_price');
+ok('price without qty',       pcode(parse('/ppspay [Cards] @50 $10 $20')), 'tier_orphan');
+ok('stray number refuses',    pcode(parse('/ppspay [Cards] @50 $10 @100 18 20')), 'tier_stray');
+ok('unbracketed desc refuses',pcode(parse('/ppspay 500 postcards @500 $250 @1000 $400')), 'tier_stray');
+ok('lone @ without price',    pcode(parse('/ppspay [Cards] @500')), 'qty_price');
+ok('zero qty refuses',        pcode(parse('/ppspay [Cards] @0 $5')), 'qty');
+ok('zero tier price refuses', pcode(parse('/ppspay [Cards] @50 $10 @100 $0')), 'tier_price');
+// The refusal names the token, so the operator can find it in a long line.
+ok('refusal names token',     strpos(parse('/ppspay [C] @50 $1 @100 $2 $3')->get_error_message(), '$3') !== false, true);
+// One weight cannot price several quantities' freight.
+ok('weight + tiers refuses',  pcode(parse('/ppspay [Cards] @50 $10 @100 $18 ~12lb')), 'weight_tiers');
+ok('weight + one tier ok',    parse('/ppspay [Cards] @50 $10 ~12lb')['weight_lb'], 12.0);
+// A multi-ITEM row with two prices used to keep the first; now refused.
+ok('multi-item row tiers',    pcode(parse('/ppspay [A] @50 $10 @100 $18 [B] @1 $5')), 'line_tiers');
+ok('multi-item row 2 qtys',   pcode(parse('/ppspay [A] @50 @100 $18 [B] @1 $5')), 'line_tiers');
+// Brackets still fence everything: numbers and sigils inside are description.
+ok('inside brackets inert',   parse('/ppspay [Cards @50 $10 @100 $18] $25')['price'], 25.0);
+
+// --- pps_paylink_create(): the tiers reach the quote, and bad ones refuse
+$GLOBALS['product_ok'] = true;
+$GLOBALS['opts']['pps_paylink_product'] = 7;
+$tt = array(array('qty' => 50, 'price' => 151.49), array('qty' => 100, 'price' => '287.83'));
+$res = pps_paylink_create(array('description' => 'Trifold', 'price' => 151.49, 'tiers' => $tt));
+ok('create: mints',           is_wp_error($res), false);
+ok('create: tiers stored',    $GLOBALS['captured']['tiers'], array(array('qty' => 50, 'price' => 151.49), array('qty' => 100, 'price' => 287.83)));
+ok('create: no tiers = one',  (pps_paylink_create(array('description' => 'X', 'price' => 9, 'qty' => 3)) && true) ? $GLOBALS['captured']['tiers'] : null,
+                              array(array('qty' => 3, 'price' => 9.0)));
+ok('create: bad tier refuses',pcode(pps_paylink_create(array('description' => 'X', 'price' => 9,
+                              'tiers' => array(array('qty' => 5, 'price' => 9), array('qty' => 6, 'price' => 0))))), 'tiers');
+ok('create: dup tier refuses',pcode(pps_paylink_create(array('description' => 'X', 'price' => 9,
+                              'tiers' => array(array('qty' => 5, 'price' => 9), array('qty' => 5, 'price' => 8))))), 'tiers');
+ok('create: weight + tiers',  pcode(pps_paylink_create(array('description' => 'X', 'price' => 9, 'weight_lb' => 12, 'tiers' => $tt))), 'weight_tiers');
+ok('summary',                 pps_paylink_tiers_summary($tt), "50 — \$151.49\n100 — \$287.83");
 
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);
