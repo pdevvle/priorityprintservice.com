@@ -475,7 +475,7 @@ function pps_paylink_clean_description( $d ) {
  * runs untouched. A one-line command therefore parses exactly as it did before,
  * including every refusal.
  *
- * @return array<array{description:string,qty:int,price:float}>|null
+ * @return array<array{description:string,qty:int,price:float}>|WP_Error|null
  */
 function pps_paylink_parse_lines( $text ) {
     if ( ! preg_match_all( '/\[([^\[\]]*)\]/s', (string) $text, $m, PREG_OFFSET_CAPTURE ) ) return null;
@@ -492,6 +492,16 @@ function pps_paylink_parse_lines( $text ) {
         // A $ price is required per line. Without one this is not the
         // multi-line shape at all, so hand the whole thing back.
         if ( ! preg_match( '/\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/', $tail, $pm ) ) return null;
+
+        // Two prices (or two quantities) after one item used to keep the first
+        // and drop the rest without a word. A choice of quantities exists only
+        // on a single-item link -- the quote page has one quantity dropdown,
+        // not one per row -- so this is refused, naming the item.
+        if ( preg_match_all( '/\$\s*[0-9]/', $tail ) > 1 || preg_match_all( '/@\s*[0-9]/', $tail ) > 1 ) {
+            return new WP_Error( 'line_tiers',
+                '[' . pps_paylink_clean_description( $m[1][ $i ][0] ) . '] has more than one quantity or price after it.'
+                . ' On a multi-item link each item takes one @qty and one $price. A choice of quantities works on a single-item link: [Job] @50 $151.49 @100 $287.83.' );
+        }
         $price = pps_paylink_parse_price( $pm[1] );
         if ( null === $price || $price <= 0 ) return null;
 
@@ -508,6 +518,148 @@ function pps_paylink_parse_lines( $text ) {
         $lines[] = array( 'description' => $desc, 'qty' => $qty, 'price' => $price );
     }
     return $lines;
+}
+
+/**
+ * A choice of quantities on one item:
+ *
+ *   [Trifold 5.5x16.5, 100lb gloss] @50 $151.49 @100 $287.83 @250 $485.88
+ *
+ * The customer picks one from a dropdown; each price is the TOTAL for that
+ * quantity, as the console's tier fields have always meant. The quote engine
+ * has supported this since day one -- the parser never built it. Until
+ * 2026-11-04 every price after the first was silently dropped, so the command
+ * above minted a one-price link at $151.49 and said nothing.
+ *
+ * Read from the text OUTSIDE the brackets, flags already stripped. Returns:
+ *   null      -- no @ and at most one $: not a quantity list, so the older
+ *                single-price rules run exactly as before;
+ *   tiers     -- array{qty:int,price:float}[], in the order typed, plus 'rest';
+ *   WP_Error  -- anything that cannot be read without guessing.
+ *
+ * STRICT ON PURPOSE. A wrong price is worse than a refusal (the same rule as
+ * the single-price parser), and with several prices on the line the cost of
+ * pairing one with the wrong quantity is a real charge on a real card. So with
+ * two or more quantities or prices, every quantity must be followed by exactly
+ * one price and nothing else numeric may sit between them. A price straight
+ * after its @qty may omit the $ ("@50pcs 151.49" -- the pairing is positional);
+ * a number anywhere else, a price with no quantity, a quantity with no price,
+ * or a quantity given twice is refused, naming the token.
+ *
+ * One @qty with one bare number is still accepted ("[Cards] @500 95"): that is
+ * a single price, and it parsed before this existed.
+ *
+ * @return array{tiers:array,rest:string}|WP_Error|null
+ */
+function pps_paylink_parse_tiers( $text ) {
+    $text = (string) $text;
+    // @qty may carry a unit glued on or after a space: @50pcs, @50 pcs, @1,000.
+    $re = '/@\s*([0-9][0-9,]*)(?:\s*(?:pcs?|pieces?|ea|each|qty|copies|units?|sets?)\b)?'
+        . '|\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)'
+        . '|(?<=^|\s)([0-9][0-9,]*(?:\.[0-9]{1,2})?)(?=$|\s|,)/i';
+    preg_match_all( $re, $text, $m, PREG_SET_ORDER );
+
+    $toks = array();
+    foreach ( $m as $t ) {
+        if ( isset( $t[1] ) && '' !== $t[1] )      $toks[] = array( 'at',   $t[1], trim( $t[0] ) );
+        elseif ( isset( $t[2] ) && '' !== $t[2] )  $toks[] = array( 'cash', $t[2], trim( $t[0] ) );
+        elseif ( isset( $t[3] ) && '' !== $t[3] )  $toks[] = array( 'bare', $t[3], trim( $t[0] ) );
+    }
+    $count = array( 'at' => 0, 'cash' => 0, 'bare' => 0 );
+    foreach ( $toks as $t ) $count[ $t[0] ]++;
+
+    if ( 0 === $count['at'] ) {
+        if ( $count['cash'] <= 1 ) return null;   // the single-price rules own this
+        $shown = array();
+        foreach ( $toks as $t ) if ( 'cash' === $t[0] ) $shown[] = $t[2];
+        return new WP_Error( 'several_prices',
+            'There are ' . count( $shown ) . ' prices (' . implode( ', ', $shown ) . ') and no quantities, so I cannot tell which to charge.'
+            . ' For a choice of quantities put @qty before each price: @50 $151.49 @100 $287.83.' );
+    }
+
+    $strip = function ( $text, $toks ) {
+        foreach ( $toks as $t ) {
+            $text = preg_replace( '/' . preg_quote( $t[2], '/' ) . '/', ' ', $text, 1 );
+        }
+        return $text;
+    };
+
+    // One quantity, one price: a single tier. With a $ the price is the $, as
+    // in the single-price rules, and other bare numbers are left to the
+    // description; without one, a lone bare number is the price.
+    if ( 1 === $count['at'] && $count['cash'] <= 1 ) {
+        $at = null; $pr = null;
+        foreach ( $toks as $t ) {
+            if ( 'at' === $t[0] ) $at = $t;
+            elseif ( 'cash' === $t[0] ) $pr = $t;
+        }
+        if ( ! $pr && 1 === $count['bare'] ) {
+            foreach ( $toks as $t ) if ( 'bare' === $t[0] ) $pr = $t;
+        }
+        if ( ! $pr ) {
+            if ( $count['bare'] > 1 ) return null;   // the single-price rules refuse it as ambiguous, as before
+            return new WP_Error( 'qty_price', $at[2] . ' has no price after it. Write it as ' . $at[2] . ' $250.' );
+        }
+        $qty   = (int) str_replace( ',', '', $at[1] );
+        $price = pps_paylink_parse_price( $pr[1] );
+        if ( $qty < 1 ) return new WP_Error( 'qty', 'A quantity must be at least 1 — "' . $at[2] . '" is not.' );
+        if ( null === $price || $price <= 0 ) return null;   // the price check below refuses it, as before
+        return array( 'tiers' => array( array( 'qty' => $qty, 'price' => $price ) ), 'rest' => $strip( $text, array( $at, $pr ) ) );
+    }
+
+    // Several: strictly @qty $price, @qty $price, ...
+    $tiers = array();
+    $seen  = array();
+    $n     = count( $toks );
+    for ( $i = 0; $i < $n; $i++ ) {
+        $t = $toks[ $i ];
+        if ( 'bare' === $t[0] ) {
+            // Not straight after an @ (that case is handled below), so it is
+            // neither a quantity nor a price -- usually a description that
+            // was left outside the brackets.
+            return new WP_Error( 'tier_stray',
+                '"' . $t[2] . '" sits among the quantities and prices with no @ or $. Put the description in [ ] and mark every number: [Job] @50 $151.49 @100 $287.83.' );
+        }
+        if ( 'cash' === $t[0] ) {
+            return new WP_Error( 'tier_orphan',
+                $t[2] . ' has no @quantity before it. With several prices each one follows its quantity: @50 $151.49 @100 $287.83.' );
+        }
+        // An @qty: the next token must be its $price.
+        $next = ( $i + 1 < $n ) ? $toks[ $i + 1 ] : null;
+        if ( ! $next || 'at' === $next[0] ) {
+            return new WP_Error( 'tier_no_price', $t[2] . ' has no price after it. Each quantity takes its own $price.' );
+        }
+        // A bare number DIRECTLY after an @qty is that quantity's price
+        // ("@50pcs 151.49"): the pairing is positional and unambiguous, and a
+        // forgotten $ is the commonest slip in a long list. Anything that
+        // breaks the strict @ then price rhythm is still refused above and
+        // below, and the minted note echoes every pair back.
+        $qty   = (int) str_replace( ',', '', $t[1] );
+        $price = pps_paylink_parse_price( $next[1] );
+        if ( $qty < 1 ) return new WP_Error( 'qty', 'A quantity must be at least 1 — "' . $t[2] . '" is not.' );
+        if ( null === $price || $price <= 0 ) {
+            return new WP_Error( 'tier_price', $t[2] . ' ' . $next[2] . ' — a price must be more than $0.' );
+        }
+        // The quote engine dedupes by quantity, later winning. Silently losing
+        // one of two prices the operator typed is the bug this function exists
+        // to end, so a repeat is refused instead.
+        if ( isset( $seen[ $qty ] ) ) {
+            return new WP_Error( 'tier_duplicate', 'The quantity ' . number_format( $qty ) . ' appears twice. Give each quantity once.' );
+        }
+        $seen[ $qty ] = true;
+        $tiers[] = array( 'qty' => $qty, 'price' => $price );
+        $i++;   // its price is consumed
+    }
+    return array( 'tiers' => $tiers, 'rest' => $strip( $text, $toks ) );
+}
+
+/** The confirmation line that echoes a quantity list back to the operator. */
+function pps_paylink_tiers_summary( array $tiers ) {
+    $out = array();
+    foreach ( $tiers as $t ) {
+        $out[] = number_format( (int) $t['qty'] ) . ' — $' . number_format( (float) $t['price'], 2 );
+    }
+    return implode( "\n", $out );
 }
 
 function pps_paylink_parse_command( $text ) {
@@ -566,6 +718,7 @@ function pps_paylink_parse_command( $text ) {
     // OUTSIDE the brackets, so a description mentioning qbo or a #tag stays
     // description -- the same guarantee the one-line form gives.
     $lines = pps_paylink_parse_lines( $text );
+    if ( is_wp_error( $lines ) ) return $lines;
     if ( null !== $lines ) {
         $outside = preg_replace( '/\[[^\[\]]*\]/s', ' ', $text );
         $flags   = pps_paylink_parse_flags( $outside );
@@ -613,8 +766,28 @@ function pps_paylink_parse_command( $text ) {
     $text      = $flags['rest'];
     if ( '' !== $flags['weight_bad'] ) return pps_paylink_weight_error( $flags['weight_bad'] );
 
+    // ── @qty $price, once or several times ───────────────────────────────
+    $tiers  = array();
+    $parsed = pps_paylink_parse_tiers( $text );
+    if ( is_wp_error( $parsed ) ) return $parsed;
+    if ( null !== $parsed ) {
+        $tiers = $parsed['tiers'];
+        $text  = $parsed['rest'];
+        // One weight cannot serve several quantities: 500 pieces do not weigh
+        // what 50 do, and the shipping charge is rated on the quote's weight
+        // whichever quantity is picked. Refused rather than under-charging
+        // the freight on every larger quantity.
+        if ( count( $tiers ) > 1 && $weight_lb > 0 ) {
+            return new WP_Error( 'weight_tiers',
+                'A ~weight cannot go on a link with several quantities — each quantity ships a different weight.'
+                . ' To ship abroad, send one quantity per link with its own ~weight.' );
+        }
+    }
+
     $price = null;
-    if ( preg_match( '/\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/', $text, $m ) ) {
+    if ( $tiers ) {
+        $price = $tiers[0]['price'];
+    } elseif ( preg_match( '/\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/', $text, $m ) ) {
         $price = pps_paylink_parse_price( $m[1] );
         $text  = str_replace( $m[0], ' ', $text );
     } else {
@@ -651,7 +824,7 @@ function pps_paylink_parse_command( $text ) {
                 : 'The brackets are empty — put the job description inside them.' );
     }
 
-    return array(
+    $out = array(
         'description' => $description,
         'price'       => $price,
         'qbo'         => $qbo,
@@ -661,6 +834,14 @@ function pps_paylink_parse_command( $text ) {
         'noship'      => $noship,
         'weight_lb'   => $weight_lb,
     );
+    // Only when an @qty was given, so a plain "[job] $250" returns exactly the
+    // shape it always did. 'qty' and 'price' mirror the first tier for every
+    // caller and log line that reads a single figure.
+    if ( $tiers ) {
+        $out['qty']   = $tiers[0]['qty'];
+        $out['tiers'] = $tiers;
+    }
+    return $out;
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -688,6 +869,28 @@ function pps_paylink_create( array $a ) {
 
     $qty = isset( $a['qty'] ) ? absint( $a['qty'] ) : 1;
     if ( $qty < 1 ) $qty = 1;
+
+    // A choice of quantities. Unlike lines, a bad tier REFUSES rather than
+    // being dropped: the customer picks from these, and a quantity that
+    // silently vanished from the dropdown is the bug that introduced them.
+    $tiers = array( array( 'qty' => $qty, 'price' => $price ) );
+    if ( ! empty( $a['tiers'] ) && is_array( $a['tiers'] ) ) {
+        $tiers = array();
+        $seen  = array();
+        foreach ( $a['tiers'] as $t ) {
+            $tq = ( is_array( $t ) && isset( $t['qty'] ) ) ? absint( $t['qty'] ) : 0;
+            $tp = pps_paylink_parse_price( ( is_array( $t ) && isset( $t['price'] ) ) ? $t['price'] : '' );
+            if ( $tq < 1 || null === $tp || $tp <= 0 || isset( $seen[ $tq ] ) ) {
+                return new WP_Error( 'tiers', 'Every quantity needs a price above $0, and each quantity may appear once.' );
+            }
+            $seen[ $tq ] = true;
+            $tiers[] = array( 'qty' => $tq, 'price' => round( $tp, 2 ) );
+        }
+        if ( count( $tiers ) > 1 && ! empty( $a['weight_lb'] ) && (float) $a['weight_lb'] > 0 ) {
+            return new WP_Error( 'weight_tiers',
+                'A ~weight cannot go on a link with several quantities — each quantity ships a different weight.' );
+        }
+    }
 
     // Several line items, each with its own quantity and price. Normalised
     // here rather than trusted, because this is the figure the customer pays:
@@ -733,7 +936,9 @@ function pps_paylink_create( array $a ) {
         'min_days'   => $min_days,
         'allow_date' => $min_days > 0,
         'product'    => $pid,
-        'tiers'      => array( array( 'qty' => $qty, 'price' => $price ) ),
+        // Several tiers render as a quantity dropdown on the quote page; the
+        // engine sorts them by quantity. Ignored there when lines are present.
+        'tiers'      => $tiers,
         'lines'      => $lines,
         'reusable'   => ! empty( $a['reusable'] ),
         'noship'     => ! empty( $a['noship'] ),
@@ -1266,6 +1471,9 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
         // untested was the seam between them, and an allow-list silently drops
         // whatever nobody remembered to add.
         'lines'       => isset( $body['lines'] ) ? $body['lines'] : array(),
+        // A choice of quantities. Added to this allow-list in the same commit
+        // as the parser field, because 'lines' was not, and shipped broken.
+        'tiers'       => isset( $body['tiers'] ) ? $body['tiers'] : array(),
         'reusable'    => ! empty( $body['reusable'] ),
         'noship'      => ! empty( $body['noship'] ),
         'weight_lb'   => isset( $body['weight_lb'] ) ? $body['weight_lb'] : 0,
@@ -1321,8 +1529,16 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
         // time the first production use of the feature went unrecorded at
         // exactly the moment it was worth seeing.
         'wt'           => isset( $body['weight_lb'] ) ? (float) $body['weight_lb'] : 0,
+        // And the quantity count, logged in the commit that adds it.
+        'tiers'        => isset( $body['tiers'] ) && is_array( $body['tiers'] ) ? count( $body['tiers'] ) : 1,
         'conversation' => '' !== $conversation,
     ) );
+    // Echo a quantity list back, so the operator sees what was READ rather
+    // than what they meant -- the silent misreading this replaces minted a
+    // one-price link from a six-price command and showed only a URL.
+    if ( ! empty( $body['tiers'] ) && is_array( $body['tiers'] ) && count( $body['tiers'] ) > 1 ) {
+        $note .= "\n\nCustomer chooses from:\n" . pps_paylink_tiers_summary( $body['tiers'] );
+    }
     pps_paylink_queue_note( $conversation, $note );
 
     return new WP_REST_Response( array( 'ok' => true ) + $res, 201 );
@@ -1774,6 +1990,8 @@ Paper: 80lb Matte Text
 
 /ppspay [Booklets 16pp] @250 $695.02 [Booklets 24pp] @250 $891.06 *qbo
 
+/ppspay [Trifold 5.5x16.5] @50 $151.49 @100 $287.83 @250 $485.88   (customer picks one)
+
 /ppspay [Business cards, 1000] $140 ~12lb        (can ship abroad)
 /ppspay *virtual [Rush fee on order 87540] $65   (nothing ships)
 /ppspay *revoke 20261104-0912
@@ -1784,7 +2002,11 @@ Paper: 80lb Matte Text
                         a <code>#tag</code> or the word qbo freely.<br>
                         <code>$177.40</code> the price. Must sit outside the brackets.<br>
                         <code>@250</code> the quantity. On a multi-item link each bracket takes its own
-                        <code>@qty</code> and its own <code>$price</code>, and the customer pays one total.<br>
+                        <code>@qty</code> and its own <code>$price</code>, and the customer pays one total.
+                        On a one-item link, several <code>@qty $price</code> pairs give the customer a
+                        quantity dropdown; each price is the total for that quantity, and the reply in the
+                        thread lists every pair as it was read. A pair that cannot be read refuses the
+                        whole link rather than dropping it. Not with <code>~weight</code>, which is per quantity.<br>
                         <code>*qbo</code> take payment through QuickBooks. Omit for card checkout.<br>
                         <code>!5</code> minimum production days — this also turns the delivery-date picker on.<br>
                         <code>#acme-october</code> use this instead of the timestamp in the link.<br>

@@ -148,10 +148,48 @@ ok('ref survives',           $GLOBALS['captured']['token'], 'acme-oct');
 ok('min_days survives',      $GLOBALS['captured']['min_days'], 5);
 ok('qty on a line',          $GLOBALS['captured']['lines'][0]['qty'], 100);
 
+// --- a choice of quantities, through the real handler (2026-11-04)
+// The command that minted a one-price link at $287.83. 'tiers' is a NEW parser
+// field, and the guard below cannot see it: the quote always receives a key
+// called 'tiers' (the single tier), so a dropped field would still pass there.
+// Hence the count, and every pair, asserted here.
+$GLOBALS['shutdown'] = array();
+$req = new WP_REST_Request('POST', array(
+    'text' => '/ppspay [Reorder: 5.5x16.5 Trifold 100lb text Gloss 4-4] *qbo @50pcs 151.49 @100pcs $287.83 @150pcs $324.13 @200pcs $444.77 @250 $485.88 @500 $725.41',
+    'conversation' => 'conv-tiers',
+), array('x_pps_key' => 'shh'));
+$GLOBALS['captured'] = array();
+$res = pps_paylink_handle_request($req);
+ok('tiers: mints',           $res->status, 201);
+ok('tiers: six reach quote', count($GLOBALS['captured']['tiers'] ?? array()), 6);
+ok('tiers: first',           $GLOBALS['captured']['tiers'][0], array('qty' => 50, 'price' => 151.49));
+ok('tiers: last',            $GLOBALS['captured']['tiers'][5], array('qty' => 500, 'price' => 725.41));
+ok('tiers: spec kept',       $GLOBALS['captured']['specs'], 'Reorder: 5.5x16.5 Trifold 100lb text Gloss 4-4');
+ok('tiers: no lines',        $GLOBALS['captured']['lines'], array());
+// The minted note echoes what was READ, so a misreading is visible in the
+// thread instead of on the customer's page.
+$noteText = '';
+foreach ($GLOBALS['shutdown'] as $f) {
+    $vars = (new ReflectionFunction($f))->getStaticVariables();
+    if (isset($vars['text'])) $noteText .= $vars['text'];
+}
+ok('tiers: note echoes list', strpos($noteText, "Customer chooses from:\n50 — \$151.49\n100 — \$287.83") !== false, true);
+ok('tiers: note has last',    strpos($noteText, '500 — $725.41') !== false, true);
+
+// A refused quantity list mints nothing and says why, naming the token.
+$GLOBALS['shutdown'] = array();
+$GLOBALS['captured'] = array();
+$res = post('/ppspay [Cards] @50 $10 @100 $18 $20');
+ok('tiers: refusal mints nothing', $GLOBALS['captured'], array());
+ok('tiers: refusal code',    $res->data['error'] ?? '', 'tier_orphan');
+
 // --- THE GUARD: every field the parser produces must be forwarded.
 // This is the assertion that would have caught 'lines' before a customer did.
 // A new parser field now fails here until the handler passes it on.
 $parsed = pps_paylink_parse_command('/ppspay [A] @2 $10 [B] @3 $20');
+// Posts the very command it parsed. It used to read whatever the previous
+// post() left behind, which held only while that happened to be a lines command.
+post('/ppspay [A] @2 $10 [B] @3 $20');
 $post_keys = array_keys($GLOBALS['captured']);
 $missing = array();
 // These are RENAMED on the way to the quote, by design, so their absence
@@ -167,6 +205,17 @@ foreach (array_keys($parsed) as $k) {
     if (!array_key_exists($k, $GLOBALS['captured'])) $missing[] = $k;
 }
 ok('no parser field is dropped', $missing, array());
+
+// The same guard over the one-item quantity shape, which has its own fields.
+$parsed = pps_paylink_parse_command('/ppspay [A] @2 $10 @3 $20 *reuse !2 #g');
+post('/ppspay [A] @2 $10 @3 $20 *reuse !2 #g');
+$missing = array();
+foreach (array_keys($parsed) as $k) {
+    if (in_array($k, $renamed, true)) continue;
+    if (!array_key_exists($k, $GLOBALS['captured'])) $missing[] = $k;
+}
+ok('no tier-shape field is dropped', $missing, array());
+ok('tier-shape tiers arrive',  $GLOBALS['captured']['tiers'], $parsed['tiers']);
 
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);
