@@ -558,11 +558,110 @@ function pps_quote_pick_intl_rate( $rates ) {
     return $best;
 }
 
+/**
+ * The customs declaration a UPS international rate needs.
+ *
+ * FOUND THE HARD WAY, 2026-11-04, against the live Shippo account. Rating
+ * Phoenix -> Toronto with a parcel and nothing else returned ELEVEN rates and
+ * not one of them UPS. UPS answered only:
+ *
+ *   111549  Hard: Invalid Shipment Contents Value.
+ *   111210  Hard: The requested service is unavailable between the selected locations.
+ *   (and ShippoCommon: Attribute "customs_declaration" must not be empty.)
+ *
+ * FedEx, USPS and DHL quoted happily, which is what made it dangerous: the
+ * response looked healthy, and this code filters to UPS, so every foreign
+ * address would have been refused as unservable. The feature would have read
+ * as "no carrier serves Canada" and nobody could have traced it.
+ *
+ * The same lane WITH this declaration returns four UPS services, cheapest
+ * Standard at $53.08 / 4 days. So the owner's UPS-only rule is sound
+ * internationally; the request was simply incomplete.
+ *
+ * THIS IS FOR RATING ONLY. The real customs paperwork is filled in by a human
+ * when the label is bought in Shippo, because international labels need forms
+ * the ship panel does not do. So the commodity is described generically and
+ * accurately rather than by pasting the operator's spec into a declaration the
+ * shop is not actually filing -- FedEx rejected a spec-derived description as
+ * inconsistent with its HS code, and a customs form is not the place to
+ * discover that.
+ *
+ * @param float  $weight_lb Parcel weight, which is also the declared net weight.
+ * @param float  $value     What the goods are worth: the quoted print price.
+ *                          Declared in full. Under-declaring to spare the
+ *                          recipient duty is fraud, and the page already tells
+ *                          them duties are theirs to pay.
+ * @param string $country   Destination, which picks the export-exemption code.
+ */
+function pps_quote_intl_customs( $weight_lb, $value, $country ) {
+    $country = strtoupper( (string) $country );
+    $signer  = function_exists( 'get_bloginfo' ) ? (string) get_bloginfo( 'name' ) : '';
+    if ( '' === trim( $signer ) ) $signer = 'Priority Print Service';
+    return array(
+        'certify'            => true,
+        'certify_signer'     => $signer,
+        'contents_type'      => 'MERCHANDISE',
+        // RETURN, not ABANDON: an undeliverable job comes back to us rather
+        // than being destroyed at the border.
+        'non_delivery_option' => 'RETURN',
+        // DDU -- the recipient pays import duties and taxes, which is exactly
+        // what the payment page tells them. DDP would bill the shop for duties
+        // nobody quoted.
+        'incoterm'           => 'DDU',
+        // Shippo's own guidance: NOEEI_30_36 for most US->CA shipments,
+        // NOEEI_30_37_a for most other US exports.
+        'eel_pfc'            => 'CA' === $country ? 'NOEEI_30_36' : 'NOEEI_30_37_a',
+        'items'              => array( array(
+            'description'    => 'Printed material',
+            'quantity'       => 1,
+            'net_weight'     => (string) round( (float) $weight_lb, 2 ),
+            'mass_unit'      => 'lb',
+            'value_amount'   => (string) round( (float) $value, 2 ),
+            'value_currency' => 'USD',
+            'origin_country' => 'US',
+            // Printed books, brochures, leaflets and similar printed matter.
+            'hs_code'        => '4901.99',
+        ) ),
+    );
+}
+
 /** The Shippo token, or '' when the integration is not configured. */
 function pps_quote_shippo_token() {
     if ( ! function_exists( 'pps_get_config' ) ) return '';
     $cfg = pps_get_config();
     return (string) ( $cfg['pcf']['shippo_api_token'] ?? '' );
+}
+
+/**
+ * The origin we export from.
+ *
+ * The domestic transit lookup sends zip + country and nothing else, which
+ * Shippo is happy with. An international rate is a different question -- it is
+ * an export, and the carrier wants to know where from -- so the WooCommerce
+ * store address is sent with it when the shop has one.
+ *
+ * The configured Shippo origin ZIP still wins over the store's postcode: that
+ * setting exists precisely because the place goods ship from need not be the
+ * address on the invoice. Everything else is a best-effort addition, and an
+ * empty store address leaves this exactly as thin as the domestic call.
+ */
+function pps_quote_intl_origin( $zip ) {
+    $out = array( 'zip' => (string) $zip, 'country' => 'US' );
+    if ( ! function_exists( 'get_option' ) ) return $out;
+    $street = trim( (string) get_option( 'woocommerce_store_address', '' ) );
+    $city   = trim( (string) get_option( 'woocommerce_store_city', '' ) );
+    $raw    = trim( (string) get_option( 'woocommerce_default_country', '' ) );
+    $name   = function_exists( 'get_bloginfo' ) ? trim( (string) get_bloginfo( 'name' ) ) : '';
+    // WooCommerce stores this as "US:AZ" -- country and state in one option.
+    $state = '';
+    if ( false !== strpos( $raw, ':' ) ) {
+        list( , $state ) = explode( ':', $raw, 2 );
+    }
+    if ( '' !== $street ) $out['street1'] = $street;
+    if ( '' !== $city )   $out['city']    = $city;
+    if ( '' !== $state )  $out['state']   = $state;
+    if ( '' !== $name )   $out['name']    = $name;
+    return $out;
 }
 
 /**
@@ -574,7 +673,7 @@ function pps_quote_shippo_token() {
  *
  * @return array|WP_Error
  */
-function pps_quote_intl_rate( $country, $postcode, $state, $city, $weight_lb ) {
+function pps_quote_intl_rate( $country, $postcode, $state, $city, $weight_lb, $street = '', $value = 0, $name = '' ) {
     $country   = pps_quote_country_code( $country );
     $weight_lb = (float) $weight_lb;
     if ( '' === $country || pps_quote_is_domestic( $country ) ) {
@@ -591,9 +690,18 @@ function pps_quote_intl_rate( $country, $postcode, $state, $city, $weight_lb ) {
     $postcode = sanitize_text_field( (string) $postcode );
     $state    = sanitize_text_field( (string) $state );
     $city     = sanitize_text_field( (string) $city );
+    $street   = sanitize_text_field( (string) $street );
+    $name     = sanitize_text_field( (string) $name );
+    $value    = (float) $value;
 
-    $key = 'pps_qintl_v1_' . $country . '_'
-         . substr( md5( strtolower( $postcode . '|' . $state . '|' . $city ) ), 0, 12 )
+    // The street is in the key as well as the request. Rates are mostly
+    // postcode-driven, but a residential surcharge is address-driven, so two
+    // addresses in one postcode can differ -- and a key that ignored the
+    // street would serve one of them the other's price. v2 because adding the
+    // street and the customs declaration changes what the cached figure means,
+    // and a v1 entry must not be read as if it were this.
+    $key = 'pps_qintl_v2_' . $country . '_'
+         . substr( md5( strtolower( $postcode . '|' . $state . '|' . $city . '|' . $street ) ), 0, 12 )
          . '_' . (string) ceil( $weight_lb );
     $hit = get_transient( $key );
     if ( is_array( $hit ) ) {
@@ -621,17 +729,24 @@ function pps_quote_intl_rate( $country, $postcode, $state, $city, $weight_lb ) {
             'Content-Type'  => 'application/json',
         ),
         'body'    => wp_json_encode( array(
-            'address_from' => array( 'zip' => $origin, 'country' => 'US' ),
+            'address_from' => pps_quote_intl_origin( $origin ),
             // City and street are sent, unlike the domestic transit lookup:
             // outside the US a postal code alone often does not identify a
             // lane, and some served countries have no postal code at all.
             'address_to'   => array_filter( array(
+                // The recipient's name is collected by the form anyway, and
+                // every carrier wants it on an international consignment.
+                'name'    => $name,
+                'street1' => $street,
                 'zip'     => $postcode,
                 'state'   => $state,
                 'city'    => $city,
                 'country' => $country,
             ), function ( $v ) { return '' !== $v; } ),
             'parcels'      => pps_quote_intl_parcels( $weight_lb ),
+            // Without this UPS returns NO RATES AT ALL on an international
+            // lane -- see pps_quote_intl_customs() for what that cost to find.
+            'customs_declaration' => pps_quote_intl_customs( $weight_lb, $value, $country ),
             'async'        => false,
         ) ),
         'timeout' => 20,
@@ -682,7 +797,26 @@ function pps_quote_ship_charge( array $q, array $p ) {
         return new WP_Error( 'intl_no_weight',
             'This quote cannot be shipped outside the US as it stands. Reply to us and we will send you an updated link with shipping included.' );
     }
-    return pps_quote_intl_rate( $country, $ship['postcode'], $ship['state'], $ship['city'], $weight );
+    // The declared customs value is what the customer is paying for the
+    // printing -- the goods' actual worth. UPS will not price an international
+    // lane without it.
+    $lines = pps_quote_normalise_lines( isset( $q['lines'] ) ? $q['lines'] : array() );
+    if ( $lines ) {
+        $value = pps_quote_lines_total( $lines );
+    } else {
+        $tiers = pps_quote_normalise_tiers( isset( $q['tiers'] ) ? $q['tiers'] : array() );
+        $idx   = isset( $p['tier'] ) ? absint( $p['tier'] ) : 0;
+        if ( ! isset( $tiers[ $idx ] ) ) $idx = 0;
+        $value = isset( $tiers[ $idx ]['price'] ) ? (float) $tiers[ $idx ]['price'] : 0;
+    }
+
+    // The name is NOT part of the cache key: it cannot change a rate, and
+    // keying on it would miss the cache for every new customer at an address
+    // already priced.
+    return pps_quote_intl_rate(
+        $country, $ship['postcode'], $ship['state'], $ship['city'], $weight,
+        $ship['address_1'], $value, trim( $ship['first'] . ' ' . $ship['last'] )
+    );
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -998,6 +1132,11 @@ add_action( 'rest_api_init', function () {
                 'postcode'   => isset( $b['postcode'] ) ? (string) $b['postcode'] : '',
                 'state'      => isset( $b['state'] ) ? (string) $b['state'] : '',
                 'city'       => isset( $b['city'] ) ? (string) $b['city'] : '',
+                // The street reaches the carrier (a residential surcharge is
+                // address-driven) and the tier decides the declared customs
+                // value, which UPS will not rate an international lane without.
+                'address_1'  => isset( $b['street'] ) ? (string) $b['street'] : '',
+                'tier'       => isset( $b['tier'] ) ? $b['tier'] : 0,
             );
             $charge = pps_quote_ship_charge( $q, $post );
 
@@ -1563,6 +1702,7 @@ function pps_quote_form_view( array $q, $error ) {
             qCountry = document.getElementById('q-country'),
             qCity    = document.getElementById('q-city'),
             qZip     = document.getElementById('q-zip'),
+            qStreet  = document.getElementById('q-a1'),
             qPaid    = null,      // the rate currently displayed
             qTimer   = null,
             qSeq     = 0;
@@ -1615,18 +1755,24 @@ function pps_quote_form_view( array $q, $error ) {
             var code = qCountry.value || 'US';
             if (code === 'US') { qClear(); return; }
             var intlRegion = document.getElementById('q-state-intl');
+            var tierSel = document.getElementById('q-tier');
             var body = {
                 token:    QCFG.token,
                 form_v:   QCFG.formV,
                 country:  code,
                 postcode: qZip ? qZip.value : '',
                 state:    intlRegion && !intlRegion.disabled ? intlRegion.value : '',
-                city:     qCity ? qCity.value : ''
+                city:     qCity ? qCity.value : '',
+                street:   qStreet ? qStreet.value : '',
+                // Decides the declared customs value, so a quantity change
+                // changes what UPS is asked about, not just what we display.
+                tier:     tierSel ? (parseInt(tierSel.value, 10) || 0) : 0
             };
-            // A city is the minimum worth asking on: many lanes cannot be
-            // priced from a country alone, and asking on every keystroke of an
-            // address burns the rate limit for nothing.
-            if (!body.city) { qClear(); qShowIncl(true); return; }
+            // A street and a city are the minimum worth asking on. Many lanes
+            // cannot be priced from a country alone, a residential surcharge
+            // needs the street, and asking on every keystroke of an address
+            // burns the rate limit for nothing.
+            if (!body.street || !body.city) { qClear(); qShowIncl(true); return; }
             // Each request carries a sequence number and only the newest answer
             // is allowed to paint. Without it a slow reply for Germany can land
             // after a fast one for Canada and overwrite the right price.
@@ -1743,10 +1889,12 @@ function pps_quote_form_view( array $q, $error ) {
             if (qZip)  qZip.addEventListener('input', qQueueShip);
             var qRegion = document.getElementById('q-state-intl');
             if (qRegion) qRegion.addEventListener('input', qQueueShip);
-            // A different quantity changes the printing half of the total, and
-            // the shipping half is already known -- no need to ask again.
+            if (qStreet) qStreet.addEventListener('input', qQueueShip);
+            // A different quantity is a different declared customs value, so
+            // the carrier has to be asked again -- it is not only the printing
+            // half of the sum that moves.
             var qTier = document.getElementById('q-tier');
-            if (qTier) qTier.addEventListener('change', qPaint);
+            if (qTier) qTier.addEventListener('change', function(){ qPaint(); qQueueShip(); });
         }
     })();
     </script>

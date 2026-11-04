@@ -283,6 +283,13 @@ cost, as its own shipping line.
   The browser is told what it will be charged; it never says.
 - The parcel split is a **verbatim port** of the 45 lb / 19×13×6 carton math in
   `pps-calculators.php`. If that rule changes, change both in the same commit.
+- **UPS returns NO international rates without a customs declaration.** Rating
+  a real Toronto lane with just a parcel gave 15 rates, every one FedEx/USPS/DHL,
+  while UPS answered `Invalid Shipment Contents Value`. Since this filters to
+  UPS, every foreign address would have been refused as unservable and nothing
+  would have said why. `pps_quote_intl_customs()` is load-bearing — do not
+  "simplify" the rate request by dropping it, and do not drop the declared
+  value, which is what UPS prices on.
 - **Labels are still bought by hand in Shippo** — `pps-missive-ship.php` refuses
   non-US because international labels need customs forms. The order carries a
   note saying so.

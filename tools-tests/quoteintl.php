@@ -71,6 +71,7 @@ function wp_trim_words($t, $n = 12) { return $t; }
 function wp_json_encode($v) { return json_encode($v); }
 function wp_http_validate_url($u) { return $u; }
 function pps_get_config() { return $GLOBALS['cfg']; }
+function get_bloginfo($k = 'name') { return $GLOBALS['blogname'] ?? 'Priority Print Service'; }
 
 function wp_remote_post($url, $args = array()) {
     $GLOBALS['http_calls'][] = json_decode($args['body'] ?? '{}', true);
@@ -137,6 +138,33 @@ ok('US needs a region',     pps_quote_requires_region('US'), true);
 ok('CA needs a province',   pps_quote_requires_region('CA'), true);
 ok('GB does not',           pps_quote_requires_region('GB'), false);
 ok('SG does not',           pps_quote_requires_region('SG'), false);
+
+/* ── The origin we export from ────────────────────────────────────────── */
+
+$GLOBALS['opts']['woocommerce_store_address']  = '21801 N 16th St';
+$GLOBALS['opts']['woocommerce_store_city']     = 'Phoenix';
+$GLOBALS['opts']['woocommerce_default_country'] = 'US:AZ';
+$o = pps_quote_intl_origin('85027');
+ok('origin zip is the config one', $o['zip'], '85027');
+ok('origin country',           $o['country'], 'US');
+ok('origin street',            $o['street1'], '21801 N 16th St');
+ok('origin city',              $o['city'], 'Phoenix');
+// WooCommerce keeps country and state in one option as "US:AZ".
+ok('origin state is split out', $o['state'], 'AZ');
+ok('origin named',             $o['name'], 'Priority Print Service');
+// A shop with no store address set must still get the thin origin the
+// domestic lookup has always sent, not a fatal or an empty street.
+$GLOBALS['opts']['woocommerce_store_address']   = '';
+$GLOBALS['opts']['woocommerce_store_city']      = '';
+$GLOBALS['opts']['woocommerce_default_country'] = 'US';
+$thin = pps_quote_intl_origin('85027');
+ok('thin origin has no street', isset($thin['street1']), false);
+ok('thin origin has no state',  isset($thin['state']), false);
+ok('thin origin still rates',   $thin, array('zip' => '85027', 'country' => 'US', 'name' => 'Priority Print Service'));
+// Restored for the lookup tests below.
+$GLOBALS['opts']['woocommerce_store_address']   = '21801 N 16th St';
+$GLOBALS['opts']['woocommerce_store_city']      = 'Phoenix';
+$GLOBALS['opts']['woocommerce_default_country'] = 'US:AZ';
 
 /* ── Cartons ───────────────────────────────────────────────────────────── */
 
@@ -233,7 +261,7 @@ $GLOBALS['http'][] = array('rates' => array(
     rate('UPS', 'ups_worldwide_saver', '188.40', 3),
     rate('UPS', 'ups_worldwide_express', '305.10', 2),
 ));
-$got = pps_quote_intl_rate('CA', 'M5V 3L9', 'ON', 'Toronto', 30);
+$got = pps_quote_intl_rate('CA', 'M5V 3L9', 'ON', 'Toronto', 30, '2001 Windy Terrace', 250.0, 'Laura Wong');
 ok('rates a real lane',     $got['amount'], 188.4);
 ok('and its days',          $got['transit_days'], 3);
 ok('fresh, not cached',     $got['cached'], false);
@@ -246,12 +274,40 @@ ok('country sent',          $sent['address_to']['country'], 'CA');
 // City and street matter abroad in a way they do not domestically: outside the
 // US a postal code often does not identify a lane on its own.
 ok('city sent',             $sent['address_to']['city'], 'Toronto');
+ok('origin is complete',    $sent['address_from']['city'], 'Phoenix');
+ok('recipient named',       $sent['address_to']['name'], 'Laura Wong');
 ok('weight becomes cartons', count($sent['parcels']), 1);
+ok('street sent',           $sent['address_to']['street1'], '2001 Windy Terrace');
+
+// THE DECLARATION UPS WILL NOT RATE WITHOUT. Verified against the live Shippo
+// account on 2026-11-04: the same lane with a parcel and no declaration
+// returned eleven rates, every one FedEx/USPS/DHL, while UPS answered only
+// "Invalid Shipment Contents Value". This code filters to UPS, so every
+// foreign address would have been refused as unservable.
+ok('customs sent',          isset($sent['customs_declaration']), true);
+$cd = $sent['customs_declaration'];
+ok('certified',             $cd['certify'], true);
+ok('merchandise',           $cd['contents_type'], 'MERCHANDISE');
+// RETURN, not ABANDON: an undeliverable job comes home.
+ok('returns if undelivered',$cd['non_delivery_option'], 'RETURN');
+// DDU is what the page promises the customer: duties are theirs. DDP would
+// bill the shop for duties nobody quoted.
+ok('recipient pays duty',   $cd['incoterm'], 'DDU');
+// The value is the PRINT PRICE, declared in full. Under-declaring to spare the
+// recipient duty is fraud.
+ok('declares the value',    $cd['items'][0]['value_amount'], '250');
+ok('in USD',                $cd['items'][0]['value_currency'], 'USD');
+ok('declares the weight',   $cd['items'][0]['net_weight'], '30');
+ok('weight in pounds',      $cd['items'][0]['mass_unit'], 'lb');
+ok('made in the US',        $cd['items'][0]['origin_country'], 'US');
+ok('printed matter code',   $cd['items'][0]['hs_code'], '4901.99');
+// Shippo's guidance: NOEEI_30_36 for US->CA, NOEEI_30_37_a for other exports.
+ok('CA export code',        $cd['eel_pfc'], 'NOEEI_30_36');
 
 // Second ask for the same lane and weight is served from cache, with no
 // carrier call -- the rate limit protects the quota, the cache protects it from
 // a page left open.
-$again = pps_quote_intl_rate('CA', 'M5V 3L9', 'ON', 'Toronto', 30);
+$again = pps_quote_intl_rate('CA', 'M5V 3L9', 'ON', 'Toronto', 30, '2001 Windy Terrace', 250.0);
 ok('cached second time',    $again['cached'], true);
 ok('no second call',        count($GLOBALS['http_calls']), 1);
 ok('same amount',           $again['amount'], 188.4);
@@ -259,9 +315,9 @@ ok('same amount',           $again['amount'], 188.4);
 // A different weight is a different price, so it is a different cache entry.
 reset_http();
 $GLOBALS['http'][] = array('rates' => array(rate('UPS', 'ups_worldwide_saver', '188.40', 3)));
-pps_quote_intl_rate('CA', 'M5V 3L9', 'ON', 'Toronto', 30);
+pps_quote_intl_rate('CA', 'M5V 3L9', 'ON', 'Toronto', 30, '2001 Windy Terrace', 250.0);
 $GLOBALS['http'][] = array('rates' => array(rate('UPS', 'ups_worldwide_saver', '402.75', 3)));
-$heavy = pps_quote_intl_rate('CA', 'M5V 3L9', 'ON', 'Toronto', 120);
+$heavy = pps_quote_intl_rate('CA', 'M5V 3L9', 'ON', 'Toronto', 120, '2001 Windy Terrace', 250.0);
 ok('weight is in the key',  $heavy['amount'], 402.75);
 ok('two calls made',        count($GLOBALS['http_calls']), 2);
 
@@ -269,14 +325,14 @@ ok('two calls made',        count($GLOBALS['http_calls']), 2);
 // rather than maintaining a list of countries. Refused, never priced at zero.
 reset_http();
 $GLOBALS['http'][] = array('rates' => array());
-$none = pps_quote_intl_rate('AS', '96799', '', 'Pago Pago', 30);
+$none = pps_quote_intl_rate('AS', '96799', '', 'Pago Pago', 30, '1 Main St', 250.0);
 ok('unservable refuses',    is_wp_error($none), true);
 ok('and says which',        $none->get_error_code(), 'intl_unservable');
 // Nothing cached, so the next attempt asks again rather than remembering a
 // refusal for three days.
 reset_http();
 $GLOBALS['http'][] = new WP_Error('http', 'down');
-$down = pps_quote_intl_rate('CA', 'M5V 3L9', 'ON', 'Toronto', 30);
+$down = pps_quote_intl_rate('CA', 'M5V 3L9', 'ON', 'Toronto', 30, '2001 Windy Terrace', 250.0);
 ok('unreachable refuses',   $down->get_error_code(), 'intl_unreachable');
 
 // Guards before any call is spent.
@@ -288,6 +344,65 @@ ok('no call was spent',     count($GLOBALS['http_calls']), 0);
 $GLOBALS['cfg'] = array('pcf' => array());
 ok('no token refuses',      pps_quote_intl_rate('CA', 'M5V', 'ON', 'Toronto', 30)->get_error_code(), 'intl_unconfigured');
 $GLOBALS['cfg'] = array('pcf' => array('shippo_api_token' => 'tok_test', 'shippo_origin_zip' => '85027'));
+
+/* ── The real thing: UPS's actual reply, as a fixture ─────────────────── */
+// Copied from a live Shippo rating of Phoenix -> Toronto, 30 lb, on
+// 2026-11-04. Hand-written fixtures test what I imagined the API returns;
+// this tests what it does. The InvoiceLink lesson, applied before it cost
+// anything.
+$live_ups = array(
+    array('provider' => 'UPS', 'amount' => '53.08', 'currency' => 'USD',
+          'amount_local' => '74.16', 'currency_local' => 'CAD', 'estimated_days' => 4,
+          'attributes' => array('CHEAPEST'),
+          'servicelevel' => array('name' => 'Standard℠', 'token' => 'ups_standard',
+                                  'extended_token' => 'ups_standard_us')),
+    array('provider' => 'UPS', 'amount' => '100.33', 'currency' => 'USD', 'estimated_days' => 2,
+          'servicelevel' => array('name' => 'Worldwide Expedited®', 'token' => 'ups_expedited',
+                                  'extended_token' => 'ups_expedited_worldwide_us')),
+    array('provider' => 'UPS', 'amount' => '127.55', 'currency' => 'USD', 'estimated_days' => 1,
+          'servicelevel' => array('name' => 'Saver®', 'token' => 'ups_saver')),
+    array('provider' => 'UPS', 'amount' => '137.29', 'currency' => 'USD', 'estimated_days' => 1,
+          'servicelevel' => array('name' => 'Worldwide Express®', 'token' => 'ups_express')),
+    // Everything else the account returned on that lane, which must all be
+    // ignored: FedEx Ground was CHEAPER than the UPS pick at $62.72, and the
+    // owner rule is UPS only.
+    array('provider' => 'FedEx', 'amount' => '62.72', 'currency' => 'USD', 'estimated_days' => 4,
+          'servicelevel' => array('name' => 'Ground', 'token' => 'fedex_ground')),
+    array('provider' => 'USPS', 'amount' => '161.35', 'currency' => 'USD', 'estimated_days' => 8,
+          'servicelevel' => array('name' => 'Priority Mail International',
+                                  'token' => 'usps_priority_mail_international')),
+    array('provider' => 'DHL Express', 'amount' => '95.71', 'currency' => 'USD', 'estimated_days' => 1,
+          'servicelevel' => array('name' => 'Worldwide', 'token' => 'dhl_express_worldwide')),
+);
+$live = pps_quote_pick_intl_rate($live_ups);
+ok('live: picks UPS Standard',  $live['service'], 'Standard℠');
+ok('live: at its real price',   $live['amount'], 53.08);
+ok('live: with its own days',   $live['transit_days'], 4);
+ok('live: carrier is UPS',      $live['carrier'], 'UPS');
+// ups_standard must NOT be caught by the ground-saver exclusion: for US->CA it
+// IS the ground service and the cheapest thing UPS offers.
+ok('live: standard not excluded', $live['amount'] < 62.72, true);
+// amount_local/currency_local are CAD on these rates. Reading the local pair
+// would charge 74.16 as if it were dollars.
+ok('live: ignores amount_local', $live['currency'], 'USD');
+
+/* ── The declaration itself ───────────────────────────────────────────── */
+
+$cd = pps_quote_intl_customs(30, 250.0, 'CA');
+ok('CA uses NOEEI_30_36',   $cd['eel_pfc'], 'NOEEI_30_36');
+// Shippo's guidance: everything that is not Canada takes the other code.
+ok('GB uses NOEEI_30_37_a', pps_quote_intl_customs(30, 250.0, 'GB')['eel_pfc'], 'NOEEI_30_37_a');
+ok('AU too',                pps_quote_intl_customs(30, 250.0, 'AU')['eel_pfc'], 'NOEEI_30_37_a');
+ok('lowercase country',     pps_quote_intl_customs(30, 250.0, 'ca')['eel_pfc'], 'NOEEI_30_36');
+ok('signer from the site',  $cd['certify_signer'], 'Priority Print Service');
+ok('one commodity',         count($cd['items']), 1);
+// A generic, accurate commodity rather than the operator's spec: FedEx
+// rejected a spec-derived description as inconsistent with its HS code, and a
+// customs declaration is not the place to find that out. The real paperwork is
+// filled in by a human at label purchase.
+ok('generic description',   $cd['items'][0]['description'], 'Printed material');
+ok('cents are kept',        pps_quote_intl_customs(30, 1586.08, 'CA')['items'][0]['value_amount'], '1586.08');
+ok('weight rounds',         pps_quote_intl_customs(29.955, 250.0, 'CA')['items'][0]['net_weight'], '29.96');
 
 /* ── What this submission owes ─────────────────────────────────────────── */
 
@@ -336,6 +451,60 @@ $v2 = charge($q_wt, array(
 ok('foreign card, US job',     $v2, null);
 ok('no call spent for it',     count($GLOBALS['http_calls']), 0);
 
+// THE DECLARED VALUE FOLLOWS THE QUOTE, not a default. UPS prices the lane
+// partly on it, and it is also what the recipient will be charged duty on.
+reset_http();
+$GLOBALS['http'][] = array('rates' => array(rate('UPS', 'ups_standard', '53.08', 4)));
+charge(array('noship' => false, 'weight_lb' => 30.0, 'tiers' => array(array('qty' => 250, 'price' => 695.02))),
+       array('pps_form_v' => '2', 'country' => 'CA', 'city' => 'Toronto',
+             'postcode' => 'M5V 3L9', 'state' => 'ON', 'address_1' => '2001 Windy Terrace'));
+ok('value is the tier price', $GLOBALS['http_calls'][0]['customs_declaration']['items'][0]['value_amount'], '695.02');
+ok('street reaches the carrier', $GLOBALS['http_calls'][0]['address_to']['street1'], '2001 Windy Terrace');
+
+// A multi-line quote declares the SUM, which is what the customer is paying.
+reset_http();
+$GLOBALS['http'][] = array('rates' => array(rate('UPS', 'ups_standard', '53.08', 4)));
+charge(array('noship' => false, 'weight_lb' => 30.0, 'lines' => array(
+           array('description' => 'A', 'qty' => 250, 'price' => 695.02),
+           array('description' => 'B', 'qty' => 250, 'price' => 891.06),
+       )),
+       array('pps_form_v' => '2', 'country' => 'CA', 'city' => 'Toronto',
+             'postcode' => 'M5V 3L9', 'state' => 'ON', 'address_1' => '2001 Windy Terrace'));
+ok('multi-line declares the sum', $GLOBALS['http_calls'][0]['customs_declaration']['items'][0]['value_amount'], '1586.08');
+
+// A different quantity is a different declared value, so tier 1 is not tier 0.
+reset_http();
+$GLOBALS['http'][] = array('rates' => array(rate('UPS', 'ups_standard', '53.08', 4)));
+$q_tiers = array('noship' => false, 'weight_lb' => 30.0, 'tiers' => array(
+    array('qty' => 250, 'price' => 250.0), array('qty' => 500, 'price' => 420.0)));
+charge($q_tiers, array('pps_form_v' => '2', 'country' => 'CA', 'city' => 'Toronto',
+                       'postcode' => 'M5V 3L9', 'state' => 'ON',
+                       'address_1' => '2001 Windy Terrace', 'tier' => 1));
+ok('tier picks the value',    $GLOBALS['http_calls'][0]['customs_declaration']['items'][0]['value_amount'], '420');
+// An out-of-range tier falls back to the first rather than declaring nothing.
+reset_http();
+$GLOBALS['http'][] = array('rates' => array(rate('UPS', 'ups_standard', '53.08', 4)));
+charge($q_tiers, array('pps_form_v' => '2', 'country' => 'CA', 'city' => 'Toronto',
+                       'postcode' => 'M5V 3L9', 'state' => 'ON',
+                       'address_1' => '2001 Windy Terrace', 'tier' => 99));
+ok('bad tier falls back',     $GLOBALS['http_calls'][0]['customs_declaration']['items'][0]['value_amount'], '250');
+
+// Two addresses in one postcode are two cache entries: a residential surcharge
+// is address-driven, so serving one of them the other's price undercharges.
+reset_http();
+$GLOBALS['http'][] = array('rates' => array(rate('UPS', 'ups_standard', '53.08', 4)));
+pps_quote_intl_rate('CA', 'M5V 3L9', 'ON', 'Toronto', 30, '1 King St', 250.0);
+$GLOBALS['http'][] = array('rates' => array(rate('UPS', 'ups_standard', '71.40', 4)));
+$other = pps_quote_intl_rate('CA', 'M5V 3L9', 'ON', 'Toronto', 30, '2 Queen St', 250.0);
+ok('street is in the key',    $other['amount'], 71.40);
+// ...but the NAME must not split it. Keying on the recipient would miss the
+// cache for every new customer at an address already priced, and a name
+// cannot change a carrier's rate.
+$GLOBALS['http'][] = array('rates' => array(rate('UPS', 'ups_standard', '99.99', 4)));
+$same = pps_quote_intl_rate('CA', 'M5V 3L9', 'ON', 'Toronto', 30, '2 Queen St', 250.0, 'Someone Else');
+ok('name does not split it',  $same['amount'], 71.40);
+ok('both were asked',         count($GLOBALS['http_calls']), 2);
+
 /* ── The REST route, driven for real ──────────────────────────────────── */
 
 $route = $GLOBALS['routes']['pps/v1/quote/ship-quote'] ?? null;
@@ -358,11 +527,17 @@ $GLOBALS['meta'] = array('_q_token' => 'tok123', '_q_product' => 7, '_q_weight_l
 reset_http();
 $GLOBALS['http'][] = array('rates' => array(rate('UPS', 'ups_worldwide_saver', '188.40', 3)));
 $res = $call(array('token' => 'tok123', 'form_v' => '2', 'country' => 'CA',
-                   'postcode' => 'M5V 3L9', 'state' => 'ON', 'city' => 'Toronto'));
+                   'postcode' => 'M5V 3L9', 'state' => 'ON', 'city' => 'Toronto',
+                   'street' => '2001 Windy Terrace', 'tier' => 0));
 ok('route quotes',             $res->data['ok'], true);
 ok('route amount',             $res->data['amount'], 188.4);
 ok('route is not domestic',    $res->data['domestic'], false);
 ok('route names the service',  $res->data['service'], 'ups_worldwide_saver');
+
+// The route must forward the street and the tier, not just the postcode. This
+// is the seam that dropped 'lines' in October, pointed at a different field.
+ok('route forwards street',    $GLOBALS['http_calls'][0]['address_to']['street1'], '2001 Windy Terrace');
+ok('route forwards a value',   isset($GLOBALS['http_calls'][0]['customs_declaration']), true);
 
 // The same quote, asked about a US address: delivery is inside the price.
 $res = $call(array('token' => 'tok123', 'form_v' => '2', 'country' => 'US', 'city' => 'Phoenix'));

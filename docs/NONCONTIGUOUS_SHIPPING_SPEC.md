@@ -192,3 +192,65 @@ recipient.
 
 Regression gate: `tools-tests/quoteintl.php` (108 assertions, mutation-tested).
 
+### UPS will not rate an international lane without a customs declaration
+
+Caught on **2026-11-04, before deploy**, by rating a real lane against the live
+Shippo account instead of trusting the code. Phoenix → Toronto, 30 lb, parcel
+and addresses only:
+
+| | |
+|---|---|
+| Rates returned | **15 — FedEx, USPS, DHL. Not one UPS.** |
+| UPS said | `111549 Hard: Invalid Shipment Contents Value`<br>`111210 Hard: The requested service is unavailable between the selected locations` |
+| Shippo said | `Attribute "customs_declaration" must not be empty` |
+
+The response looked healthy. Rates came back. But this code filters to UPS by
+owner rule, so **every foreign address would have been refused as unservable**
+and the feature would have read as "no carrier serves Canada" — with nothing in
+any log pointing at the real cause.
+
+The same lane **with** a declaration returns four UPS services:
+
+| UPS service | price | days |
+|---|---|---|
+| **Standard℠** | **$53.08** | 4 |
+| Worldwide Expedited® | $100.33 | 2 |
+| Saver® | $127.55 | 1 |
+| Worldwide Express® | $137.29 | 1 |
+
+So the owner's UPS-only rule is sound internationally — the request was simply
+incomplete. `pps_quote_intl_customs()` now builds it. What it carries, and why:
+
+- **The declared value is the print price, in full.** UPS prices partly on it
+  (that is the `111549`), and it is what the recipient is assessed duty on.
+  Under-declaring to spare them is fraud.
+- **`DDU`** — the recipient pays duties, which is exactly what the payment page
+  tells them. `DDP` would bill the shop for duties nobody quoted.
+- **`RETURN`**, not `ABANDON` — an undeliverable job comes home.
+- **`NOEEI_30_36`** for Canada, `NOEEI_30_37_a` elsewhere, per Shippo's guidance.
+- **A generic commodity** (`Printed material`, HS `4901.99`) rather than the
+  operator's spec. FedEx rejected a spec-derived description as inconsistent
+  with its HS code, and a customs declaration is not the place to discover that.
+  **This declaration is for RATING ONLY** — the real paperwork is filled in by a
+  human when the label is bought in Shippo.
+
+Two related corrections the same test forced:
+
+- **The origin is now a full address** (`pps_quote_intl_origin()`, from the
+  WooCommerce store address, with the configured Shippo origin ZIP still
+  winning). The domestic lookup sends zip + country and Shippo is content; an
+  export is a different question and could not be verified in that thin form.
+- **The destination carries street and recipient name.** The street is in the
+  cache key as well as the request, because a residential surcharge is
+  address-driven; the name is deliberately *not*, because it cannot change a
+  rate and keying on it would miss the cache for every new customer at a
+  known address.
+
+Verified by sending **the exact payload the PHP builds** to the live API: UPS
+Standard, $53.08, 4 days — the cheapest of all 15 rates — which is what
+`pps_quote_pick_intl_rate()` selects when fed that real response.
+
+One note worth keeping: UPS returned `110971 RatedShipmentAlert: Your invoice
+may vary from the displayed reference rates`. The shop absorbs that drift by
+the no-margin rule, which is the exposure the 3-day cache bounds.
+

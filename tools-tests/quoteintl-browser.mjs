@@ -87,8 +87,14 @@ ok('US: can submit',          s.submitOff, false);
 ok('US: delivery included',   s.incl, 'Delivery included — this is the total.');
 
 // ── Canada: a province is required, the ZIP is not ──────────────────────
+// A street AND a city are now required before anything is asked of the
+// carrier: a residential surcharge is address-driven, and asking on every
+// keystroke burns the rate limit.
 await page.fill('#q-city', 'Toronto');
 await page.selectOption('#q-country', 'CA');
+await page.waitForTimeout(1000);
+ok('no quote without a street', await page.evaluate(() => document.getElementById('q-intl').hidden), true);
+await page.fill('#q-a1', '2001 Windy Terrace');
 await page.waitForTimeout(1400);
 s = await st();
 ok('CA: state select off',    s.usDisabled, true);
@@ -116,6 +122,9 @@ const asked = await page.evaluate(() => window.__asked[window.__asked.length - 1
 ok('sent the token',          asked.token, 'tok123');
 ok('sent the country',        asked.country, 'CA');
 ok('sent the city',           asked.city, 'Toronto');
+ok('sent the street',         asked.street, '2001 Windy Terrace');
+// The tier decides the declared customs value, so it travels too.
+ok('sent the tier',           asked.tier, 0);
 
 // ── Singapore: a region is optional, because it has none ────────────────
 await page.selectOption('#q-country', 'SG');
@@ -127,6 +136,7 @@ ok('SG: still quotes',        s.intlHidden, false);
 // ── a refusal must stop the sale, not pass the domestic price ───────────
 await page.evaluate(() => { window.__reply = { ok: false, error: 'intl_unservable', message: 'We could not get a shipping price for that address.' }; });
 await page.fill('#q-city', 'Pago Pago');
+await page.fill('#q-a1', '1 Main St');
 await page.waitForTimeout(1400);
 s = await st();
 ok('refused: summary hidden', s.intlHidden, true);
@@ -181,6 +191,7 @@ const incl2 = () => page2.evaluate(() => document.querySelector('.js-q-incl').te
 const original = await incl2();
 ok('tiers: own wording',      original, 'Delivery included — the price shown is the total.');
 await page2.fill('#q-city', 'Toronto');
+await page2.fill('#q-a1', '2001 Windy Terrace');
 await page2.selectOption('#q-country', 'CA');
 await page2.waitForTimeout(1400);
 ok('tiers: foreign wording',  await incl2(),
