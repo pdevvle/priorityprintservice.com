@@ -307,14 +307,60 @@ function pps_paylink_parse_flags( $text ) {
         $text = str_replace( $m[0], ' ', $text );
     }
 
+    // ~18lb — the parcel weight, and the one thing an international shipping
+    // rate cannot be invented from. Nothing else in a pay link knows it: the
+    // calculators derive weight from sheets and paper stock, while an
+    // operator-minted link carries a description and a price and nothing more.
+    // So it is asked for explicitly, and a link without one does not quote
+    // abroad at all -- it says "contact us for a shipping quote" instead of
+    // charging a number no one computed.
+    //
+    // THE TILDE IS REQUIRED. "80lb Matte Text" is a paper, not a parcel, and a
+    // spec line that lands outside the brackets by accident must not become the
+    // shipping weight of the job. Nothing else in the command language uses ~.
+    $weight_lb  = 0.0;
+    $weight_bad = '';
+    if ( preg_match( '/(?:^|\s)~\s*([0-9]+(?:\.[0-9]{1,2})?)\s*([A-Za-z]*)(?=$|\s)/', $text, $m ) ) {
+        // Stripped either way. Leaving a rejected weight in the text would hand
+        // its digits to the price scanner, and the operator would be told their
+        // price was ambiguous when what was actually wrong was the weight.
+        $text = str_replace( $m[0], ' ', $text );
+        $unit = strtolower( $m[2] );
+        $val  = (float) $m[1];
+        if ( '' !== $unit && ! in_array( $unit, array( 'lb', 'lbs', 'pound', 'pounds' ), true ) ) {
+            $weight_bad = trim( $m[1] . ' ' . $m[2] );
+        } elseif ( $val <= 0 || $val > 2000 ) {
+            // 0 would read as "no weight given" further down, which is a
+            // different thing from "the operator typed a weight of zero".
+            $weight_bad = trim( $m[1] . ' ' . $m[2] );
+        } else {
+            $weight_lb = $val;
+        }
+    }
+
     return array(
-        'reference' => $reference,
-        'min_days'  => $min_days,
-        'qbo'       => $qbo,
-        'reusable'  => $reusable,
-        'noship'    => $noship,
-        'rest'      => $text,
+        'reference'  => $reference,
+        'min_days'   => $min_days,
+        'qbo'        => $qbo,
+        'reusable'   => $reusable,
+        'noship'     => $noship,
+        'weight_lb'  => $weight_lb,
+        'weight_bad' => $weight_bad,
+        'rest'       => $text,
     );
+}
+
+/**
+ * The refusal for a weight that was typed but could not be read.
+ *
+ * Shared because both the one-line and the multi-line branch read flags, and a
+ * weight rejected in one shape and ignored in the other is the kind of
+ * difference nobody finds until a foreign customer cannot check out.
+ */
+function pps_paylink_weight_error( $bad ) {
+    return new WP_Error( 'weight',
+        'I could not read "~' . $bad . '" as a shipping weight. Write it in pounds, like ~18lb'
+        . ' (up to 2000). Leave it off entirely if the job does not ship abroad.' );
 }
 
 /**
@@ -523,6 +569,7 @@ function pps_paylink_parse_command( $text ) {
     if ( null !== $lines ) {
         $outside = preg_replace( '/\[[^\[\]]*\]/s', ' ', $text );
         $flags   = pps_paylink_parse_flags( $outside );
+        if ( '' !== $flags['weight_bad'] ) return pps_paylink_weight_error( $flags['weight_bad'] );
         return array(
             // Kept so every existing caller, log line and test still sees a
             // description and a price: the first line describes the job and the
@@ -536,6 +583,7 @@ function pps_paylink_parse_command( $text ) {
             'min_days'    => $flags['min_days'],
             'reusable'    => $flags['reusable'],
             'noship'      => $flags['noship'],
+            'weight_lb'   => $flags['weight_lb'],
         );
     }
 
@@ -561,7 +609,9 @@ function pps_paylink_parse_command( $text ) {
     $qbo       = $flags['qbo'];
     $reusable  = $flags['reusable'];
     $noship    = $flags['noship'];
+    $weight_lb = $flags['weight_lb'];
     $text      = $flags['rest'];
+    if ( '' !== $flags['weight_bad'] ) return pps_paylink_weight_error( $flags['weight_bad'] );
 
     $price = null;
     if ( preg_match( '/\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/', $text, $m ) ) {
@@ -609,6 +659,7 @@ function pps_paylink_parse_command( $text ) {
         'min_days'    => $min_days,
         'reusable'    => $reusable,
         'noship'      => $noship,
+        'weight_lb'   => $weight_lb,
     );
 }
 
@@ -686,6 +737,9 @@ function pps_paylink_create( array $a ) {
         'lines'      => $lines,
         'reusable'   => ! empty( $a['reusable'] ),
         'noship'     => ! empty( $a['noship'] ),
+        // Only ever used to rate a foreign destination, so a domestic link
+        // carrying no weight is normal and not a defect.
+        'weight_lb'  => isset( $a['weight_lb'] ) ? (float) $a['weight_lb'] : 0,
         // A multi-line quote has no single spec: each line carries its own
         // description. Leaving line one's text here put it at the top of the
         // payment page as if it were the whole job, and duplicated it on both
@@ -1214,6 +1268,7 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
         'lines'       => isset( $body['lines'] ) ? $body['lines'] : array(),
         'reusable'    => ! empty( $body['reusable'] ),
         'noship'      => ! empty( $body['noship'] ),
+        'weight_lb'   => isset( $body['weight_lb'] ) ? $body['weight_lb'] : 0,
         'by'          => isset( $body['by'] ) ? $body['by'] : 'missive',
         'note'        => isset( $body['note'] ) ? $body['note'] : '',
         'reference'   => isset( $body['reference'] ) ? $body['reference'] : '',
@@ -1261,6 +1316,11 @@ function pps_paylink_handle_request( WP_REST_Request $request ) {
         // was the one the next question needed.
         'reuse'        => ! empty( $body['reusable'] ),
         'noship'       => ! empty( $body['noship'] ),
+        // Logged in the commit that adds the sigil, not a week later. The three
+        // fields above were each taught to this log after the fact, and each
+        // time the first production use of the feature went unrecorded at
+        // exactly the moment it was worth seeing.
+        'wt'           => isset( $body['weight_lb'] ) ? (float) $body['weight_lb'] : 0,
         'conversation' => '' !== $conversation,
     ) );
     pps_paylink_queue_note( $conversation, $note );
@@ -1710,16 +1770,57 @@ Color: Full Color / Full Color
 Paper: 80lb Matte Text
 10 pads of 50] $177.40
 
-/ppspay *qbo [500 postcards, 16pt gloss] $250 #acme-october</code></pre>
+/ppspay *qbo [500 postcards, 16pt gloss] $250 #acme-october
+
+/ppspay [Booklets 16pp] @250 $695.02 [Booklets 24pp] @250 $891.06 *qbo
+
+/ppspay [Business cards, 1000] $140 ~12lb        (can ship abroad)
+/ppspay *virtual [Rush fee on order 87540] $65   (nothing ships)
+/ppspay *revoke 20261104-0912
+/ppspay *cancel 87540</code></pre>
                         <p class="description">
                         <code>[&nbsp;]</code> the description, kept exactly as typed — line breaks and all.
-                        Nothing inside is read as a command, so a spec may mention a price or a quantity freely.<br>
+                        Nothing inside is read as a command, so a spec may mention a price, a quantity,
+                        a <code>#tag</code> or the word qbo freely.<br>
                         <code>$177.40</code> the price. Must sit outside the brackets.<br>
+                        <code>@250</code> the quantity. On a multi-item link each bracket takes its own
+                        <code>@qty</code> and its own <code>$price</code>, and the customer pays one total.<br>
                         <code>*qbo</code> take payment through QuickBooks. Omit for card checkout.<br>
-                        <code>#acme-october</code> use this instead of the timestamp in the link.</p>
+                        <code>!5</code> minimum production days — this also turns the delivery-date picker on.<br>
+                        <code>#acme-october</code> use this instead of the timestamp in the link.<br>
+                        <code>*reuse</code> the link keeps working after its order is paid, so one link can
+                        serve a standing job at a frozen price.<br>
+                        <code>*virtual</code> nothing ships: billing only, no destination, no delivery date.
+                        For an addendum to a job already in production.<br>
+                        <code>~12lb</code> <strong>the shipping weight.</strong> Only a link carrying one can
+                        be ordered to an address outside the US — see below.<br>
+                        <code>*revoke</code> kill a link (paste it, or give its token or <code>#reference</code>).
+                        Refused while its order is unpaid.<br>
+                        <code>*cancel 87540</code> cancel that order. Unpaid orders only; this never refunds.</p>
                         <p class="description">Without a reference the link is the minute it was created, in site
                         time (<?php echo esc_html( wp_timezone_string() ); ?>) — so it can be written into a reply
                         from a clock rather than waited for.</p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row">Shipping outside the US</th>
+                    <td>
+                        <p class="description" style="margin-top:0">A pay link quotes one figure with delivery
+                        inside it, which is true in the contiguous US and false everywhere else. So a foreign
+                        destination is rated live against UPS and the carrier's price is added on top, at cost,
+                        as its own line the customer sees before paying.</p>
+                        <p class="description"><strong>This only works on a link that carries
+                        <code>~12lb</code>.</strong> Nothing else in a pay link knows the parcel weight — the
+                        calculators work it out from sheets and paper, an operator-typed link does not — and a
+                        shipping price without a weight is a made-up number on a real card. A link with no
+                        weight simply offers no country choice, and a customer abroad is told to contact us.</p>
+                        <p class="description">The cheapest UPS service that serves the lane is used, with its
+                        own transit days. No rate means no order: the page refuses rather than quoting free
+                        international freight. Import duties and taxes are not included and the page says so —
+                        the carrier collects those from the recipient.</p>
+                        <p class="description"><strong>The label still has to be bought by hand in Shippo.</strong>
+                        International labels need customs forms, which the ship panel does not do, so the order
+                        carries a note saying as much.</p>
                     </td>
                 </tr>
                 <tr>

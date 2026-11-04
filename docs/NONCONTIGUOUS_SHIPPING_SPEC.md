@@ -151,3 +151,44 @@ promise, which narrows the exposure while the work is scheduled.
 4. Transit-days override for rated destinations; conservative map placeholders.
 5. Foreign path for unservable lanes.
 6. Matrix destination slice.
+
+## Implemented for pay links, 2026-11-04 (not yet for the calculators)
+
+The **pay-link quote page** now does for foreign destinations what this spec
+describes for rated US ones. The calculators still do not — items 1–6 of the
+build order above remain open for them.
+
+What shipped, and where it differs from the spec above:
+
+| Spec says | Pay links do | Why |
+|---|---|---|
+| Rated vs foreign decided by whether UPS returns a rate | Same | Asking UPS beats maintaining a country list |
+| Surcharge **inside** the quoted total | **Added on top**, as its own WooCommerce shipping line | A pay link's price is one figure an operator typed in a conversation; it was quoted before any address existed, so it cannot already contain the freight. Shown itemised: printing + shipping = total |
+| Cheapest serving rate, days and price from one rate object | Same | The domestic endpoint picks the *slowest* UPS service, which is fine for a duration and a correctness bug once it is also the price |
+| 30-day cache | **3 days** | That figure is a duration; this one is a price. Fuel surcharges move. `pps_quote_intl_ttl()` |
+| No margin | Same | Owner rule: passed through at cost |
+| Never fall back to $0 | Same, enforced | No rate means no order. `pps_quote_ship_charge()` returns `WP_Error` and the page disables its own submit button |
+
+**The weight is the whole constraint.** A rate needs a parcel weight and nothing
+in a pay link has one — the calculators derive it from sheets and paper stock, an
+operator-typed link carries a description and a price. So it is supplied
+explicitly as `~18lb`, and a link without one offers no country choice at all.
+The parcel split is a **verbatim port** of the 45 lb / 19×13×6 carton math in
+`pps-calculators.php`; if that rule changes, change both in the same commit.
+
+**The existing transit endpoint could not be used.** `POST
+/pps/v1/shipping/transit-estimate` strips the postcode to digits and 400s under
+five, so `M5V 3L9` becomes `53`, and it is hardwired to `country: US`. It also
+lives in `pps-calculators.php`, which this lane must not deploy. Hence
+`POST /pps/v1/quote/ship-quote` in `pps-job-quote.php`. The page's domestic
+transit line is now guarded to US destinations — a German `10115` is five digits
+and would otherwise have come back with a confident US ground estimate.
+
+**Labels are still bought by hand.** `pps-missive-ship.php` refuses non-US
+outright ("International labels need customs forms — buy them in Shippo"), so
+an international order carries an order note saying so. Duties are DDU: the page
+tells the customer the carrier collects import duties and taxes from the
+recipient.
+
+Regression gate: `tools-tests/quoteintl.php` (108 assertions, mutation-tested).
+

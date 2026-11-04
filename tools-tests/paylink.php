@@ -684,5 +684,83 @@ ok('already cancelled', $r->get_error_code(), 'already');
 $GLOBALS['cancel_order'] = null;
 ok('unknown order refuses', pps_paylink_cancel_order(99999)->get_error_code(), 'not_found');
 
+// ── ~18lb: the shipping weight ──────────────────────────────────────────
+// The one thing an international rate cannot be invented from, and the only
+// reason a pay link can be ordered to a foreign address at all.
+
+$r = parse('/ppspay [Business cards, 1000] $140 ~12lb');
+ok('weight read',             $r['weight_lb'], 12.0);
+ok('price untouched',         $r['price'], 140.0);
+ok('description untouched',   $r['description'], 'Business cards, 1000');
+
+ok('bare number',             parse('/ppspay [Cards] $140 ~12')['weight_lb'], 12.0);
+ok('fractional',              parse('/ppspay [Cards] $140 ~12.5lb')['weight_lb'], 12.5);
+ok('spaced out',              parse('/ppspay [Cards] $140 ~ 12 lb')['weight_lb'], 12.0);
+ok('plural',                  parse('/ppspay [Cards] $140 ~12lbs')['weight_lb'], 12.0);
+ok('spelled out',             parse('/ppspay [Cards] $140 ~12pounds')['weight_lb'], 12.0);
+ok('order does not matter',   parse('/ppspay ~12lb [Cards] $140')['weight_lb'], 12.0);
+ok('absent is zero',          parse('/ppspay [Cards] $140')['weight_lb'], 0.0);
+
+// THE ONE THAT MATTERS MOST. A weight introduces a second number outside the
+// brackets, and the no-$ price rule refuses when it sees two. If the weight
+// were not stripped before the price scan, this would be "ambiguous" -- and
+// the operator would be told their PRICE was unclear when nothing was wrong
+// with it.
+$r = parse('/ppspay [Cards] 250 ~12lb');
+ok('weight is not a price',   $r['price'], 250.0);
+ok('and is still the weight', $r['weight_lb'], 12.0);
+
+// THE TILDE IS REQUIRED. "80lb Matte Text" is a paper, not a parcel. A spec
+// line that lands outside the brackets by accident must not become the
+// shipping weight of the job.
+ok('no tilde, no weight',     parse('/ppspay [Cards] $140 12lb')['weight_lb'], 0.0);
+// Inside the brackets nothing is read as a command, weights included.
+ok('bracketed is description',parse('/ppspay [Cards on 80lb text ~12lb] $140')['weight_lb'], 0.0);
+ok('bracket text intact',     parse('/ppspay [Cards on 80lb text ~12lb] $140')['description'],
+                              'Cards on 80lb text ~12lb');
+
+// A weight that cannot be read REFUSES rather than being ignored. Ignoring it
+// would leave the operator with a link they believe can ship abroad, failing
+// later with "contact us for a shipping quote" and nothing to explain why.
+ok('kilograms refused',       pcode(parse('/ppspay [Cards] $140 ~8kg')), 'weight');
+ok('zero refused',            pcode(parse('/ppspay [Cards] $140 ~0lb')), 'weight');
+ok('absurd refused',          pcode(parse('/ppspay [Cards] $140 ~5000lb')), 'weight');
+// ...and the refusal names the weight, not the price.
+$e = parse('/ppspay [Cards] 250 ~8kg');
+ok('refusal is about weight', pcode($e), 'weight');
+ok('message says pounds',     (bool) strpos($e->get_error_message(), 'pounds'), true);
+
+// A weight and no price is still a missing price, not an ambiguous one.
+ok('weight alone has no price', pcode(parse('/ppspay [Cards] ~12lb')), 'price');
+
+// Multi-item links take one weight for the whole shipment: the jobs go in the
+// same cartons.
+$r = parse('/ppspay [Booklets 16pp] @250 $695.02 [Booklets 24pp] @250 $891.06 ~40lb');
+ok('weight on a multi-item',  $r['weight_lb'], 40.0);
+ok('lines still parsed',      count($r['lines']), 2);
+ok('total still the sum',     $r['price'], 1586.08);
+// And a bad weight refuses there too, rather than only on the one-line form --
+// a sigil honoured in one shape and ignored in the other is the kind of
+// difference nobody finds until a customer cannot check out.
+ok('multi-item weight checked', pcode(parse('/ppspay [A] @1 $10 [B] @1 $20 ~8kg')), 'weight');
+
+// It coexists with every other sigil, in any order.
+$r = parse('/ppspay *qbo !5 #acme ~18lb *reuse [Cards] @500 $140');
+ok('with everything: weight', $r['weight_lb'], 18.0);
+ok('with everything: qbo',    $r['qbo'], true);
+ok('with everything: days',   $r['min_days'], 5);
+ok('with everything: ref',    $r['reference'], 'acme');
+ok('with everything: reuse',  $r['reusable'], true);
+ok('with everything: price',  $r['price'], 140.0);
+// FOUND 2026-11-04, PRE-EXISTING AND NOT FIXED HERE: a one-item command
+// returns no 'qty' at all, so the @500 above is silently dropped and the quote
+// is stored as one unit at $140. @qty works on a MULTI-item command, where
+// parse_lines reads it per row. Pinned as it actually behaves rather than as it
+// reads, so the day somebody fixes it this assertion is what tells them the
+// behaviour changed. The customer never sees a single tier's quantity, so the
+// visible cost is a reorder dividing a frozen price by 1 instead of 500.
+ok('single @qty is dropped',  array_key_exists('qty', $r), false);
+ok('multi @qty is not',       parse('/ppspay [A] @250 $10 [B] @7 $20')['lines'][1]['qty'], 7);
+
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);

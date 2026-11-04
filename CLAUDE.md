@@ -263,6 +263,33 @@ Loading themselves is what makes that impossible: no deploy of
   files**, not in `pps-job-quote.php` or `pps-calculators.php`. The receipt's
   shipping-address filter lives in `pps-pay-link.php` for exactly this reason.
 
+### Pay links can ship abroad, but only with a weight
+
+A pay link quotes one figure with delivery inside it, which is true in the
+contiguous US and false everywhere else. Since 2026-11-04 the quote page rates a
+foreign destination live against UPS and adds the carrier's price on top, at
+cost, as its own shipping line.
+
+- **It only works on a link carrying `~18lb`.** Nothing else in a pay link knows
+  the parcel weight, and a shipping price without a weight is a made-up number
+  on a real card. A link without one offers no country choice and tells a
+  foreign customer to contact us. Do not "improve" this by defaulting the
+  weight.
+- **No rate means no order.** `pps_quote_ship_charge()` refuses and the page
+  disables its own submit button. Never make this fall back to $0 — free
+  international freight charged to the shop is the one outcome worse than a
+  customer waiting for a human.
+- **The amount is always derived server-side** from the quote's stored weight.
+  The browser is told what it will be charged; it never says.
+- The parcel split is a **verbatim port** of the 45 lb / 19×13×6 carton math in
+  `pps-calculators.php`. If that rule changes, change both in the same commit.
+- **Labels are still bought by hand in Shippo** — `pps-missive-ship.php` refuses
+  non-US because international labels need customs forms. The order carries a
+  note saying so.
+
+Full rationale and the differences from the calculators' plan:
+`docs/NONCONTIGUOUS_SHIPPING_SPEC.md` § "Implemented for pay links".
+
 ### Pay links tell you when they are broken — ask them first
 
 `GET /wp-json/pps/v1/pay-link` is the one-call diagnosis, unauthenticated on

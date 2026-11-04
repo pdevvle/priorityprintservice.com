@@ -532,6 +532,12 @@ function pps_qbo_invoice_order( $order ) {
             'City'                   => $order->get_shipping_city(),
             'CountrySubDivisionCode' => $order->get_shipping_state(),
             'PostalCode'             => $order->get_shipping_postcode(),
+            // Added when pay links learned to ship abroad: without it a
+            // Canadian invoice reads as a Canadian city in no country at all.
+            // Domestic invoices now carry Country "US" where they carried
+            // nothing before -- a valid PhysicalAddress field either way, and
+            // stating the country is not a behaviour anyone has to opt into.
+            'Country'                => $order->get_shipping_country(),
         ) );
     }
 
