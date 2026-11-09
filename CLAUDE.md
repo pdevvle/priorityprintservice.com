@@ -500,6 +500,30 @@ and new checks in `tools-job-ticket-test.mjs`, `tools-closure-engine-test.mjs` a
 `tools-delivery-date-guard-test.php`. Several take `PPS_DIST` / `PPS_CALC_PHP` /
 `PPS_PAPER_PHP` / `PPS_JUNCTURE_PAGES` to point at the pre-fix copies.
 
+## Quantity table vs. the chosen date (2026-11-09)
+
+Owner report: on the saddle form, with Nov 12 chosen the 1,000+ rows showed standard prices, with
+Nov 13 rush prices. The quantity table prices other quantities for the chosen date only when the
+current quantity is rush (`projNeedBy`). A quantity that cannot make that date at all comes back
+from `calculate()` as `tooSoon` with no rush charge, and the table showed that as the plain
+standard price — the date the bigger job could NOT be made looked cheapest. Reproduced on the live
+saddle (16 pp, 25 copies, Nov 12: 5,000 at $4,815.87 standard; earliest really Nov 17) and the live
+brochure (11×25.5 trifold, Nov 11: 5,000 at $3,923.11, Nov 12: $7,061.60 rush). The ORDER price was
+never wrong: switching to such a quantity stops Add to Order ("We can no longer deliver by this date").
+
+Fix (owner chose "only fix the impossible rows"): such a row reads "Not available by your date —
+earliest <date>" instead of a price, is left out of the copied table, and every other row is
+unchanged. When the current quantity is NOT rush the table still drops the date and shows standard
+prices for every quantity — by design, left as is. All eight calculators. Shipped as the LIVE builds
+(saddle `5b7fffb`, the other seven `482509f`) patched by `tools-rush-table-patch.py` — the compiled
+text, four anchored edits, each asserted unique — and kept in `releases/2026-11-09-rush-table/`; the
+branch mirrors got the same patch. **The JSX source on `claude/design-it-online` still needs it**:
+in the projections row builder, `if (projNeedBy && pr?.shipping?.tooSoon) return {qty:q, total:null,
+perUnit:null, current:false, notBy:pr.shipping.earliestDate};` before the error check; the table body
+and its "show more" count filter `p.total!==null || p.notBy`; and the body renders a notBy row as the
+quantity plus one cell (colSpan 2) with that sentence. `tools-rush-table-page.mjs` drives a build in
+Chromium on a fixed clock; run it against the live and the patched file and diff the rows.
+
 ## Shared Components (in each calculator HTML)
 - `PCF` — pricing constants object, overridable via PPS_CONFIG.calc
 - `calculate()` — pricing engine (different per product type)
