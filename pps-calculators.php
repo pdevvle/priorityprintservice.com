@@ -4069,6 +4069,24 @@ add_action( 'woocommerce_checkout_create_order_line_item', function( $item, $car
  * Lifted out of the line-item hook (2026-09-27) so the flats' spec and the escaping can
  * be tested without WooCommerce. Returns array( $spec, $addons ).
  */
+/**
+ * A self-cover booklet whose cover prints in another colour than its inside (owner 2026-11-10,
+ * order 87921: "the mixed job needs to be remarked upon better. As-is it looks like 'bw self
+ * cover'"). The calculators' ticket says only "Self-cover (same stock as inside)" and PPS-Spec
+ * only "SELF-COVER", so a full-colour cover on a B&W book read as an all-B&W job. Returns ''
+ * unless it is that case, else e.g. "MIXED: Full Color cover, B&W inside".
+ */
+function pps_mixed_self_cover( array $m ) {
+    if ( isset( $m['frontColor'] ) || isset( $m['sides'] ) ) return '';                 // a flat
+    $in = (string) ( $m['insideColor'] ?? '' );
+    $cv = (string) ( $m['coverColor'] ?? '' );
+    if ( $in === '' || $cv === '' || $in === $cv ) return '';
+    $self = ( $m['coverMode'] ?? '' ) === 'same' || ! is_array( $m['coverPaper'] ?? null ) || (string) ( $m['coverPaper']['label'] ?? '' ) === '';
+    if ( ! $self ) return '';
+    $name = function ( $v ) { return $v === 'bw' ? 'B&W' : ( $v === 'mixed' ? 'Mixed color' : 'Full Color' ); };
+    return 'MIXED: ' . $name( $cv ) . ' cover, ' . $name( $in ) . ' inside';
+}
+
 function pps_build_spec( array $full, $summary, $prepress, $biz_days ) {
     // Single-line spec string: size | qty | pages | paper | color | proof | rush | turnaround
     $sets     = is_array( $full['sets'] ?? null ) ? $full['sets'] : array();
@@ -4106,7 +4124,7 @@ function pps_build_spec( array $full, $summary, $prepress, $biz_days ) {
     $cColor = ( $full['coverColor'] ?? '' ) === 'bw' ? 'BW' : 'Color';
     $cover  = $is_flat ? 'FLAT' . ( ! empty( $full['foldType'] ) && $full['foldType'] !== 'flat' ? ': ' . ( $full['foldLabel'] ?? $full['foldType'] ) : '' )
         : ( ( ( $full['coverMode'] ?? '' ) === 'same' || $cPaper === '' )
-        ? 'SELF-COVER'
+        ? ( pps_mixed_self_cover( $full ) !== '' ? 'SELF-COVER/' . $cColor . ' MIXED' : 'SELF-COVER' )
         : 'COVER: ' . $cPaper . '/' . $cColor );
 
     // Add-ons. Since 2026-09-21 every calculator resolves its finishing choices to the
@@ -4221,7 +4239,10 @@ function pps_job_ticket( array $full, array $values, DateTime $delivery, $prepre
 
     if ( isset( $full['ticket'] ) && is_array( $full['ticket'] ) ) {
         foreach ( array_slice( $full['ticket'], 0, 40 ) as $pair ) {
-            if ( is_array( $pair ) && count( $pair ) >= 2 ) $put( $pair[0], $pair[1] );
+            if ( ! is_array( $pair ) || count( $pair ) < 2 ) continue;
+            $value = (string) $pair[1];
+            if ( (string) $pair[0] === 'Cover' && stripos( $value, 'Self-cover' ) === 0 && ( $mixed = pps_mixed_self_cover( $full ) ) !== '' ) $value .= ' · ' . $mixed;
+            $put( $pair[0], $value );
         }
     } else {
         // Legacy build: the summary is the best words we have.
@@ -4411,6 +4432,27 @@ add_filter( 'woocommerce_order_item_get_formatted_meta_data', function( $formatt
     }
     return $formatted;
 }, 10, 2 );
+
+/**
+ * Orders placed before 2026-11-10 carry a Cover line that hides a mixed job; say it wherever the
+ * ticket is shown (order screen, emails, the customer's pages). The stored ticket is unchanged.
+ */
+add_filter( 'woocommerce_order_item_get_formatted_meta_data', function( $formatted, $item ) {
+    if ( ! is_array( $formatted ) || ! is_object( $item ) || ! method_exists( $item, 'get_meta' ) ) return $formatted;
+    try {
+        $meta = json_decode( (string) $item->get_meta( '_pps_metadata' ), true );
+        if ( ! is_array( $meta ) || ( $mixed = pps_mixed_self_cover( $meta ) ) === '' ) return $formatted;
+        foreach ( $formatted as $meta_obj ) {
+            if ( ! isset( $meta_obj->key ) || $meta_obj->key !== 'Job Ticket' ) continue;
+            foreach ( array( 'value', 'display_value' ) as $f ) {
+                $v = (string) $meta_obj->$f;
+                if ( strpos( $v, 'MIXED:' ) !== false ) continue;
+                $meta_obj->$f = preg_replace( '/(Cover:\s*Self-cover[^<\r\n]*)/', '$1 · ' . $mixed, $v, 1 );
+            }
+        }
+    } catch ( \Throwable $e ) {}
+    return $formatted;
+}, 9, 2 );
 
 /**
  * The Job Ticket as the customer reads it (owner 2026-10-21: "That shouldn't be shown to the

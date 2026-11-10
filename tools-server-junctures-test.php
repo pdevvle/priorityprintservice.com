@@ -44,7 +44,7 @@ function sanitize_file_name( $s ) { return preg_replace( '/[^A-Za-z0-9._-]+/', '
 
 $want = array( 'pps_get_closures', 'pps_shop_timezone', 'pps_is_business_day', 'pps_add_business_days', 'pps_shop_start_day', 'pps_business_days_between', 'pps_quote_is_stale',
                'pps_requote_line', 'pps_requote_summary', 'pps_requote_describe',
-               'pps_clean_text', 'pps_order_addons', 'pps_spec_size_label', 'pps_build_spec', 'pps_one_side_missing', 'pps_job_ticket' );
+               'pps_clean_text', 'pps_order_addons', 'pps_spec_size_label', 'pps_mixed_self_cover', 'pps_build_spec', 'pps_one_side_missing', 'pps_job_ticket' );
 $have = array();
 foreach ( $want as $n ) { $f = lift( $src, $n ); if ( $f !== '' ) { eval( $f ); $have[ $n ] = true; } }
 $has = function( $n ) use ( $have ) { return ! empty( $have[ $n ] ); };
@@ -195,6 +195,16 @@ if ( ! $has( 'pps_build_spec' ) ) {
     ok( "a '|' in the job name cannot split the spec", substr( $spec, -18 ) === 'JOB: Spring / Gala' && substr_count( $spec, '|' ) === 11, $spec );
     list( $spec ) = pps_build_spec( array( 'sets' => array( array( 'qty' => 100, 'pages' => 12 ) ), 'insidePaper' => array( 'label' => 'X' ), 'coverMode' => 'same', 'proof' => 0 ), '', 'yes', 5 );
     ok( 'a booklet still reads as before, and prepress review still overrides SelfApproved', strpos( $spec, '100qty | 12pg | 1set | INSIDE: X/Color | SELF-COVER | PREPRESS-REVIEW' ) !== false, $spec );
+    // 87921 (2026-11-10): a B&W book with a full-colour self-cover read as an all-B&W job.
+    $mixed = array( 'sets' => array( array( 'qty' => 530, 'pages' => 8 ) ), 'insidePaper' => array( 'label' => 'X' ), 'coverMode' => 'same', 'insideColor' => 'bw', 'coverColor' => 'color', 'proof' => 0 );
+    list( $spec ) = pps_build_spec( $mixed, '', '', 5 );
+    ok( 'a self-cover book with a colour cover on a B&W inside says MIXED in PPS-Spec', strpos( $spec, 'INSIDE: X/BW | SELF-COVER/Color MIXED |' ) !== false, $spec );
+    ok( 'the mixed note names both colours', pps_mixed_self_cover( $mixed ) === 'MIXED: Full Color cover, B&W inside', pps_mixed_self_cover( $mixed ) );
+    ok( 'same colour, a separate cover, or a flat is not mixed', pps_mixed_self_cover( array( 'coverMode' => 'same', 'insideColor' => 'bw', 'coverColor' => 'bw' ) ) === ''
+        && pps_mixed_self_cover( array( 'coverMode' => 'different', 'coverPaper' => array( 'label' => 'C' ), 'insideColor' => 'bw', 'coverColor' => 'color' ) ) === ''
+        && pps_mixed_self_cover( array( 'sides' => 2, 'frontColor' => 'color', 'backColor' => 'bw', 'insideColor' => 'bw', 'coverColor' => 'color' ) ) === '' );
+    $t = pps_job_ticket( $mixed + array( 'ticket' => array( array( 'Inside', 'X · B&W' ), array( 'Cover', 'Self-cover (same stock as inside)' ) ) ), array(), new DateTime( '2026-11-12', new DateTimeZone( 'America/Phoenix' ) ), '' );
+    ok( 'the Job Ticket cover line says the cover prints in colour', strpos( $t, 'Cover: Self-cover (same stock as inside) · MIXED: Full Color cover, B&W inside' ) !== false, $t );
 }
 
 // ── 4. Art status on the Job Ticket ──

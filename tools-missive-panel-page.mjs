@@ -15,7 +15,7 @@ const row = (o) => Object.assign({ order: 87001, item: 1, customer: 'Ann Lee', w
 const answer = { today: '2026-10-19', orders: [], missing: [], missive: { connected: false }, board: [
   row({ order: 87001, finishing: ['Coating', 'Fold'], addons: ['Coating: UV Gloss (both sides)', 'Fold: Tri-fold'] }),
   row({ order: 87002, item: 2, customer: 'Bo Ray', start: '2026-10-15', qty: '1000', size: '6×9', print: 'Inside Color · Cover Color', pages: '16 pp', rush: true, papers: [{ label: '80lb Matte Cardstock', sheet: '13x19', sheets: 90, key: 'm', in_stock: false }] }),
-  row({ order: 87003, item: 3, customer: 'Cy Doe', addons: ['Coating: Aqueous'], finishing: ['Coating'] }),
+  row({ order: 87003, item: 3, customer: 'Cy Doe', addons: ['Coating: Aqueous'], finishing: ['Coating'], print: 'Inside B&W · Cover Color, self-cover', mixed: true }),
   row({ order: 87400, item: 0, customer: 'Dee Fox', what: 'Reprint flyers', qty: 0, size: '', start: '2026-10-30', must_ship: '2026-10-30', delivery: '', paper: '', sheet: '', sheets: 0, papers: [], source: 'missive',
         task: { id: 'tx', title: 'Reprint flyers', state: 'todo', due: '2026-10-30', due_time: '17:00', started: '', conversation: 'c1' }, missive_only: true, reason: 'Order #87400 is completed', order_status: 'completed' }) ] };
 const b = await pw.chromium.launch(); const top = await b.newPage({ viewport: { width: 380, height: 900 } });
@@ -56,7 +56,8 @@ ok(kinds.every(Boolean) && new Set(kinds).size === 5 && !kinds.includes(RED) && 
 ok(byText('Coating: UV Gloss (both sides)').length === 1 && byText('Fold: Tri-fold').length === 1, 'each add-on is its own pill, in the words the customer chose');
 ok(['Coating: UV Gloss (both sides)', 'Fold: Tri-fold', 'Coating: Aqueous'].every(t => st(t)[0] && st(t)[0].bg === RED && st(t)[0].fg === WHITE), 'add-ons are dark red with white text');
 ok(st('RUSH').length === 1 && st('RUSH')[0].bg === RED && st('RUSH')[0].fg === WHITE, 'rush is a dark red pill, on the rush job only', st('RUSH'));
-ok(styles.filter(x => x.bg === RED).every(x => /NOT STOCKED|Coating|Fold|RUSH/.test(x.t)), 'dark red is used for nothing else', styles.filter(x => x.bg === RED).map(x => x.t));
+ok(st('MIXED COLOR').length === 1 && st('MIXED COLOR')[0].bg === RED && st('MIXED COLOR')[0].fg === WHITE && st('Inside B&W · Cover Color, self-cover').length === 1, 'a mixed self-cover book (87921) names both colours and carries a dark red MIXED COLOR pill, on that job only', st('MIXED COLOR'));
+ok(styles.filter(x => x.bg === RED).every(x => /NOT STOCKED|Coating|Fold|RUSH|MIXED COLOR/.test(x.t)), 'dark red is used for nothing else', styles.filter(x => x.bg === RED).map(x => x.t));
 ok(byText('500 qty').length === 2 && byText('8.5×11').length === 2 && byText('1,000 qty').length === 1, 'quantity and size are pills too');
 ok(pills.filter(x => x.t === 'LATE START' && /pill-late/.test(x.cls)).length === 1 && st('LATE START')[0].bg === LATE && st('LATE START')[0].fg === WHITE && pills.some(x => x.t === 'start Wed, Oct 21' && /pill-plain/.test(x.cls)), 'the start date is a plain pill; a late start is a red one, on that job only', pills.filter(x => /start|START/.test(x.t)));
 if (shot) await top.screenshot({ path: shot });

@@ -186,8 +186,12 @@ function pps_mp_print_spec( array $meta ) {
     $pg = array_values( array_unique( array_filter( array_map( 'intval', $sets ? array_column( $sets, 'pages' ) : array( $meta['pages'] ) ) ) ) );
     $in = $c( (string) ( $meta['insideColor'] ?? '' ) );
     $self = ( $meta['coverMode'] ?? '' ) === 'same' || ! is_array( $meta['coverPaper'] ?? null ) || (string) ( $meta['coverPaper']['label'] ?? '' ) === '';
-    return array( 'print' => $self ? $in . ', self-cover' : 'Inside ' . $in . ' · Cover ' . $c( (string) ( $meta['coverColor'] ?? '' ) ),
-                  'pages' => $pg ? implode( ' / ', $pg ) . ' pp' : '' );
+    // A self-cover book whose cover prints in another colour than its inside (owner 2026-11-10,
+    // 87921: "As-is it looks like 'bw self cover'") names both and is flagged.
+    $cv = (string) ( $meta['coverColor'] ?? '' );
+    $mixed = $self && $cv !== '' && (string) ( $meta['insideColor'] ?? '' ) !== '' && $cv !== (string) $meta['insideColor'];
+    return array( 'print' => $mixed ? 'Inside ' . $in . ' · Cover ' . $c( $cv ) . ', self-cover' : ( $self ? $in . ', self-cover' : 'Inside ' . $in . ' · Cover ' . $c( $cv ) ),
+                  'pages' => $pg ? implode( ' / ', $pg ) . ' pp' : '', 'mixed' => $mixed );
 }
 
 /** A job's window as [from, to] Y-m-d; from falls back to today, to to delivery. */
@@ -392,7 +396,7 @@ function pps_mp_board_rows( array $open, array $tasks_by_order, $today, array $t
         $p0 = $j['papers'][0] ?? null;
         $rows[] = array(
             'order' => $j['order'], 'item' => $j['item'], 'customer' => $j['customer'], 'what' => $j['job'] !== '' ? $j['job'] : $j['product'],
-            'qty' => $j['qty'], 'size' => $j['size'], 'print' => $j['print'] ?? '', 'pages' => $j['pages'] ?? '', 'start' => $f, 'must_ship' => $t, 'delivery' => $j['delivery'],
+            'qty' => $j['qty'], 'size' => $j['size'], 'print' => $j['print'] ?? '', 'mixed' => ! empty( $j['mixed'] ), 'pages' => $j['pages'] ?? '', 'start' => $f, 'must_ship' => $t, 'delivery' => $j['delivery'],
             'rush' => $j['rush'], 'printed' => $j['printed'], 'source' => $j['source'], 'finishing' => array_values( array_unique( $fin ) ), 'addons' => array_values( array_unique( $add ) ),
             'paper' => $p0 ? $p0['label'] : '', 'sheet' => $p0 ? $p0['sheet'] : '', 'paper_key' => $p0 ? $p0['key'] : '',
             'sheets' => array_sum( array_column( $j['papers'], 'sheets' ) ),
@@ -943,6 +947,7 @@ function specPills(r){
       : pill(t+' · NOT STOCKED', 'pill-flag', 'Paper not inventoried — '+p.sheets+' press sheets of '+p.label+' on '+p.sheet+' to order')); });
   if(!(r.papers||[]).length && r.source==='custom') specs.appendChild(el('span',{cls:'pill pill-plain',text:'custom order'}));
   if(r.print) specs.appendChild(pill(r.print, 'k-print', 'Print'));
+  if(r.mixed) specs.appendChild(pill('MIXED COLOR', 'pill-flag', 'Self-cover book: the cover prints in another colour than the inside — '+r.print));
   if(r.pages) specs.appendChild(pill(r.pages, 'k-pages', 'Pages per book'));
   if(r.qty) specs.appendChild(pill(Number(r.qty).toLocaleString()+' qty', 'k-qty', 'Quantity'));
   if(r.size) specs.appendChild(pill(r.size, 'k-size', 'Finished size'));

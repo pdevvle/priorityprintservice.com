@@ -112,9 +112,14 @@ ok( $custom['source'] === 'custom' && $custom['delivery'] === '2026-10-30' && $c
 ok( pps_mp_print_spec( array( 'qty' => 500, 'sides' => 2, 'frontColor' => 'color', 'backColor' => 'color' ) ) === array( 'print' => 'Color 2-sided', 'pages' => '' )
     && pps_mp_print_spec( array( 'qty' => 500, 'sides' => 2, 'frontColor' => 'color', 'backColor' => 'bw' ) )['print'] === 'Color / B&W'
     && pps_mp_print_spec( array( 'qty' => 500, 'sides' => 1, 'frontColor' => 'bw' ) )['print'] === 'B&W 1-sided', 'a flat\'s print pill: colour per side, no page count' );
-ok( pps_mp_print_spec( array( 'sets' => array( array( 'qty' => 100, 'pages' => 16 ) ), 'insideColor' => 'color', 'coverMode' => 'separate', 'coverPaper' => array( 'label' => '100lb Gloss Cover' ), 'coverColor' => 'color' ) ) === array( 'print' => 'Inside Color · Cover Color', 'pages' => '16 pp' )
-    && pps_mp_print_spec( array( 'sets' => array( array( 'pages' => 8 ), array( 'pages' => 12 ) ), 'insideColor' => 'bw', 'coverMode' => 'same' ) ) === array( 'print' => 'B&W, self-cover', 'pages' => '8 / 12 pp' )
+ok( pps_mp_print_spec( array( 'sets' => array( array( 'qty' => 100, 'pages' => 16 ) ), 'insideColor' => 'color', 'coverMode' => 'separate', 'coverPaper' => array( 'label' => '100lb Gloss Cover' ), 'coverColor' => 'color' ) ) === array( 'print' => 'Inside Color · Cover Color', 'pages' => '16 pp', 'mixed' => false )
+    && pps_mp_print_spec( array( 'sets' => array( array( 'pages' => 8 ), array( 'pages' => 12 ) ), 'insideColor' => 'bw', 'coverMode' => 'same' ) ) === array( 'print' => 'B&W, self-cover', 'pages' => '8 / 12 pp', 'mixed' => false )
     && pps_mp_print_spec( array() ) === array( 'print' => '', 'pages' => '' ), 'a booklet\'s print and pages pills; a custom line has neither' );
+// 87921 (2026-11-10): a B&W book with a full-colour self-cover must not read "B&W, self-cover".
+$mx = pps_mp_print_spec( array( 'sets' => array( array( 'qty' => 530, 'pages' => 8 ) ), 'insideColor' => 'bw', 'coverColor' => 'color', 'coverMode' => 'same' ) );
+ok( $mx === array( 'print' => 'Inside B&W · Cover Color, self-cover', 'pages' => '8 pp', 'mixed' => true ), 'a mixed self-cover book names both colours and is flagged', $mx );
+ok( strpos( $panel_src ?? file_get_contents( __DIR__ . '/pps-missive-panel.php' ), "if(r.mixed) specs.appendChild(pill('MIXED COLOR', 'pill-flag'" ) !== false
+    && strpos( file_get_contents( __DIR__ . '/pps-missive-panel.php' ), "'mixed' => ! empty( \$j['mixed'] )" ) !== false, 'the board row carries the flag and the pills show it in dark red' );
 $p = pps_mp_preview( $a );
 ok( $p['due'] === '2026-10-19' && $p['title'] === '#87501 Job 1000 · start Oct 19 · ship Oct 22 · deliver Oct 22', 'the preview task is due on the start date (the team convention) with the window in its title', $p );
 ok( $p['labels'] === array( '100lb Gloss Text', '13×19', 'RUSH', 'Coating', 'Fold' ), 'the preview labels: paper, sheet, rush, finishing', $p['labels'] );
