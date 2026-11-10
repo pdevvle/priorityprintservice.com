@@ -1045,6 +1045,34 @@ Add-on turnaround (paper days, vivid, coating, bundling, perforation, etc.) stil
 
 `PCF.minimum_turnaround_days` still enforced as the floor.
 
+### The minimum floors the print days only (2026-11-10)
+
+**Rule (owner, 2026-11-10: "paper lead time should be atop the minimum, other addons are
+outside the minimum as well"):**
+
+```
+flats:            days = max(minimum_turnaround_days, baseDays) + paper + vivid + coating + bundling + perforation + round corner + art + proof
+saddle:           days = max(minimum_turnaround_days, sheetsToDays(tS)) + floor(pT + aT + artT) + hT
+perfect bound /
+coupon book:      days = max(minimum_turnaround_days, sheetsToDays(tS) + perfBindTurnaround) + floor(pT + (aT − perfBindTurnaround) + artT)
+```
+
+**Rollback reference (until 2026-11-10):** `days = max(minimum, base + every add-on)` (flats);
+`max(minimum, floor(sheetsToDays(tS) + pT + aT + artT))` (+ hT on the saddle). The floor absorbed
+add-on days on every small job: a letterhead run of up to 2,000 on 80lb Offset Smooth Opaque
+(2 factory days) read 2 days, the same as the in-stock 70lb (live minimum 2, base 0). The same
+trap the human-touch day was moved out of (see below).
+
+**What stays inside the floor:** the print days (`sheetsToDays`) and, on perfect bound and coupon
+book, the perfect-binding labour (`perfBindTurnaround`) — every one of those books is bound, it
+is how the product is made, not an option.
+
+**Effect:** a job with no add-on days, or whose print days already reach the minimum, is
+unchanged. A small job on factory paper or with an add-on now takes those days on top of the
+minimum — and since free delivery is `ceil(days × free_shipping_buffer) + transit` (buffer 2.3
+live), its free-delivery date moves out by about 2.3× those days, which also moves where rush
+starts and what it costs. `tools-addon-days-test.mjs` compares the live and patched builds.
+
 ### Material lead times STACK, they don't accumulate (2026-07-24)
 
 **Rule:** when a job needs more than one supplier-ordered material, those lead times run

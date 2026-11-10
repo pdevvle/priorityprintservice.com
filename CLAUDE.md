@@ -524,6 +524,25 @@ and its "show more" count filter `p.total!==null || p.notBy`; and the body rende
 quantity plus one cell (colSpan 2) with that sentence. `tools-rush-table-page.mjs` drives a build in
 Chromium on a fixed clock; run it against the live and the patched file and diff the rows.
 
+## Add-on days sit on top of the minimum (2026-11-10)
+
+Owner report: "on the letterhead page the 80lb opaque text is not adding to the turnaround
+time". Every calculator computed `days = max(minimum, print days + paper + add-ons)`, so on a
+small run (print days 0, live minimum 2) a 2-day factory paper — or any add-on up to the minimum —
+vanished; the "paper lead time" note still showed. Owner: "paper lead time should be atop the
+minimum, other addons are outside the minimum as well". Now `max(minimum, print days) + paper +
+add-ons` on all eight; perfect binding labour stays with the print days (it is the product, not an
+option). Rules and rollback: `docs/MASTER_PRICING_LOGIC.md` "The minimum floors the print days
+only". Shipped as the live builds (`releases/2026-11-09-rush-table/`) patched by
+`tools-addon-days-patch.py` (one anchored edit per file; the saddle's debug `minimumApplied` now
+compares the print days) into `releases/2026-11-10-addon-days/`, branch mirrors the same;
+`tools-addon-days-test.mjs` runs both builds in Chromium (in-stock paper unchanged everywhere,
+small factory-paper jobs exactly +2, large runs unchanged). **The JSX source on
+`claude/design-it-online` still needs the same edit** (the `const days=` line of each calculate()).
+Also seen, not changed: the saddle reads paper days as `floor(val)` and ignores an injected
+`days`, unlike the other seven; the letterhead's paper list is the calculator's built-in one
+(no `letterhead_papers` is injected), so paper lead days there are not editable in PPS Config.
+
 ## Shared Components (in each calculator HTML)
 - `PCF` — pricing constants object, overridable via PPS_CONFIG.calc
 - `calculate()` — pricing engine (different per product type)
