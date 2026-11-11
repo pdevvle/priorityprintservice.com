@@ -91,6 +91,50 @@ function pps_quote_lines_total( array $lines ) {
  * Normalise a tier list to [ ['qty'=>int,'price'=>float], ... ], sorted by
  * quantity, deduped, positives only. Accepts the raw shape posted by the form.
  */
+/**
+ * The customer's own reference for each line of a multi-item quote.
+ *
+ * A PO number or a job name, per row, because a company buying four jobs on one
+ * payment often has to book each against a different purchase order, and one
+ * reference for the whole order cannot do that.
+ *
+ * INDEXED BY LINE, NEVER PACKED. The form posts refs[0], refs[1] with explicit
+ * indices, and this reads them back by index. With a bare refs[] the browser
+ * would send only the fields it has, so one empty row would shift every
+ * reference after it up a line and book a PO against the wrong job. That is a
+ * silent, plausible-looking wrong answer -- the worst kind -- and it is why the
+ * count is passed in rather than inferred from what arrived.
+ *
+ * Capped at 80: a PO number is short, and the cap stops a pasted email thread
+ * widening every order table this meta appears in.
+ */
+function pps_quote_line_refs( $raw, $count ) {
+    $count = max( 0, (int) $count );
+    $out   = array();
+    for ( $i = 0; $i < $count; $i++ ) {
+        $v = '';
+        if ( is_array( $raw ) && isset( $raw[ $i ] ) && is_scalar( $raw[ $i ] ) ) {
+            $v = trim( mb_substr( sanitize_text_field( (string) $raw[ $i ] ), 0, 80 ) );
+        }
+        $out[] = $v;
+    }
+    return $out;
+}
+
+/**
+ * One line of a quote, named short enough to label a form field.
+ *
+ * A description may run to several lines and carry the whole spec, so every
+ * run of whitespace collapses to a single space: a label has to be one line,
+ * and a newline inside one would break the field layout rather than wrap.
+ */
+function pps_quote_line_label( $description, $max = 64 ) {
+    $s = trim( preg_replace( '/\s+/', ' ', (string) $description ) );
+    if ( '' === $s ) return 'Item';
+    if ( mb_strlen( $s ) <= $max ) return $s;
+    return rtrim( mb_substr( $s, 0, $max - 1 ) ) . '…';
+}
+
 function pps_quote_normalise_tiers( $raw ) {
     $out = array();
     if ( ! is_array( $raw ) ) return $out;
@@ -986,6 +1030,14 @@ function pps_quote_to_order( array $q, array $p ) {
         'price'       => $tier['price'],
     ) );
 
+    // Read against the number of lines, not the number of fields that arrived,
+    // so an untouched row cannot shift the references below it onto the wrong
+    // jobs. Only a multi-item quote collects these; a single-item one has the
+    // Project name field, which does the same job for the whole order.
+    $refs = count( $add ) > 1
+        ? pps_quote_line_refs( isset( $p['refs'] ) ? $p['refs'] : array(), count( $add ) )
+        : array();
+
     $first_item_id = 0;
     foreach ( $add as $i => $ln ) {
         $item_id = $order->add_product( $product, $ln['qty'], array(
@@ -1000,6 +1052,13 @@ function pps_quote_to_order( array $q, array $p ) {
         // the QuickBooks invoice line all name the job on that row.
         if ( '' !== (string) $ln['description'] ) {
             $it->add_meta_data( 'Item', $ln['description'], true );
+        }
+        // The customer's own PO or job name for THIS row. Non-underscore, so it
+        // follows the order into wp-admin, the receipt, the packing list and
+        // the QuickBooks invoice line without any of them being taught about
+        // it -- the same reasoning as 'Item' and 'Project'.
+        if ( isset( $refs[ $i ] ) && '' !== $refs[ $i ] ) {
+            $it->add_meta_data( 'Reference', $refs[ $i ], true );
         }
         $it->save();
     }
@@ -1228,6 +1287,29 @@ function pps_quote_placed_view( $order, $settled ) {
         <?php if ( '' !== $proj ) : ?>
             <p class="pps-q-note"><strong><?php echo esc_html( $proj ); ?></strong></p>
         <?php endif; ?>
+        <?php // And the per-item references, for the same reason: somebody who
+              // typed four purchase orders wants to see that four were recorded,
+              // against the items they meant, rather than trusting it. ?>
+        <?php
+        $ref_rows = array();
+        foreach ( $order->get_items() as $ri_item ) {
+            $ri_ref = (string) $ri_item->get_meta( 'Reference' );
+            if ( '' === $ri_ref ) continue;
+            $ri_what = (string) $ri_item->get_meta( 'Item' );
+            $ref_rows[] = array( 'ref' => $ri_ref, 'what' => '' !== $ri_what ? $ri_what : $ri_item->get_name() );
+        }
+        ?>
+        <?php if ( $ref_rows ) : ?>
+            <ul class="pps-q-lines pps-q-refs-back">
+                <?php foreach ( $ref_rows as $ri_row ) : ?>
+                    <li>
+                        <span class="pps-q-line-desc"><?php
+                            echo esc_html( pps_quote_line_label( $ri_row['what'] ) ); ?></span>
+                        <span class="pps-q-line-price"><?php echo esc_html( $ri_row['ref'] ); ?></span>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+        <?php endif; ?>
         <?php if ( $settled ) : ?>
             <div class="banner banner-success"><div><strong>This order is paid.</strong> Thank you — we'll be in touch about artwork and production.</div></div>
         <?php else : ?>
@@ -1446,6 +1528,36 @@ function pps_quote_form_view( array $q, $error ) {
                     receipt and order history, which makes it easier to find later.</span>
             </div>
 
+            <?php // A PO or job name PER ITEM, on a multi-item quote only.
+                  //
+                  // A company buying four jobs on one payment often has to book
+                  // each against a different purchase order, and the single
+                  // Project name field above cannot express that. On a
+                  // single-item quote it can, so this block does not appear.
+                  //
+                  // Each input carries its LINE INDEX, refs[0], refs[1] — not a
+                  // bare refs[]. The browser sends only the fields it has, so
+                  // with a packed array one untouched row would shift every
+                  // reference after it up a line and book a PO against the
+                  // wrong job, which looks entirely plausible on the invoice. ?>
+            <?php if ( count( $lines ) > 1 ) : ?>
+                <h3 class="con-h" style="margin-top:20px">PO or job name per item</h3>
+                <p class="field-hint pps-q-refs-intro">Optional. If each item has to go against a
+                    different purchase order or job, name them here — each one appears on its own
+                    line of your receipt and invoice.</p>
+                <div class="pps-q-refs">
+                    <?php foreach ( $lines as $ri => $rln ) : ?>
+                        <div class="field">
+                            <label for="q-ref-<?php echo (int) $ri; ?>"><?php
+                                echo esc_html( pps_quote_line_label( $rln['description'] ) ); ?></label>
+                            <input type="text" id="q-ref-<?php echo (int) $ri; ?>"
+                                   name="refs[<?php echo (int) $ri; ?>]" maxlength="80"
+                                   autocomplete="off" placeholder="e.g. PO-4471">
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+
             <?php // Destination first: it is what the job needs, it drives transit, and
                   // the customer knows it before they think about a card.
                   //
@@ -1578,6 +1690,11 @@ function pps_quote_form_view( array $q, $error ) {
       .pps-q-intl .pps-q-price{font-size:1.35rem}
       .pps-q-intl .pps-q-incl{margin:6px 0 0}
       .pps-q-intl-err{margin:0 0 14px}
+      /* The per-item references read as a short list, not as a second address
+         block: the label IS the item, so it carries the weight. */
+      .pps-q-refs-intro{margin:-6px 0 10px}
+      .pps-q-refs .field{margin-bottom:10px}
+      .pps-q-refs .field label{display:block;opacity:.85;font-weight:600}
       .pps-q-transit{margin:-4px 0 12px;font-size:1rem}
       /* Scoped to this page: it is read once, by somebody deciding whether to
          spend money, often on a phone. Comfortable beats compact. */

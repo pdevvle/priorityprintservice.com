@@ -26,8 +26,25 @@ try { ({ chromium } = require_('playwright')); }
 catch (e) { ({ chromium } = createRequire(import.meta.url)('playwright')); }
 
 const dir = mkdtempSync(path.join(tmpdir(), 'pps-quoteintl-'));
-const suite = new URL('./quoteintl.php', import.meta.url).pathname;
-execFileSync('php', [suite], { env: { ...process.env, PPS_DUMP_DIR: dir }, stdio: 'pipe' });
+// Both PHP suites dump into one directory: quoteintl.php renders the shipping
+// pages, quotelines.php the multi-item page whose per-row reference fields are
+// checked at the end. Each keeps its own stubs, so neither pass can render a
+// page the other suite would not recognise.
+for (const name of ['quoteintl.php', 'quotelines.php']) {
+  const suite = new URL('./' + name, import.meta.url).pathname;
+  try {
+    execFileSync('php', [suite], { env: { ...process.env, PPS_DUMP_DIR: dir }, stdio: 'pipe' });
+  } catch (e) {
+    // execFileSync throws its captured output as raw byte arrays, which prints
+    // as several screens of numbers and buries the actual failure. Say what
+    // happened instead: these pages come from the PHP suites, so if one of
+    // them is red the browser pass has nothing trustworthy to open.
+    console.log(`Could not render pages: ${name} failed.\n`);
+    console.log(String(e.stdout || '').trim());
+    console.log(String(e.stderr || '').trim());
+    process.exit(1);
+  }
+}
 const file = path.join(dir, 'page.html');
 let pass = 0, fail = 0;
 const ok = (label, got, want) => {
@@ -205,6 +222,38 @@ ok('tiers: total at tier 1',  await page2.evaluate(() => document.getElementById
 await page2.selectOption('#q-country', 'US');
 await page2.waitForTimeout(1400);
 ok('tiers: wording restored', await incl2(), original);
+
+// ── a PO or job name per item: one field per row, and they stay put ─────
+// The safety property, end to end: each input carries its own line index, so
+// filling only the second row cannot book its purchase order against the
+// first job. A packed refs[] would send one value and silently do exactly that.
+const page3 = await browser.newPage();
+await page3.goto('file://' + file.replace('page.html', 'page-lines.html'));
+const refNames = await page3.evaluate(() =>
+  Array.from(document.querySelectorAll('input[name^="refs"]')).map(i => i.name));
+ok('refs: one field per row',  refNames, ['refs[0]', 'refs[1]']);
+
+// Fill ONLY the second row.
+await page3.fill('#q-ref-1', 'PO-4471');
+const refPost = await page3.evaluate(() => {
+  const fd = new FormData(document.getElementById('pps-q-form'));
+  return { zero: fd.get('refs[0]'), one: fd.get('refs[1]'), all: fd.getAll('refs[]') };
+});
+ok('refs: row 1 carries it',   refPost.one, 'PO-4471');
+// THE ONE THAT MATTERS: row 0 posts as empty, not absent and not shifted.
+ok('refs: row 0 stays empty',  refPost.zero, '');
+ok('refs: nothing packed',     refPost.all, []);
+
+// Both rows, distinct values, in their own slots.
+await page3.fill('#q-ref-0', 'PO-1000');
+const refBoth = await page3.evaluate(() => {
+  const fd = new FormData(document.getElementById('pps-q-form'));
+  return [fd.get('refs[0]'), fd.get('refs[1]')];
+});
+ok('refs: both, in order',     refBoth, ['PO-1000', 'PO-4471']);
+// The order-wide project name is a separate field and is not one of these.
+ok('refs: project is separate', await page3.evaluate(() =>
+  document.getElementById('q-project').name), 'project');
 
 await browser.close();
 console.log(`\n${pass} passed, ${fail} failed`);

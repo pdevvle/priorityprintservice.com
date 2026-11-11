@@ -482,6 +482,11 @@ function pps_qbo_invoice_order( $order ) {
         // at the top of the invoice line rather than buried under the spec.
         $project = $item->get_meta( 'Project' );
         if ( $project ) $desc = $project . ' — ' . $desc;
+        // The customer's PO or job name for this row LEADS the line. A purchase
+        // order exists to be matched against, so accounts payable should not
+        // have to read to the end of a spec to find it.
+        $ref = $item->get_meta( 'Reference' );
+        if ( $ref ) $desc = $ref . ' — ' . $desc;
         // The Specs meta is the job as the operator described it in the thread;
         // it is what makes the QuickBooks line readable months later.
         $specs = $item->get_meta( 'Specs' );

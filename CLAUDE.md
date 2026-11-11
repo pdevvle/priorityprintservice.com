@@ -321,6 +321,29 @@ minted a one-price link. `pps_paylink_parse_tiers()` now reads the pairs:
   `tools-tests/paylinkroute.php` asserts it arrives — the guard over parser
   fields cannot see it, because the quote always receives a `tiers` key.
 
+### A PO or job name per line item
+
+On a **multi-item** pay link each row gets its own optional PO / job name,
+because a company buying four jobs on one payment often books each against a
+different purchase order. Stored as visible `Reference` line-item meta, so it
+follows the order into wp-admin, the receipt, the packing list and the
+QuickBooks invoice line (where it **leads** the line — a PO exists to be
+matched against) with nothing else taught about it.
+
+- **The inputs carry explicit line indices — `refs[0]`, `refs[1]` — never a
+  bare `refs[]`.** The browser sends only the fields it has, so with a packed
+  array one untouched row would shift every reference after it up a line and
+  book a PO against the wrong job. The invoice would look entirely plausible.
+  `pps_quote_line_refs()` reads by index and takes the line count as an
+  argument for the same reason; it never infers it from what arrived.
+- **Single-item quotes do not get the block.** The order-wide `Project name`
+  field already names the whole job, and both can be set at once on a
+  multi-item order: `Project` names the order, `Reference` names the row.
+- Nothing is carried into a reorder — a new order has a new PO.
+- Gates: `tools-tests/quotelines.php` (the normaliser, the field labels and the
+  rendered form) and the last block of `tools-tests/quoteintl-browser.mjs`
+  (that filling only row 1 leaves row 0 empty rather than shifted).
+
 ### Pay links tell you when they are broken — ask them first
 
 `GET /wp-json/pps/v1/pay-link` is the one-call diagnosis, unauthenticated on
