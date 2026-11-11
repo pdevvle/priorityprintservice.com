@@ -148,11 +148,21 @@ function pps_openai_feed_settings() {
  * Rows
  * ───────────────────────────────────────────────────────────── */
 
-/** Plain one-line text: tags, shortcodes and runs of whitespace gone. */
+/**
+ * Plain one-line text: tags, shortcodes and runs of whitespace gone. The end
+ * of a list item, paragraph, heading or line break becomes a sentence break
+ * first — short descriptions here are bullet lists, which would otherwise run
+ * together ("Minimum Order of 25 Pieces Text and Cardstock …").
+ */
 function pps_openai_feed_text( $s ) {
-    $s = wp_strip_all_tags( strip_shortcodes( (string) $s ), true );
+    $s = preg_replace( '#</(li|p|h[1-6]|div|td)\s*>|<br\s*/?>#i', '. ', strip_shortcodes( (string) $s ) );
+    $s = wp_strip_all_tags( $s, true );
     $s = html_entity_decode( $s, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
-    return trim( preg_replace( '/\s+/u', ' ', $s ) );
+    $s = trim( preg_replace( '/\s+/u', ' ', $s ) );
+    // ". ." from nested blocks, and a break after text that already ended a sentence.
+    $s = preg_replace( '/([.!?:;])(\s*\.)+/u', '$1', $s );
+    $s = preg_replace( '/(\s*\.){2,}/u', '.', $s );
+    return trim( ltrim( $s, '. ' ) );
 }
 
 function pps_openai_feed_clip( $s, $max ) {
@@ -176,9 +186,17 @@ function pps_openai_feed_description( $title, $text, array $defaults, array $s )
         $spec = function_exists( 'pps_catalog_spec_line' ) ? pps_catalog_spec_line( $defaults ) : '';
         $text = trim( $title . ( $spec !== '' ? ' — ' . $spec : '' ) . '.' );
     }
+    if ( ! preg_match( '/[.!?]$/u', $text ) ) $text .= '.';
     $tail = ' Printed to order by ' . $s['seller_name'] . '. The price shown is the starting price for the job '
           . 'this page opens with; the online calculator prices any size, paper, quantity and finishing live.';
     return pps_openai_feed_clip( pps_openai_feed_clip( $text, 4500 ) . $tail, 5000 );
+}
+
+/** Does this product carry a contract price list? (Same meta the saddle calculator reads.) */
+function pps_openai_feed_is_contract( $id ) {
+    $c = get_post_meta( (int) $id, '_pps_contract', true );
+    if ( is_string( $c ) && $c !== '' ) { $d = json_decode( $c, true ); $c = is_array( $d ) ? $d : array( 'raw' => $c ); }
+    return is_array( $c ) && ! empty( $c );
 }
 
 /** "Printing Services > Booklets": the root, then the first WooCommerce category. */
@@ -220,7 +238,7 @@ function pps_openai_feed_product_item( array $row, array $s ) {
 
     $item = array(
         'item_id'     => 'pps-' . (int) $row['id'],
-        'title'       => pps_openai_feed_clip( $row['title'], 150 ),
+        'title'       => pps_openai_feed_clip( pps_openai_feed_text( $row['title'] ), 150 ),
         'description' => pps_openai_feed_description( $row['title'],
                             $row['short'] !== '' ? $row['short'] : $row['description'], $row['defaults'], $s ),
         'url'         => $row['url'],
@@ -283,7 +301,7 @@ function pps_openai_feed_preset_item( array $preset, array $s ) {
 
     $item = array(
         'item_id'     => 'pps-preset-' . $slug,
-        'title'       => pps_openai_feed_clip( $title, 150 ),
+        'title'       => pps_openai_feed_clip( pps_openai_feed_text( $title ), 150 ),
         'description' => pps_openai_feed_description( $title, (string) ( $preset['description'] ?? '' ), $defaults, $s ),
         'url'         => pps_get_preset_url( $slug ),
         'image_url'   => $image,
@@ -316,6 +334,14 @@ function pps_openai_feed_build() {
         'require_price' => true, 'require_image' => true, 'require_virtual' => true,
     ) );
     foreach ( $report['rows'] as $row ) {
+        // A contract product (a `_pps_contract` price list, e.g. Armadillo) is sold
+        // to one customer at agreed prices; its public price is a placeholder.
+        // It stays out of a public catalog — the only difference from the Google
+        // feed's item set, and the test holds it to exactly that.
+        if ( pps_openai_feed_is_contract( $row['id'] ) ) {
+            $skipped[] = array( 'id' => 'pps-' . $row['id'], 'title' => $row['title'], 'reason' => 'contract product (one customer\'s price list)' );
+            continue;
+        }
         $it = pps_openai_feed_product_item( $row, $s );
         if ( $it ) $items[] = $it;
     }

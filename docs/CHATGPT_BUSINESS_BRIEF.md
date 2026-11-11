@@ -119,10 +119,65 @@ of `CLAUDE.md`).
   unless it has come back.
 - How ChatGPT referrals appear in WooCommerce on this site.
 
+## 6a. What the re-check found (2026-11-11, against OpenAI's own pages)
+
+developers.openai.com was read directly; openai.com and help.openai.com refuse this sandbox (403),
+so items marked † rest on search-engine extracts of those pages, not a full read.
+
+| Brief said | OpenAI says | Verdict |
+|---|---|---|
+| Verify by phone, email, DNS TXT or Shopify; Persona check of a person before publishing † | Same four methods; Persona required "before you can publish business information changes, view insights, or create an eligible business agent". Claiming is "initially available to eligible businesses with a website". | Right |
+| Editable: website, description, category, logo, **cover photo**, delivery, returns; OpenAI reviews edits † | Help article lists website, description, category, logo, delivery policy, return policy — **no cover photo**. Edits are reviewed. Claiming gives no exclusive control; OpenAI may show a listing whether or not it is claimed. | Cover photo not confirmed |
+| A published profile cannot be unpublished † | "OpenAI Support is unable to delete, unpublish, or hide a published profile." Only drafts can be deleted. | Right |
+| How Business Hub ingests a feed: unknown | † **CSV upload, a link to a hosted feed file, or a Shopify feed.** Fetch schedule, size limits and refresh cadence for a link: not stated. (SFTP push with parquet/jsonl.gz/csv.gz is the separate Commerce channel, not Business Hub.) | Settled: give it the CSV link |
+| 9 required fields; `price` one value; `is_eligible_search` default true, checkout default off | Confirmed (`/commerce/specs/file-upload/products`; `/commerce/specs/spec` is a 404 now). `availability` is exactly `in_stock`, `out_of_stock`, `pre_order`, `backorder`, `unknown`. `price` = `79.99 USD`. No version string, no `item_id` length limit. `title` ≤150 and `description` ≤5,000 are guidance. | Right; details added |
+| `shipping` = free ground | `shipping` "requires feed-specific setup"; **`shipping_price` `0.00 USD`** means free, and omitting it means *unknown*, not free. Never both. | Corrected — the feed sends `shipping_price` |
+| `group_id` + `variant_dict` for variants | Only for real variants of one product as the site presents it (`listing_has_variations` true, a `variant_dict`, group ≠ item id). | Presets are NOT grouped |
+| — | `mpn`: "do not invent a value". | The OpenAI feed sends a real SKU only (the Google feed's `PPS-<id>` fallback stays a Google rule) |
+| Business Agent: US ecommerce/online service with a website; cannot buy/book/look up orders; must say it is AI, no invented facts † | Confirmed; plus the industry rules of the Business Agents Policy, and the business is responsible for the agent's outputs. **Cost: not stated anywhere** (sponsoring it as an ad is separate and paid). | Right; cost unknown |
+| Insights: 28 days, mentions, clicks, discovery topics, threshold † | 28 days, mainly mentions and website clicks; thresholds not published; needs Persona. "Discovery topics" not confirmed. | Mostly right |
+| Instant Checkout wound down | † OpenAI's March 2026 post: "moving away from a standalone Instant Checkout experience" toward discovery + merchant checkout; the developer docs still say it is "available to approved partners". | Deprioritised, not clearly retired — irrelevant: checkout stays off |
+
+## 6b. Phase 1 as built (branch `claude/chatgpt-business`)
+
+- `pps-openai-feed.php` — `/pps-openai-feed.csv` (give Business Hub this link) and
+  `/pps-openai-feed.jsonl`; `?debug=1` as an admin names everything left out. Loaded by one guarded
+  require in `pps-calculators.php`.
+- **Products:** the Google feed's, through `pps_catalog_report()` with its three requirements;
+  `price` = g:price (list), `sale_price` = g:sale_price. **One deliberate difference:** a product
+  with a contract price list (`_pps_contract`, e.g. Armadillo 35765) is left out — it is one
+  customer's job and its public price is a placeholder.
+- **Presets (decision 3 — on by default, `wp_options['pps_openai_feed'] = {"presets": false}` turns
+  them off):** priced as their own page's Product schema (`overrides.offer_price`, else
+  `price_from`); a preset without one is left out, never given its product's price. Image: the
+  preset's, else its product's featured image (never the site logo). Today only
+  `bulk-booklet-printing` ($109.04) has a page price; the other three are left out until a
+  "Price from" is set on them.
+- **Every row:** brand + seller Priority Print Service, `in_stock`, `condition` new,
+  `shipping_price` 0.00 USD, `accepts_returns` false + the policy URL (the page says "All sales
+  final"), privacy + terms URLs, search on, checkout off, `product_category` "Printing Services >
+  <first WooCommerce category>", plain-text description (list items become sentences) ending
+  "The price shown is the starting price for the job this page opens with; the online calculator
+  prices any size, paper, quantity and finishing live."
+- **Gate:** `tools-openai-feed-test.php` (fake catalog: lint, item set, every price vs the real
+  Google renderer, presets, contract exclusion; swapping in the effective price fails 10 checks).
+  `--snapshot` runs it over the real catalog read from production (registry option, Store API,
+  presets) against the live `/pps-product-feed.xml`: 32 rows, all clean, all prices equal
+  (2026-11-11). `--live <jsonl> <xml> [csv]` lints feeds fetched from the site after deploy.
+- **Found in the live catalog, for the owner (same in the Google feed today):** Foldover Greeting
+  Card $0.25, Note Card $0.15 and Standard Letterhead $1.00 carry per-piece prices as the product
+  price, so the feed says "from $0.25"; Standard Letterhead's short description is about door
+  hangers; registry ids 86472, 86887, 86468 are not published; 85177 "Sample Test" has no price;
+  sticker 86465 has no featured image.
+- **Phase 0 wording:** `docs/CHATGPT_BUSINESS_PROFILE.md`.
+
 ## 7. Sources used
 
 - OpenAI product feed reference — https://developers.openai.com/commerce/product-feeds/spec
-- OpenAI product feed spec — https://developers.openai.com/commerce/specs/spec
+- OpenAI product feed spec (current) — https://developers.openai.com/commerce/specs/file-upload/products (`/commerce/specs/spec` now 404s)
+- Setting up your business on ChatGPT — https://help.openai.com/en/articles/20001635-setting-up-your-business-on-chatgpt
+- Business Agents policy — https://openai.com/policies/business-agents-policy/
+- Businesses in ChatGPT policy and terms — https://openai.com/policies/businesses-in-chatgpt/ , https://openai.com/policies/businesses-in-chatgpt-terms/
 - OpenAI checkout guidance for apps — https://developers.openai.com/plugins/build/monetization
 - OpenAI, "Buy it in ChatGPT" (2025) — https://openai.com/index/buy-it-in-chatgpt/
 - Businesses in ChatGPT, deep dive — https://flaviocopes.com/businesses-in-chatgpt/

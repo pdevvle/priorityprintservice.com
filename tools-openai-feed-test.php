@@ -29,7 +29,11 @@ function google_prices( $xml ) {
 }
 
 /** The parity rule, shared by both modes. */
-function check_parity( array $items, array $google, $label ) {
+function check_parity( array $items, array $google, $label, array $contract = array() ) {
+    foreach ( $contract as $c ) {
+        ok( ! in_array( 'pps-' . $c, array_column( $items, 'item_id' ), true ), "$label: contract product #$c not in the OpenAI feed" );
+        unset( $google[ (string) $c ], $google[ (int) $c ] );
+    }
     $products = array();
     foreach ( $items as $it ) {
         if ( preg_match( '/^pps-(\d+)$/', $it['item_id'], $m ) ) $products[ $m[1] ] = $it;
@@ -128,6 +132,8 @@ $P = array(
                   'short' => '', 'content' => "<h2>Brochures</h2>\n<script>x()</script><p>Folded   three ways.</p>", 'cats' => array( 'Uncategorized', 'Brochures > Folded' ) ),
     107 => array( 'title' => 'Postcards', 'regular' => '45', 'sale' => '30', 'sale_scheduled' => true, 'image' => 'https://priorityprintservice.com/g.jpg',
                   'short' => '', 'content' => '', 'defaults' => array( 'sizeLabel' => '4×6', 'qty' => 100, 'frontColor' => 'color' ) ),
+    108 => array( 'title' => 'Acme 8p Booklets', 'regular' => '1', 'image' => 'https://priorityprintservice.com/h.jpg', 'short' => 'One customer.', 'content' => '',
+                  'contract' => '{"name":"Acme","lock":true,"prices":{"500":1}}' ),
 );
 function get_post( $id ) {
     $d = $GLOBALS['P'][ $id ] ?? null; if ( ! $d ) return null;
@@ -138,12 +144,13 @@ function wc_get_product( $id ) { return isset( $GLOBALS['P'][ $id ] ) ? new Fake
 function get_post_meta( $id, $k, $single = false ) {
     if ( $k === '_pps_defaults' ) return $GLOBALS['P'][ $id ]['defaults'] ?? '';
     if ( $k === '_pps_defaults_price' ) return $GLOBALS['P'][ $id ]['quoted'] ?? '';
+    if ( $k === '_pps_contract' ) return $GLOBALS['P'][ $id ]['contract'] ?? '';
     return '';
 }
 function get_the_post_thumbnail_url( $id ) { return $GLOBALS['P'][ $id ]['image'] ?? ''; }
-function wp_get_attachment_image_url( $a ) { return 'https://priorityprintservice.com/gal-' . $a . '.jpg'; }
+function wp_get_attachment_image_url( $a ) { return $GLOBALS['gal'][ $a ] ?? 'https://priorityprintservice.com/gal-' . $a . '.jpg'; }
 function get_the_terms( $id ) { return array_map( function ( $n ) { return (object) array( 'name' => $n ); }, $GLOBALS['P'][ $id ]['cats'] ?? array() ); }
-function get_permalink( $id ) { return 'https://priorityprintservice.com/product/p' . $id . '/'; }
+function get_permalink( $id ) { return $GLOBALS['links'][ $id ] ?? 'https://priorityprintservice.com/product/p' . $id . '/'; }
 
 /* ═══════════ the real code ═══════════ */
 $calc = file_get_contents( __DIR__ . '/pps-calculators.php' );
@@ -173,7 +180,7 @@ ok( strpos( $calc, "\$offer_low_raw  = \$ovr_get( 'offer_price', \$preset_price 
     'preset head emitter still resolves offer_price → price_from (the order the feed copies)' );
 
 $GLOBALS['opts']['pps_calculators'] = array(
-    'calc-preview-test.html'  => array( 'products' => '101, 102,103,' ),
+    'calc-preview-test.html'  => array( 'products' => '101, 102,103, 108' ),
     'calc-brochure.html'      => array( 'products' => '104 105 106 107' ),
     'calc-perfect-bound.html' => array( 'products' => '102' ),   // collision: first claim wins
 );
@@ -188,14 +195,49 @@ $GLOBALS['opts']['pps_presets'] = array(
     'mystery' => array( 'slug' => 'mystery', 'calc' => 'nope', 'title' => 'Mystery', 'price_from' => 10 ),
 );
 
+/* ═══════════ snapshot mode: the real catalog, read-only ═══════════
+ * php tools-openai-feed-test.php --snapshot <snapshot.json> <live google.xml> [out-dir]
+ * snapshot.json = {products: Store API products by id, registry, presets}; the live
+ * Google feed is the reference. Writes the would-be feed to out-dir to look at. */
+if ( ( $argv[1] ?? '' ) === '--snapshot' ) {
+    $snap = json_decode( file_get_contents( $argv[2] ), true );
+    $GLOBALS['P'] = array(); $GLOBALS['gal'] = array(); $GLOBALS['links'] = array();
+    foreach ( $snap['products'] as $id => $p ) {
+        $p['gallery'] = array();
+        foreach ( $p['gallery_urls'] as $u ) { $k = count( $GLOBALS['gal'] ) + 1; $GLOBALS['gal'][ $k ] = $u; $p['gallery'][] = $k; }
+        $GLOBALS['links'][ $id ] = $p['permalink'];
+        $GLOBALS['P'][ (int) $id ] = $p;
+    }
+    $GLOBALS['opts']['pps_calculators'] = $snap['registry'];
+    $GLOBALS['opts']['pps_presets']     = $snap['presets'];
+    foreach ( $snap['contract_ids'] ?? array() as $c ) $GLOBALS['P'][ (int) $c ]['contract'] = array( 'name' => 'contract', 'prices' => array( '500' => 1 ) );
+    $live   = google_prices( file_get_contents( $argv[3] ) );
+    $mine   = google_prices( pps_product_feed_render() );
+    ok( sort_keys( $mine ) === sort_keys( $live ), 'the snapshot reproduces the live Google feed\'s item set (' . count( $mine ) . ' vs ' . count( $live ) . ')' );
+    $built = pps_openai_feed_build();
+    foreach ( $built['items'] as $it ) {
+        $p = pps_openai_feed_lint( $it );
+        ok( ! $p, $it['item_id'] . ' lints clean' . ( $p ? ': ' . implode( '; ', $p ) : '' ) );
+    }
+    check_parity( $built['items'], $live, 'live catalog vs live Google feed', $snap['contract_ids'] ?? array() );
+    foreach ( $built['skipped'] as $sk ) echo "     left out: {$sk['id']} {$sk['title']} — {$sk['reason']}\n";
+    if ( ! empty( $argv[4] ) ) {
+        file_put_contents( $argv[4] . '/pps-openai-feed.jsonl', pps_openai_feed_jsonl( $built['items'] ) );
+        file_put_contents( $argv[4] . '/pps-openai-feed.csv', pps_openai_feed_csv( $built['items'] ) );
+    }
+    echo "\n" . count( $built['items'] ) . " rows. $pass passed, $fail failed\n";
+    exit( $fail ? 1 : 0 );
+}
+
 /* ═══════════ the two feeds ═══════════ */
 $google = google_prices( pps_product_feed_render() );
 $built  = pps_openai_feed_build();
 $items  = $built['items'];
 $byId   = array_column( $items, null, 'item_id' );
 
-ok( sort_keys( $google ) === array( '101', '102', '106', '107' ), 'Google feed (control): 101, 102, 106, 107' );
-check_parity( $items, $google, 'fake catalog' );
+ok( sort_keys( $google ) === array( '101', '102', '106', '107', '108' ), 'Google feed (control): 101, 102, 106, 107, 108' );
+check_parity( $items, $google, 'fake catalog', array( 108 ) );
+ok( stripos( array_column( $built['skipped'], 'reason', 'id' )['pps-108'] ?? '', 'contract' ) !== false, 'contract product left out and named' );
 
 ok( $byId['pps-101']['price'] === '109.04 USD' && ! isset( $byId['pps-101']['sale_price'] ), 'list price, no sale' );
 ok( $byId['pps-102']['price'] === '200.00 USD' && $byId['pps-102']['sale_price'] === '150.00 USD', 'live sale: list in price, sale in sale_price' );
@@ -233,6 +275,8 @@ ok( $byId['pps-107']['product_category'] === 'Printing Services', '…root alone
 ok( strpos( $byId['pps-106']['description'], 'x()' ) === false && strpos( $byId['pps-106']['description'], 'Brochures Folded three ways.' ) === 0, 'body text: script dropped, tags + whitespace flattened' );
 ok( strpos( $byId['pps-102']['description'], 'for & catalogs' ) !== false, 'shortcode removed, entity decoded' );
 ok( strpos( $byId['pps-107']['description'], 'Postcards — 4×6, from 100 copies, full color.' ) === 0, 'empty body → built from the defaults' );
+ok( pps_openai_feed_text( '<ul><li>Minimum Order of 25 Pieces</li><li>Text and Cardstock</li></ul><p>Done.</p>' ) === 'Minimum Order of 25 Pieces. Text and Cardstock. Done.', 'list items become sentences, no doubled stops' );
+ok( pps_openai_feed_text( '11&#215;25.5 Trifold Brochure &#8211; 3 Panel' ) === '11×25.5 Trifold Brochure – 3 Panel', 'entities in a title decoded' );
 
 /* Presets */
 $bulk = $byId['pps-preset-bulk-booklet-printing'] ?? null;
@@ -248,7 +292,7 @@ ok( stripos( $skippedIds['pps-preset-mystery'] ?? '', 'unknown calculator' ) !==
 $GLOBALS['opts']['pps_openai_feed'] = array( 'presets' => false );
 $off = pps_openai_feed_build();
 ok( count( $off['items'] ) === 4 && ! preg_grep( '/preset/', array_column( $off['items'], 'item_id' ) ), 'presets switch off: products only' );
-check_parity( $off['items'], $google, 'presets off' );
+check_parity( $off['items'], $google, 'presets off', array( 108 ) );
 unset( $GLOBALS['opts']['pps_openai_feed'] );
 
 /* Lint discriminates */
