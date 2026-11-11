@@ -147,8 +147,8 @@ so items marked † rest on search-engine extracts of those pages, not a full re
   `price` = g:price (list), `sale_price` = g:sale_price. **One deliberate difference:** a product
   with a contract price list (`_pps_contract`, e.g. Armadillo 35765) is left out — it is one
   customer's job and its public price is a placeholder.
-- **Presets (decision 3 — on by default, `wp_options['pps_openai_feed'] = {"presets": false}` turns
-  them off):** priced as their own page's Product schema (`overrides.offer_price`, else
+- **Presets (decision 3 — owner 2026-11-11: "products only". OFF by default;
+  `wp_options['pps_openai_feed'] = {"presets": true}` turns them on):** when on, they are priced as their own page's Product schema (`overrides.offer_price`, else
   `price_from`); a preset without one is left out, never given its product's price. Image: the
   preset's, else its product's featured image (never the site logo). Today only
   `bulk-booklet-printing` ($109.04) has a page price; the other three are left out until a
@@ -162,13 +162,30 @@ so items marked † rest on search-engine extracts of those pages, not a full re
 - **Gate:** `tools-openai-feed-test.php` (fake catalog: lint, item set, every price vs the real
   Google renderer, presets, contract exclusion; swapping in the effective price fails 10 checks).
   `--snapshot` runs it over the real catalog read from production (registry option, Store API,
-  presets) against the live `/pps-product-feed.xml`: 32 rows, all clean, all prices equal
-  (2026-11-11). `--live <jsonl> <xml> [csv]` lints feeds fetched from the site after deploy.
-- **Found in the live catalog, for the owner (same in the Google feed today):** Foldover Greeting
-  Card $0.25, Note Card $0.15 and Standard Letterhead $1.00 carry per-piece prices as the product
-  price, so the feed says "from $0.25"; Standard Letterhead's short description is about door
-  hangers; registry ids 86472, 86887, 86468 are not published; 85177 "Sample Test" has no price;
-  sticker 86465 has no featured image.
+  presets) against the live `/pps-product-feed.xml`: 31 rows (presets off), all clean, all prices
+  equal (2026-11-11, after the fixes below). `--live <jsonl> <xml> [csv]` lints feeds fetched from the site after deploy.
+- **Found in the live catalog and FIXED on production 2026-11-11 (owner: "fix the issues"):** three
+  products carried a per-piece price as the product price, so every feed and schema said "from
+  $0.25". Each now carries the grand total its own calculator shows when the page opens (250 pieces,
+  read from the live page in a browser), in both `_regular_price` and `_pps_defaults_price`, so
+  the schema, the Google feed and this feed agree:
+
+  | Product | Was | Now |
+  |---|---|---|
+  | 23527 Foldover Greeting Card | 0.25 | 150.83 |
+  | 23559 Note Card | 0.15 | 111.23 |
+  | 21873 Standard Letterhead | 1.00 | 93.37 |
+
+  Safe for checkout: the add-to-cart floor is the SMALLER of $5 and half the product price.
+  Standard Letterhead's short description was door-hanger copy ("Heavy-Duty Door Hangers with
+  Extra Gloss Coating / DIY Designer On-Page / Shipping: Free UPS Ground Shipping / Size:
+  3.5x8.5, 4.25x11"); it now reads "Custom letterhead printed on premium text-weight papers,
+  including linen and opaque stocks. / Size: 8.5x11, 8.5x14 / Shipping: Free UPS Ground
+  Shipping". These are content edits (production is the source of truth for content); the
+  values above are the rollback. If the calculators' pricing changes, re-read these three opening
+  totals — nothing updates them automatically.
+- **Still for the owner:** registry ids 86472, 86887, 86468 are not published; 85177 "Sample Test"
+  has no price; sticker 86465 has no featured image (both left out of every feed).
 - **Phase 0 wording:** `docs/CHATGPT_BUSINESS_PROFILE.md`.
 
 ## 7. Sources used

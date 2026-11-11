@@ -231,6 +231,10 @@ if ( ( $argv[1] ?? '' ) === '--snapshot' ) {
 
 /* ═══════════ the two feeds ═══════════ */
 $google = google_prices( pps_product_feed_render() );
+$def    = pps_openai_feed_build();   // no option saved: the owner's default
+ok( count( $def['items'] ) === 4 && ! preg_grep( '/preset/', array_column( $def['items'], 'item_id' ) ), 'default: products only, no presets (owner 2026-11-11)' );
+check_parity( $def['items'], $google, 'default', array( 108 ) );
+$GLOBALS['opts']['pps_openai_feed'] = array( 'presets' => true );   // the switch, for the preset checks below
 $built  = pps_openai_feed_build();
 $items  = $built['items'];
 $byId   = array_column( $items, null, 'item_id' );
@@ -272,10 +276,11 @@ ok( $byId['pps-101']['additional_image_urls'] === 'https://priorityprintservice.
 ok( $byId['pps-101']['product_category'] === 'Printing Services > Booklets', 'product_category from the WooCommerce category' );
 ok( $byId['pps-106']['product_category'] === 'Printing Services > Brochures - Folded', '…Uncategorized skipped, ">" inside a name neutralised' );
 ok( $byId['pps-107']['product_category'] === 'Printing Services', '…root alone when there is none' );
-ok( strpos( $byId['pps-106']['description'], 'x()' ) === false && strpos( $byId['pps-106']['description'], 'Brochures Folded three ways.' ) === 0, 'body text: script dropped, tags + whitespace flattened' );
+ok( strpos( $byId['pps-106']['description'], 'x()' ) === false && strpos( $byId['pps-106']['description'], 'Brochures. Folded three ways.' ) === 0, 'body text: script dropped, heading and paragraph become sentences' );
 ok( strpos( $byId['pps-102']['description'], 'for & catalogs' ) !== false, 'shortcode removed, entity decoded' );
 ok( strpos( $byId['pps-107']['description'], 'Postcards — 4×6, from 100 copies, full color.' ) === 0, 'empty body → built from the defaults' );
 ok( pps_openai_feed_text( '<ul><li>Minimum Order of 25 Pieces</li><li>Text and Cardstock</li></ul><p>Done.</p>' ) === 'Minimum Order of 25 Pieces. Text and Cardstock. Done.', 'list items become sentences, no doubled stops' );
+ok( pps_openai_feed_text( "Custom letterhead.\r\n\r\nSize: <strong>8.5x11</strong>\r\n\r\nShipping: <strong>Free</strong>\r\n\r\n&nbsp;" ) === 'Custom letterhead. Size: 8.5x11. Shipping: Free.', 'blank-line paragraphs become sentences, trailing &nbsp; dropped' );
 ok( pps_openai_feed_text( '11&#215;25.5 Trifold Brochure &#8211; 3 Panel' ) === '11×25.5 Trifold Brochure – 3 Panel', 'entities in a title decoded' );
 
 /* Presets */
@@ -291,7 +296,7 @@ ok( stripos( $skippedIds['pps-preset-mystery'] ?? '', 'unknown calculator' ) !==
 
 $GLOBALS['opts']['pps_openai_feed'] = array( 'presets' => false );
 $off = pps_openai_feed_build();
-ok( count( $off['items'] ) === 4 && ! preg_grep( '/preset/', array_column( $off['items'], 'item_id' ) ), 'presets switch off: products only' );
+ok( count( $off['items'] ) === 4 && ! preg_grep( '/preset/', array_column( $off['items'], 'item_id' ) ), 'presets switched off explicitly: products only' );
 check_parity( $off['items'], $google, 'presets off', array( 108 ) );
 unset( $GLOBALS['opts']['pps_openai_feed'] );
 
@@ -324,7 +329,7 @@ ok( $r['item_id'] === 'pps-101' && $r['price'] === '109.04 USD' && $r['is_eligib
 ok( count( $head ) === count( array_unique( $head ) ) && in_array( 'sale_price', $head, true ), 'csv: one column per field across all rows' );
 
 /* Cache + robots */
-ok( pps_openai_feed_cached_rows() === $items && isset( $GLOBALS['transients']['pps_openai_feed_rows'] ), 'rows cached' );
+ok( pps_openai_feed_cached_rows() === $def['items'] && isset( $GLOBALS['transients']['pps_openai_feed_rows'] ), 'rows cached' );
 pps_openai_feed_flush_cache();
 ok( ! isset( $GLOBALS['transients']['pps_openai_feed_rows'] ), 'cache flushed' );
 ok( isset( $GLOBALS['hooks']['update_option_pps_presets'] ), 'a preset save flushes the cache' );

@@ -4,7 +4,8 @@
  *
  * Serves /pps-openai-feed.jsonl and /pps-openai-feed.csv: the same products as
  * the Google Merchant feed (/pps-product-feed.xml), in OpenAI's product-feed
- * shape, plus the preset landing pages. Read-only; it writes nothing but its
+ * shape. Preset landing pages can be added, but are off by default (owner
+ * 2026-11-11: products only). Read-only; it writes nothing but its
  * own hour-long cache.
  *
  * ── The one rule: never a second price calculation ──
@@ -125,8 +126,9 @@ function pps_openai_feed_settings() {
         'seller_name'    => $brand,
         'seller_url'     => home_url( '/' ),
         'currency'       => (string) ( $g['currency'] ?? 'USD' ),
-        // Preset landing pages in the feed. On unless the owner turns it off.
-        'presets'        => ! array_key_exists( 'presets', $o ) || ! empty( $o['presets'] ),
+        // Preset landing pages in the feed. OFF (owner 2026-11-11: "products
+        // only"); wp_options['pps_openai_feed'] = {"presets": true} turns them on.
+        'presets'        => ! empty( $o['presets'] ),
         // Free ground shipping US-wide — the site's own wording (calculator
         // noscript). The spec reads an omitted shipping_price as "unknown",
         // not free, so it is said: 0.00. (The structured `shipping` field
@@ -156,6 +158,9 @@ function pps_openai_feed_settings() {
  */
 function pps_openai_feed_text( $s ) {
     $s = preg_replace( '#</(li|p|h[1-6]|div|td)\s*>|<br\s*/?>#i', '. ', strip_shortcodes( (string) $s ) );
+    // WordPress short descriptions are often bare lines with blank lines between
+    // them (wpautop adds the <p> only on display): a blank line ends a sentence too.
+    $s = preg_replace( '/\R[ \t\x{00A0}]*\R/u', '. ', $s );
     $s = wp_strip_all_tags( $s, true );
     $s = html_entity_decode( $s, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
     $s = trim( preg_replace( '/\s+/u', ' ', $s ) );
@@ -199,6 +204,24 @@ function pps_openai_feed_is_contract( $id ) {
     return is_array( $c ) && ! empty( $c );
 }
 
+/**
+ * The product's own text, before pps_catalog_row() flattened it. The catalog
+ * strips tags with line breaks removed, so "<p>Minimum Order of 25</p><p>Text
+ * and Cardstock</p>" reaches the row as one run-on line; the raw excerpt (else
+ * body) keeps the breaks for pps_openai_feed_text() to turn into sentences.
+ * Same choice as the Google feed: the short description when it has one.
+ */
+function pps_openai_feed_raw_text( array $row ) {
+    $post = get_post( (int) $row['id'] );
+    if ( $post ) {
+        $ex = (string) $post->post_excerpt;
+        if ( pps_openai_feed_text( $ex ) !== '' ) return $ex;
+        $body = (string) $post->post_content;
+        if ( pps_openai_feed_text( $body ) !== '' ) return $body;
+    }
+    return $row['short'] !== '' ? $row['short'] : $row['description'];
+}
+
 /** "Printing Services > Booklets": the root, then the first WooCommerce category. */
 function pps_openai_feed_category( array $s, array $cats ) {
     $path = array( $s['category'] );
@@ -239,8 +262,7 @@ function pps_openai_feed_product_item( array $row, array $s ) {
     $item = array(
         'item_id'     => 'pps-' . (int) $row['id'],
         'title'       => pps_openai_feed_clip( pps_openai_feed_text( $row['title'] ), 150 ),
-        'description' => pps_openai_feed_description( $row['title'],
-                            $row['short'] !== '' ? $row['short'] : $row['description'], $row['defaults'], $s ),
+        'description' => pps_openai_feed_description( $row['title'], pps_openai_feed_raw_text( $row ), $row['defaults'], $s ),
         'url'         => $row['url'],
         'image_url'   => $row['image'],
         'price'       => pps_openai_feed_money( $list, $s['currency'] ),
@@ -456,7 +478,7 @@ function pps_openai_feed_debug() {
     $o = "PPS OpenAI product feed — diagnostic\n" . str_repeat( '=', 60 ) . "\n\n";
     $o .= 'Feed URLs: ' . home_url( '/' . PPS_OPENAI_FEED_SLUG . '.jsonl' ) . "\n           "
         . home_url( '/' . PPS_OPENAI_FEED_SLUG . '.csv' ) . "\n";
-    $o .= 'Presets:   ' . ( $s['presets'] ? 'included' : 'left out (option pps_openai_feed.presets)' ) . "\n\n";
+    $o .= 'Presets:   ' . ( $s['presets'] ? 'included (option pps_openai_feed.presets)' : 'left out — products only (set option pps_openai_feed.presets to include them)' ) . "\n\n";
     $o .= 'IN THE FEED (' . count( $b['items'] ) . ")\n" . str_repeat( '-', 60 ) . "\n";
     foreach ( $b['items'] as $it ) {
         $o .= sprintf( "  %-34s %-40s %s%s\n", $it['item_id'], pps_openai_feed_clip( $it['title'], 38 ), $it['price'],
