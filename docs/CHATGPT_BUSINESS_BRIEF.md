@@ -109,6 +109,11 @@ of `CLAUDE.md`).
 3. Preset pages in the feed — yes/no (recommended yes).
 4. Phase 4 app — later, or never?
 
+**Answered 2026-11-11:** 2 — yes, draft it (`docs/CHATGPT_BUSINESS_AGENT.md`: instructions,
+knowledge, preview test questions; no prices, no dates). 3 — **no presets: products only.**
+4 — later, once Insights shows ChatGPT sends customers. 1 (claim, email vs phone) is the owner's
+to do; `docs/CHATGPT_BUSINESS_PROFILE.md` recommends Office@.
+
 ## 6. Re-check before relying on it (the brief's weakest points)
 
 - Every Business Hub / Business Agent detail in §1 came from coverage dated 2026-11-10/11 — confirm
