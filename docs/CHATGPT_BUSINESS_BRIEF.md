@@ -109,6 +109,11 @@ of `CLAUDE.md`).
 3. Preset pages in the feed — yes/no (recommended yes).
 4. Phase 4 app — later, or never?
 
+**Answered 2026-11-11:** 2 — yes, draft it (`docs/CHATGPT_BUSINESS_AGENT.md`: instructions,
+knowledge, preview test questions; no prices, no dates). 3 — **no presets: products only.**
+4 — later, once Insights shows ChatGPT sends customers. 1 (claim, email vs phone) is the owner's
+to do; `docs/CHATGPT_BUSINESS_PROFILE.md` recommends Office@.
+
 ## 6. Re-check before relying on it (the brief's weakest points)
 
 - Every Business Hub / Business Agent detail in §1 came from coverage dated 2026-11-10/11 — confirm
@@ -119,10 +124,91 @@ of `CLAUDE.md`).
   unless it has come back.
 - How ChatGPT referrals appear in WooCommerce on this site.
 
+## 6a. What the re-check found (2026-11-11, against OpenAI's own pages)
+
+developers.openai.com was read directly; openai.com and help.openai.com refuse this sandbox (403),
+so items marked † rest on search-engine extracts of those pages, not a full read.
+
+| Brief said | OpenAI says | Verdict |
+|---|---|---|
+| Verify by phone, email, DNS TXT or Shopify; Persona check of a person before publishing † | Same four methods; Persona required "before you can publish business information changes, view insights, or create an eligible business agent". Claiming is "initially available to eligible businesses with a website". | Right |
+| Editable: website, description, category, logo, **cover photo**, delivery, returns; OpenAI reviews edits † | Help article lists website, description, category, logo, delivery policy, return policy — **no cover photo**. Edits are reviewed. Claiming gives no exclusive control; OpenAI may show a listing whether or not it is claimed. | Cover photo not confirmed |
+| A published profile cannot be unpublished † | "OpenAI Support is unable to delete, unpublish, or hide a published profile." Only drafts can be deleted. | Right |
+| How Business Hub ingests a feed: unknown | † **CSV upload, a link to a hosted feed file, or a Shopify feed.** Fetch schedule, size limits and refresh cadence for a link: not stated. (SFTP push with parquet/jsonl.gz/csv.gz is the separate Commerce channel, not Business Hub.) | Settled: give it the CSV link |
+| 9 required fields; `price` one value; `is_eligible_search` default true, checkout default off | Confirmed (`/commerce/specs/file-upload/products`; `/commerce/specs/spec` is a 404 now). `availability` is exactly `in_stock`, `out_of_stock`, `pre_order`, `backorder`, `unknown`. `price` = `79.99 USD`. No version string, no `item_id` length limit. `title` ≤150 and `description` ≤5,000 are guidance. | Right; details added |
+| `shipping` = free ground | `shipping` "requires feed-specific setup"; **`shipping_price` `0.00 USD`** means free, and omitting it means *unknown*, not free. Never both. | Corrected — the feed sends `shipping_price` |
+| `group_id` + `variant_dict` for variants | Only for real variants of one product as the site presents it (`listing_has_variations` true, a `variant_dict`, group ≠ item id). | Presets are NOT grouped |
+| — | `mpn`: "do not invent a value". | The OpenAI feed sends a real SKU only (the Google feed's `PPS-<id>` fallback stays a Google rule) |
+| Business Agent: US ecommerce/online service with a website; cannot buy/book/look up orders; must say it is AI, no invented facts † | Confirmed; plus the industry rules of the Business Agents Policy, and the business is responsible for the agent's outputs. **Cost: not stated anywhere** (sponsoring it as an ad is separate and paid). | Right; cost unknown |
+| Insights: 28 days, mentions, clicks, discovery topics, threshold † | 28 days, mainly mentions and website clicks; thresholds not published; needs Persona. "Discovery topics" not confirmed. | Mostly right |
+| Instant Checkout wound down | † OpenAI's March 2026 post: "moving away from a standalone Instant Checkout experience" toward discovery + merchant checkout; the developer docs still say it is "available to approved partners". | Deprioritised, not clearly retired — irrelevant: checkout stays off |
+
+## 6b. Phase 1 as built (branch `claude/chatgpt-business`)
+
+- `pps-openai-feed.php` — `/pps-openai-feed.csv` (give Business Hub this link) and
+  `/pps-openai-feed.jsonl`; `?debug=1` as an admin names everything left out. Loaded by one guarded
+  require in `pps-calculators.php`.
+- **Products:** the Google feed's, through `pps_catalog_report()` with its three requirements;
+  `price` = g:price (list), `sale_price` = g:sale_price. **One deliberate difference:** a product
+  with a contract price list (`_pps_contract`, e.g. Armadillo 35765) is left out — it is one
+  customer's job and its public price is a placeholder.
+- **Presets (decision 3 — owner 2026-11-11: "products only". OFF by default;
+  `wp_options['pps_openai_feed'] = {"presets": true}` turns them on):** when on, they are priced as their own page's Product schema (`overrides.offer_price`, else
+  `price_from`); a preset without one is left out, never given its product's price. Image: the
+  preset's, else its product's featured image (never the site logo). Today only
+  `bulk-booklet-printing` ($109.04) has a page price; the other three are left out until a
+  "Price from" is set on them.
+- **Every row:** brand + seller Priority Print Service, `in_stock`, `condition` new,
+  `shipping_price` 0.00 USD, `accepts_returns` false + the policy URL (the page says "All sales
+  final"), privacy + terms URLs, search on, checkout off, `product_category` "Printing Services >
+  <first WooCommerce category>", plain-text description (list items become sentences) ending
+  "The price shown is the starting price for the job this page opens with; the online calculator
+  prices any size, paper, quantity and finishing live."
+- **Gate:** `tools-openai-feed-test.php` (fake catalog: lint, item set, every price vs the real
+  Google renderer, presets, contract exclusion; swapping in the effective price fails 10 checks).
+  `--snapshot` runs it over the real catalog read from production (registry option, Store API,
+  presets) against the live `/pps-product-feed.xml`: 31 rows (presets off), all clean, all prices
+  equal (2026-11-11, after the fixes below). `--live <jsonl> <xml> [csv]` lints feeds fetched from the site after deploy.
+- **Found in the live catalog and FIXED on production 2026-11-11 (owner: "fix the issues"):** three
+  products carried a per-piece price as the product price, so every feed and schema said "from
+  $0.25". Each now carries the grand total its own calculator shows when the page opens (250 pieces,
+  read from the live page in a browser), in both `_regular_price` and `_pps_defaults_price`, so
+  the schema, the Google feed and this feed agree:
+
+  | Product | Was | Now |
+  |---|---|---|
+  | 23527 Foldover Greeting Card | 0.25 | 150.83 |
+  | 23559 Note Card | 0.15 | 111.23 |
+  | 21873 Standard Letterhead | 1.00 | 93.37 |
+
+  Safe for checkout: the add-to-cart floor is the SMALLER of $5 and half the product price.
+  Standard Letterhead's short description was door-hanger copy ("Heavy-Duty Door Hangers with
+  Extra Gloss Coating / DIY Designer On-Page / Shipping: Free UPS Ground Shipping / Size:
+  3.5x8.5, 4.25x11"); it now reads "Custom letterhead printed on premium text-weight papers,
+  including linen and opaque stocks. / Size: 8.5x11, 8.5x14 / Shipping: Free UPS Ground
+  Shipping". These are content edits (production is the source of truth for content); the
+  values above are the rollback. If the calculators' pricing changes, re-read these three opening
+  totals — nothing updates them automatically.
+- **Still for the owner:** registry ids 86472, 86887, 86468 are not published; 85177 "Sample Test"
+  has no price; sticker 86465 has no featured image (both left out of every feed).
+- **Phase 0 wording:** `docs/CHATGPT_BUSINESS_PROFILE.md`.
+- **LIVE on production since 2026-11-11** (owner approved): `pps-openai-feed.php` (25,639 bytes)
+  then `pps-calculators.php` (474,693 bytes; the live copy was 474,303 = this branch's base, so
+  only the guarded require changed), both pulled from `931b4e8`. Site and Google feed answered
+  200 afterwards. `https://priorityprintservice.com/pps-openai-feed.csv` and `.jsonl`: 31 rows;
+  `--live … 35765` passed 98/98 (every row lints, every price = the live Google feed, Armadillo
+  absent, CSV = JSONL). Rollback: pull `pps-calculators.php` from `7ac70ab` (the loader goes,
+  the feed URL stops answering) and delete `pps-openai-feed.php`.
+- `robots.txt` on production is not built by WordPress's `robots_txt` filter (neither feed's
+  Allow line appears), but it disallows only `/wp-admin/`, so both feeds are fetchable.
+
 ## 7. Sources used
 
 - OpenAI product feed reference — https://developers.openai.com/commerce/product-feeds/spec
-- OpenAI product feed spec — https://developers.openai.com/commerce/specs/spec
+- OpenAI product feed spec (current) — https://developers.openai.com/commerce/specs/file-upload/products (`/commerce/specs/spec` now 404s)
+- Setting up your business on ChatGPT — https://help.openai.com/en/articles/20001635-setting-up-your-business-on-chatgpt
+- Business Agents policy — https://openai.com/policies/business-agents-policy/
+- Businesses in ChatGPT policy and terms — https://openai.com/policies/businesses-in-chatgpt/ , https://openai.com/policies/businesses-in-chatgpt-terms/
 - OpenAI checkout guidance for apps — https://developers.openai.com/plugins/build/monetization
 - OpenAI, "Buy it in ChatGPT" (2025) — https://openai.com/index/buy-it-in-chatgpt/
 - Businesses in ChatGPT, deep dive — https://flaviocopes.com/businesses-in-chatgpt/

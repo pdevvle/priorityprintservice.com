@@ -296,6 +296,14 @@ if ( file_exists( PPS_CALC_DIR . 'pps-product-feed.php' )
     require_once PPS_CALC_DIR . 'pps-product-feed.php';
 }
 
+// /pps-openai-feed.jsonl + .csv for Businesses in ChatGPT (Business Hub). Same catalog
+// and price resolver as the Google feed; needs both files above.
+if ( file_exists( PPS_CALC_DIR . 'pps-openai-feed.php' )
+     && file_exists( PPS_CALC_DIR . 'pps-product-feed.php' )
+     && file_exists( PPS_CALC_DIR . 'pps-catalog.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-openai-feed.php';
+}
+
 // Daily Places API refresh of the Business Profile rating the LocalBusiness
 // schema mirrors. Inert until a key and Place ID are configured.
 if ( file_exists( PPS_CALC_DIR . 'pps-gbp-sync.php' ) ) {
