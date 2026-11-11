@@ -151,3 +151,106 @@ promise, which narrows the exposure while the work is scheduled.
 4. Transit-days override for rated destinations; conservative map placeholders.
 5. Foreign path for unservable lanes.
 6. Matrix destination slice.
+
+## Implemented for pay links, 2026-11-04 (not yet for the calculators)
+
+The **pay-link quote page** now does for foreign destinations what this spec
+describes for rated US ones. The calculators still do not — items 1–6 of the
+build order above remain open for them.
+
+What shipped, and where it differs from the spec above:
+
+| Spec says | Pay links do | Why |
+|---|---|---|
+| Rated vs foreign decided by whether UPS returns a rate | Same | Asking UPS beats maintaining a country list |
+| Surcharge **inside** the quoted total | **Added on top**, as its own WooCommerce shipping line | A pay link's price is one figure an operator typed in a conversation; it was quoted before any address existed, so it cannot already contain the freight. Shown itemised: printing + shipping = total |
+| Cheapest serving rate, days and price from one rate object | Same | The domestic endpoint picks the *slowest* UPS service, which is fine for a duration and a correctness bug once it is also the price |
+| 30-day cache | **3 days** | That figure is a duration; this one is a price. Fuel surcharges move. `pps_quote_intl_ttl()` |
+| No margin | Same | Owner rule: passed through at cost |
+| Never fall back to $0 | Same, enforced | No rate means no order. `pps_quote_ship_charge()` returns `WP_Error` and the page disables its own submit button |
+
+**The weight is the whole constraint.** A rate needs a parcel weight and nothing
+in a pay link has one — the calculators derive it from sheets and paper stock, an
+operator-typed link carries a description and a price. So it is supplied
+explicitly as `~18lb`, and a link without one offers no country choice at all.
+The parcel split is a **verbatim port** of the 45 lb / 19×13×6 carton math in
+`pps-calculators.php`; if that rule changes, change both in the same commit.
+
+**The existing transit endpoint could not be used.** `POST
+/pps/v1/shipping/transit-estimate` strips the postcode to digits and 400s under
+five, so `M5V 3L9` becomes `53`, and it is hardwired to `country: US`. It also
+lives in `pps-calculators.php`, which this lane must not deploy. Hence
+`POST /pps/v1/quote/ship-quote` in `pps-job-quote.php`. The page's domestic
+transit line is now guarded to US destinations — a German `10115` is five digits
+and would otherwise have come back with a confident US ground estimate.
+
+**Labels are still bought by hand.** `pps-missive-ship.php` refuses non-US
+outright ("International labels need customs forms — buy them in Shippo"), so
+an international order carries an order note saying so. Duties are DDU: the page
+tells the customer the carrier collects import duties and taxes from the
+recipient.
+
+Regression gate: `tools-tests/quoteintl.php` (108 assertions, mutation-tested).
+
+### UPS will not rate an international lane without a customs declaration
+
+Caught on **2026-11-04, before deploy**, by rating a real lane against the live
+Shippo account instead of trusting the code. Phoenix → Toronto, 30 lb, parcel
+and addresses only:
+
+| | |
+|---|---|
+| Rates returned | **15 — FedEx, USPS, DHL. Not one UPS.** |
+| UPS said | `111549 Hard: Invalid Shipment Contents Value`<br>`111210 Hard: The requested service is unavailable between the selected locations` |
+| Shippo said | `Attribute "customs_declaration" must not be empty` |
+
+The response looked healthy. Rates came back. But this code filters to UPS by
+owner rule, so **every foreign address would have been refused as unservable**
+and the feature would have read as "no carrier serves Canada" — with nothing in
+any log pointing at the real cause.
+
+The same lane **with** a declaration returns four UPS services:
+
+| UPS service | price | days |
+|---|---|---|
+| **Standard℠** | **$53.08** | 4 |
+| Worldwide Expedited® | $100.33 | 2 |
+| Saver® | $127.55 | 1 |
+| Worldwide Express® | $137.29 | 1 |
+
+So the owner's UPS-only rule is sound internationally — the request was simply
+incomplete. `pps_quote_intl_customs()` now builds it. What it carries, and why:
+
+- **The declared value is the print price, in full.** UPS prices partly on it
+  (that is the `111549`), and it is what the recipient is assessed duty on.
+  Under-declaring to spare them is fraud.
+- **`DDU`** — the recipient pays duties, which is exactly what the payment page
+  tells them. `DDP` would bill the shop for duties nobody quoted.
+- **`RETURN`**, not `ABANDON` — an undeliverable job comes home.
+- **`NOEEI_30_36`** for Canada, `NOEEI_30_37_a` elsewhere, per Shippo's guidance.
+- **A generic commodity** (`Printed material`, HS `4901.99`) rather than the
+  operator's spec. FedEx rejected a spec-derived description as inconsistent
+  with its HS code, and a customs declaration is not the place to discover that.
+  **This declaration is for RATING ONLY** — the real paperwork is filled in by a
+  human when the label is bought in Shippo.
+
+Two related corrections the same test forced:
+
+- **The origin is now a full address** (`pps_quote_intl_origin()`, from the
+  WooCommerce store address, with the configured Shippo origin ZIP still
+  winning). The domestic lookup sends zip + country and Shippo is content; an
+  export is a different question and could not be verified in that thin form.
+- **The destination carries street and recipient name.** The street is in the
+  cache key as well as the request, because a residential surcharge is
+  address-driven; the name is deliberately *not*, because it cannot change a
+  rate and keying on it would miss the cache for every new customer at a
+  known address.
+
+Verified by sending **the exact payload the PHP builds** to the live API: UPS
+Standard, $53.08, 4 days — the cheapest of all 15 rates — which is what
+`pps_quote_pick_intl_rate()` selects when fed that real response.
+
+One note worth keeping: UPS returned `110971 RatedShipmentAlert: Your invoice
+may vary from the displayed reference rates`. The shop absorbs that drift by
+the no-margin rule, which is the exposure the 3-day cache bounds.
+

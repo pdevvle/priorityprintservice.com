@@ -756,6 +756,190 @@ Whole-file deploys are the mechanism that destroys surgical patches, so check fi
   deployed bytes are pinned to a reviewable commit, and rollback is the same call with
   a different SHA.
 
+### Concurrent sessions: the server's copy must be an ANCESTOR of yours
+
+The size check above only catches a file edited *by hand*. It does not catch the more
+common failure now that several Claude sessions run at once: the server holding a
+**real commit from somebody else's branch**. The size matches a genuine commit, the
+check passes, and the deploy silently reverts work that was live and being used.
+
+This happened on 2026-08-27. One session deployed `pps-calculators.php` from `6b75f46`
+at 22:52. That commit did not carry another session's two `require_once` lines, so
+`pps-pay-link.php` and `pps-quickbooks.php` stopped loading and `/pps/v1/pay-link`
+ceased to exist. Missive's webhook got a 404 and reported only "failed to send
+webhook"; the feature's own diagnostics stayed empty because none of its code ran. The
+outage lasted until somebody happened to GET the route. **Nothing alerted. Nothing
+logged. A paying feature was simply gone.**
+
+So before overwriting a shared PHP file, ask the question the size check does not:
+
+```bash
+SIZE=<bytes reported by pps_plugin_list_files>
+for c in $(git log --all --format=%H -100 -- <file>); do
+  [ "$(git cat-file -s $(git rev-parse $c:<file>) 2>/dev/null)" = "$SIZE" ] && echo "$c"
+done
+# then, for whatever that returns:
+git merge-base --is-ancestor <server-commit> HEAD && echo SAFE || echo "STOP — merge first"
+```
+
+- **SAFE** means the server is running something you already contain; deploying moves it
+  forward.
+- **STOP** means the server has work your branch does not. Fetch and merge that branch
+  first, verify the merged byte count equals *both* contributions, and deploy the merged
+  file. Never "fix" this by redeploying your own copy — that is the same fault pointed
+  the other way.
+- A size matching **several** commits is ambiguous; read the file and compare a hash
+  rather than guessing.
+
+### Pay Link and QuickBooks load themselves — do not "restore" the requires
+
+`pps-pay-link.php` and `pps-quickbooks.php` are **separately activated plugins**,
+listed in `active_plugins` as `pps-calculators/pps-pay-link.php` and
+`pps-calculators/pps-quickbooks.php`. This is the same pattern
+`pps-assistant.php`, `pps-assistant-webhook.php`, `pps-html-deploy.php` and
+`pps-intake.php` already use — several plugin files sharing one directory, each
+with its own `Plugin Name` header.
+
+They are NOT required from `pps-calculators.php`, and must not be. They were,
+and twice — 2026-08-27 22:52 and 2026-08-29 00:10 — another session redeployed
+that file from a branch without the two `require_once` lines. Both times the
+modules stopped existing: `/pps/v1/pay-link` 404d, Missive reported only
+"failed to send webhook", and none of the module's own diagnostics fired
+because none of its code ran. A money-taking feature was silently offline for
+hours, twice, and nothing alerted.
+
+Loading themselves is what makes that impossible: no deploy of
+`pps-calculators.php` can unload a plugin WordPress activates directly.
+
+- **Do not add `require_once` lines for them back into `pps-calculators.php`.**
+  Both files guard with `PPS_PAYLINK_LOADED` / `PPS_QBO_LOADED` and would
+  return early rather than fatal, but the guard is a safety net, not a design.
+- **If either stops working, check `active_plugins` first.** A missing entry is
+  the failure; the fix is re-adding it, not re-adding a require.
+- **Anything that must survive an unrelated deploy belongs in one of these two
+  files**, not in `pps-job-quote.php` or `pps-calculators.php`. The receipt's
+  shipping-address filter lives in `pps-pay-link.php` for exactly this reason.
+
+### Pay links can ship abroad, but only with a weight
+
+A pay link quotes one figure with delivery inside it, which is true in the
+contiguous US and false everywhere else. Since 2026-11-04 the quote page rates a
+foreign destination live against UPS and adds the carrier's price on top, at
+cost, as its own shipping line.
+
+- **It only works on a link carrying `~18lb`.** Nothing else in a pay link knows
+  the parcel weight, and a shipping price without a weight is a made-up number
+  on a real card. A link without one offers no country choice and tells a
+  foreign customer to contact us. Do not "improve" this by defaulting the
+  weight.
+- **No rate means no order.** `pps_quote_ship_charge()` refuses and the page
+  disables its own submit button. Never make this fall back to $0 — free
+  international freight charged to the shop is the one outcome worse than a
+  customer waiting for a human.
+- **The amount is always derived server-side** from the quote's stored weight.
+  The browser is told what it will be charged; it never says.
+- The parcel split is a **verbatim port** of the 45 lb / 19×13×6 carton math in
+  `pps-calculators.php`. If that rule changes, change both in the same commit.
+- **UPS returns NO international rates without a customs declaration.** Rating
+  a real Toronto lane with just a parcel gave 15 rates, every one FedEx/USPS/DHL,
+  while UPS answered `Invalid Shipment Contents Value`. Since this filters to
+  UPS, every foreign address would have been refused as unservable and nothing
+  would have said why. `pps_quote_intl_customs()` is load-bearing — do not
+  "simplify" the rate request by dropping it, and do not drop the declared
+  value, which is what UPS prices on.
+- **Labels are still bought by hand in Shippo** — `pps-missive-ship.php` refuses
+  non-US because international labels need customs forms. The order carries a
+  note saying so.
+
+Full rationale and the differences from the calculators' plan:
+`docs/NONCONTIGUOUS_SHIPPING_SPEC.md` § "Implemented for pay links".
+
+### Pay links: a choice of quantities
+
+`/ppspay [Trifold] @50 $151.49 @100 $287.83 @250 $485.88` gives the customer a
+quantity dropdown — each price the total for that quantity. The quote engine
+always supported tiers; until 2026-11-04 the parser never built them, so every
+price after the first `$` was **silently dropped** and a six-price command
+minted a one-price link. `pps_paylink_parse_tiers()` now reads the pairs:
+
+- **Strict, because a mispaired price is a real charge.** With two or more
+  quantities or prices, every `@qty` must be followed by exactly one price. A
+  price straight after its `@qty` may omit the `$` (the pairing is positional);
+  a stray number, a price with no quantity, a quantity with no price or a
+  repeated quantity refuses the whole link, naming the token. Two `$` prices
+  with no `@` refuse too — that used to charge the first.
+- **The minted note lists every pair as read**, so a misreading shows in the
+  thread rather than on the customer's page.
+- **Not with `~weight`** — one weight cannot rate the freight of every
+  quantity. One quantity per link to ship abroad.
+- **One item only.** On a multi-item link a row with two prices refuses
+  (`line_tiers`); the page has one quantity dropdown, not one per row.
+- `tiers` is on the REST handler's allow-list and in the outcome log, and
+  `tools-tests/paylinkroute.php` asserts it arrives — the guard over parser
+  fields cannot see it, because the quote always receives a `tiers` key.
+
+### A PO or job name per line item
+
+On a **multi-item** pay link each row gets its own optional PO / job name,
+because a company buying four jobs on one payment often books each against a
+different purchase order. Stored as visible `Reference` line-item meta, so it
+follows the order into wp-admin, the receipt, the packing list and the
+QuickBooks invoice line (where it **leads** the line — a PO exists to be
+matched against) with nothing else taught about it.
+
+- **The inputs carry explicit line indices — `refs[0]`, `refs[1]` — never a
+  bare `refs[]`.** The browser sends only the fields it has, so with a packed
+  array one untouched row would shift every reference after it up a line and
+  book a PO against the wrong job. The invoice would look entirely plausible.
+  `pps_quote_line_refs()` reads by index and takes the line count as an
+  argument for the same reason; it never infers it from what arrived.
+- **Single-item quotes do not get the block.** The order-wide `Project name`
+  field already names the whole job, and both can be set at once on a
+  multi-item order: `Project` names the order, `Reference` names the row.
+- Nothing is carried into a reorder — a new order has a new PO.
+- Gates: `tools-tests/quotelines.php` (the normaliser, the field labels and the
+  rendered form) and the last block of `tools-tests/quoteintl-browser.mjs`
+  (that filling only row 1 leaves row 0 empty rather than shifted).
+
+### Pay links tell you when they are broken — ask them first
+
+`GET /wp-json/pps/v1/pay-link` is the one-call diagnosis, unauthenticated on
+purpose:
+
+| Response | Meaning |
+|---|---|
+| `200 {"ok":true,"status":"ok"}` | Loading and able to mint. |
+| `503 {"ok":false,"status":"degraded"}` | Loading, but something it needs is missing. |
+| `404 rest_no_route` | `pps-pay-link.php` is not loading at all — check `active_plugins`. |
+
+`pps_paylink_health()` holds the checks (both `active_plugins` entries,
+`pps_quote_create()`, `pps_is_business_day()`, the line product and its
+`_virtual` flag, the shared secret). The endpoint reports *that* it is degraded
+without saying *what* is wrong; the detail goes to `admin_email` and the
+outcome log. The hourly `pps_paylink_healthcheck` cron mails **once per distinct
+failure**, not once per hour — if you add a check, keep that property.
+
+The gap it cannot close is its own absence: if the file stops loading, nothing
+in it runs, which is exactly what happened twice. Only an outside poller
+watching for any non-200 covers both shapes.
+
+### Running more than one session at a time
+
+- **One deploy lane.** Feature branches are fine; deploying from them is not. Merge into
+  the integration branch and deploy *that* commit, so production only ever receives bytes
+  from one lineage. Two branches deploying the same file is the whole problem.
+- **Split by file, not by feature.** Two sessions editing `pps-calculators.php` for
+  unrelated reasons will collide no matter how careful each is.
+- **Merge early.** A branch open all day drifts far enough that a merge stops being
+  routine. Land it while the diff is small.
+- **Say so in the handoff.** A session that deploys a shared file should record what it
+  deployed and from which SHA, so the next one can run the ancestry check without
+  archaeology.
+- **A feature that reaches production before it is merged is on loan.** Until the change
+  lives on the shared branch, every unrelated deploy of those files can take it away —
+  and the symptom will not look like a deploy problem. Prefer merging over deploying from
+  a branch; when that is not possible, treat the merge as unfinished work, not paperwork.
+
 ### Applies equally to
 
 Anything edited outside version control and relied upon: `wp_options` values that
