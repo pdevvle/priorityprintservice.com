@@ -10,8 +10,9 @@
  *       helpers out of pps-calculators.php, loads the real pps-catalog.php and
  *       pps-product-feed.php, renders BOTH feeds and compares them.
  *
- *   php tools-openai-feed-test.php --live <openai.jsonl> <google.xml> [openai.csv]
- *       The same lint and parity on feeds fetched from a site.
+ *   php tools-openai-feed-test.php --live <openai.jsonl> <google.xml> [openai.csv] [contract-ids]
+ *       The same lint and parity on feeds fetched from a site. contract-ids (e.g. 35765) are
+ *       the contract products the OpenAI feed leaves out on purpose; they must be missing.
  */
 error_reporting( E_ALL );
 $pass = 0; $fail = 0;
@@ -57,7 +58,7 @@ function sort_keys( $a ) { $k = array_map( 'strval', array_keys( $a ) ); sort( $
 if ( ( $argv[1] ?? '' ) === '--live' ) {
     define( 'ABSPATH', '/' );
     // Only the pure parts of the module are needed: lint and nothing that touches WP.
-    function add_action() {} function add_filter() {}
+    // the stubs below are declared at load time (PHP hoists top-level functions)
     require __DIR__ . '/pps-openai-feed.php';
     $items = array();
     foreach ( file( $argv[2], FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES ) as $n => $line ) {
@@ -71,7 +72,8 @@ if ( ( $argv[1] ?? '' ) === '--live' ) {
         $p = pps_openai_feed_lint( $it );
         ok( ! $p, $it['item_id'] . ' lints clean' . ( $p ? ': ' . implode( '; ', $p ) : '' ) );
     }
-    check_parity( $items, google_prices( file_get_contents( $argv[3] ) ), 'live' );
+    $contract = array_filter( array_map( 'intval', explode( ',', (string) ( $argv[5] ?? '' ) ) ) );
+    check_parity( $items, google_prices( file_get_contents( $argv[3] ) ), 'live', $contract );
     if ( ! empty( $argv[4] ) ) {
         $fh = fopen( $argv[4], 'r' ); $head = fgetcsv( $fh, 0, ',', '"', '' ); $rows = 0;
         while ( ( $r = fgetcsv( $fh, 0, ',', '"', '' ) ) !== false ) {

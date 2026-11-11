@@ -192,6 +192,15 @@ so items marked † rest on search-engine extracts of those pages, not a full re
 - **Still for the owner:** registry ids 86472, 86887, 86468 are not published; 85177 "Sample Test"
   has no price; sticker 86465 has no featured image (both left out of every feed).
 - **Phase 0 wording:** `docs/CHATGPT_BUSINESS_PROFILE.md`.
+- **LIVE on production since 2026-11-11** (owner approved): `pps-openai-feed.php` (25,639 bytes)
+  then `pps-calculators.php` (474,693 bytes; the live copy was 474,303 = this branch's base, so
+  only the guarded require changed), both pulled from `931b4e8`. Site and Google feed answered
+  200 afterwards. `https://priorityprintservice.com/pps-openai-feed.csv` and `.jsonl`: 31 rows;
+  `--live … 35765` passed 98/98 (every row lints, every price = the live Google feed, Armadillo
+  absent, CSV = JSONL). Rollback: pull `pps-calculators.php` from `7ac70ab` (the loader goes,
+  the feed URL stops answering) and delete `pps-openai-feed.php`.
+- `robots.txt` on production is not built by WordPress's `robots_txt` filter (neither feed's
+  Allow line appears), but it disallows only `/wp-admin/`, so both feeds are fetchable.
 
 ## 7. Sources used
 
