@@ -296,6 +296,11 @@ if ( file_exists( PPS_CALC_DIR . 'pps-product-feed.php' )
     require_once PPS_CALC_DIR . 'pps-product-feed.php';
 }
 
+// Upload failures, server and browser, listed at PPS Calculators → Upload Failures.
+if ( file_exists( PPS_CALC_DIR . 'pps-upload-log.php' ) ) {
+    require_once PPS_CALC_DIR . 'pps-upload-log.php';
+}
+
 // /pps-openai-feed.jsonl + .csv for Businesses in ChatGPT (Business Hub). Same catalog
 // and price resolver as the Google feed; needs both files above.
 if ( file_exists( PPS_CALC_DIR . 'pps-openai-feed.php' )
@@ -1528,11 +1533,35 @@ function pps_artwork_sniff_type( $head ) {
     return '';
 }
 
+/** Refuse an upload and record why (pps-upload-log.php). Same answer to the browser as before. */
+function pps_upload_refuse( $message, $code = 'refused', $file = null ) {
+    if ( function_exists( 'pps_upload_log' ) ) {
+        pps_upload_log( array(
+            'source' => 'server',
+            'code'   => $code,
+            'reason' => $message,
+            'file'   => is_array( $file ) ? ( $file['name'] ?? '' ) : '',
+            'size'   => is_array( $file ) ? ( $file['size'] ?? 0 ) : 0,
+            'page'   => (string) wp_parse_url( (string) ( $_SERVER['HTTP_REFERER'] ?? '' ), PHP_URL_PATH ),
+        ) );
+    }
+    wp_send_json_error( $message );
+}
+
 function pps_ajax_upload_artwork() {
-    check_ajax_referer( 'pps_upload_artwork', 'nonce' );
+    // Same -1 / 403 as check_ajax_referer() gave, but the stale page is now recorded. The
+    // calculator renews the nonce and sends again, so this alone is not a lost order.
+    if ( ! check_ajax_referer( 'pps_upload_artwork', 'nonce', false ) ) {
+        if ( function_exists( 'pps_upload_log' ) ) {
+            pps_upload_log( array( 'source' => 'server', 'code' => 'nonce', 'reason' => 'Upload nonce not accepted (the calculator renews it and retries)',
+                'file' => (string) ( $_FILES['artwork']['name'] ?? '' ), 'size' => (int) ( $_FILES['artwork']['size'] ?? 0 ),
+                'page' => (string) wp_parse_url( (string) ( $_SERVER['HTTP_REFERER'] ?? '' ), PHP_URL_PATH ) ) );
+        }
+        wp_die( '-1', 403 );
+    }
 
     if ( empty( $_FILES['artwork'] ) ) {
-        wp_send_json_error( 'No file received.' );
+        pps_upload_refuse( 'No file received.' );
     }
     // PHP reports WHY an upload did not arrive; collapsing every code into
     // "No file received." hid a file over the ini limit, a dropped connection
@@ -1551,7 +1580,7 @@ function pps_ajax_upload_artwork() {
             UPLOAD_ERR_EXTENSION  => 'The upload was stopped by a server extension. Please email the file to us and we will attach it to your order.',
         );
         error_log( sprintf( '[pps] artwork upload refused by PHP: code=%d name=%s', $up_err, (string) ( $_FILES['artwork']['name'] ?? '' ) ) );
-        wp_send_json_error( $messages[ $up_err ] ?? ( 'No file received (upload error ' . $up_err . ').' ) );
+        pps_upload_refuse( $messages[ $up_err ] ?? ( 'No file received (upload error ' . $up_err . ').' ), in_array( $up_err, array( UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE ), true ) ? 'size' : 'php', $_FILES['artwork'] );
     }
 
     $file = $_FILES['artwork'];
@@ -1561,11 +1590,11 @@ function pps_ajax_upload_artwork() {
     // (plain-text record of art transforms) that ships with the approval package.
     $allowed = array( 'pdf', 'jpg', 'jpeg', 'png', 'tiff', 'tif', 'eps', 'ai', 'txt' );
     if ( ! in_array( $ext, $allowed, true ) ) {
-        wp_send_json_error( 'File type not allowed: .' . $ext );
+        pps_upload_refuse( 'File type not allowed: .' . $ext, 'refused', $file );
     }
 
     if ( $file['size'] > 200 * 1024 * 1024 ) {
-        wp_send_json_error( 'File too large (max 200MB).' );
+        pps_upload_refuse( 'File too large (max 200MB).', 'size', $file );
     }
 
     // Magic-byte validation: the file's content must be the kind of file it claims
@@ -1609,7 +1638,7 @@ function pps_ajax_upload_artwork() {
             break;
     }
     if ( ! $magic_ok ) {
-        wp_send_json_error( 'File content does not match its .' . $ext . ' extension — re-export the file and try again.' );
+        pps_upload_refuse( 'File content does not match its .' . $ext . ' extension — re-export the file and try again.', 'refused', $file );
     }
 
     // Unique filename: timestamp-hash.ext
@@ -1656,7 +1685,7 @@ function pps_ajax_upload_artwork() {
                 $stats = $body['data']['attributes']['last_analysis_stats'] ?? array();
                 $bad   = intval( $stats['malicious'] ?? 0 ) + intval( $stats['suspicious'] ?? 0 );
                 if ( $bad >= 2 ) { // ≥2 engines flag it — refuse
-                    wp_send_json_error( 'This file was flagged as unsafe by malware scanning and cannot be uploaded. Please re-export from your source application.' );
+                    pps_upload_refuse( 'This file was flagged as unsafe by malware scanning and cannot be uploaded. Please re-export from your source application.', 'refused', $file );
                 }
             }
         }
@@ -1665,7 +1694,7 @@ function pps_ajax_upload_artwork() {
     $dest = trailingslashit( $full_dir ) . $stored_name;
 
     if ( ! move_uploaded_file( $file['tmp_name'], $dest ) ) {
-        wp_send_json_error( 'Failed to save file.' );
+        pps_upload_refuse( 'Failed to save file.', 'php', $file );
     }
 
     // Return the full relative path — stored directly in cart, no glob needed

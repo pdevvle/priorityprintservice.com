@@ -28,6 +28,8 @@ function lift( $src, $name ) {
 }
 class Sent extends Exception { public $ok; public $data; function __construct( $ok, $data ) { $this->ok = $ok; $this->data = $data; } }
 function check_ajax_referer() { return true; }
+function wp_die( $m = '', $c = 0 ) { throw new Sent( false, $m ); }
+function wp_parse_url( $u, $c = -1 ) { return parse_url( $u, $c ); }
 function wp_send_json_error( $d ) { throw new Sent( false, $d ); }
 function wp_send_json_success( $d ) { throw new Sent( true, $d ); }
 function size_format( $b ) { return round( $b / 1048576 ) . ' MB'; }
@@ -39,7 +41,7 @@ function error_log_( $m ) {}
 $GLOBALS['tmp'] = sys_get_temp_dir() . '/pps-up-' . getmypid(); @mkdir( $GLOBALS['tmp'], 0777, true );
 function pps_artwork_dir() { return $GLOBALS['tmp'] . '/pps-artwork'; }
 function pps_test_move( $from, $to ) { return copy( $from, $to ); }
-$code = lift( $src, 'pps_artwork_sniff_type' ) . "\n" . lift( $src, 'pps_ajax_upload_artwork' );
+$code = lift( $src, 'pps_artwork_sniff_type' ) . "\n" . ( strpos( $src, 'function pps_upload_refuse' ) !== false ? lift( $src, 'pps_upload_refuse' ) . "\n" : '' ) . lift( $src, 'pps_ajax_upload_artwork' );
 eval( str_replace( array( 'error_log(', 'move_uploaded_file(' ), array( 'error_log_(', 'pps_test_move(' ), $code ) );
 
 function upload( $name, $bytes ) {
