@@ -3288,8 +3288,203 @@ add_filter( 'woocommerce_get_cart_item_from_session', function( $cart_item, $val
             $cart_item[ $k ] = $values[ $k ];
         }
     }
+    try { $cart_item = pps_heal_cart_line( $cart_item ); } catch ( \Throwable $e ) {}
     return $cart_item;
 }, 10, 2 );
+
+/**
+ * Share-cart links (share-cart-url-for-woo) and the specification JSON (owner 2026-11-12:
+ * "after I send them a share-cart link any attempt to edit the cart results in a total
+ * reset of the product form").
+ *
+ * The plugin saves the cart with update_post_meta() (saved carts: update_user_meta()), and
+ * WordPress runs wp_unslash() over every value it stores. A line's pps_metadata is JSON, in
+ * which every inch mark is written \" — so the backslashes went, the JSON no longer parsed,
+ * and everything that reads it saw nothing: Edit Specs opened the calculator at its
+ * defaults, and checkout wrote no Job Ticket, PPS-Spec, add-ons or production start (order
+ * 87984: two brochure jobs that reached the Ship Schedule as "custom" with no quantity,
+ * size or must-ship date).
+ *
+ * Every calculator line now carries pps_metadata_b64, a copy with no backslash to lose,
+ * refreshed whenever the cart is read from the session (which is what the plugin does just
+ * before it saves). A line whose JSON does not parse is put back from that copy; a link
+ * saved before the copy existed is repaired by pps_json_restore_escapes(). The plugin is
+ * not modified. tools-share-cart-test.php is the gate.
+ */
+function pps_json_object_ok( $s ) {
+    if ( ! is_string( $s ) || $s === '' ) return false;
+    return is_array( json_decode( $s, true ) );
+}
+
+/**
+ * Put back the escapes wp_unslash() took out of a JSON text. Inside a string, a quote that
+ * is followed by : } ] or end — or by a comma that is followed by the start of a JSON
+ * value — closes it; any other quote (21×7" custom) is content and is escaped again, and
+ * any backslash left is content too. Returns the repaired text only if it parses.
+ */
+function pps_json_restore_escapes( $s ) {
+    if ( ! is_string( $s ) || $s === '' ) return null;
+    if ( pps_json_object_ok( $s ) ) return $s;
+    // A quote before a comma that is followed by a JSON value could close the string or be
+    // text ('11", folded, "Spring"'). Try "closes" everywhere first; if that does not parse,
+    // make one doubtful quote text, then two (at most 3,000 tries — only damaged text gets here).
+    $doubtful = 0;
+    $out = pps_json_requote( $s, array(), $doubtful );
+    if ( pps_json_object_ok( $out ) ) return $out;
+    $k = $doubtful; $tries = 0; $d = 0;
+    for ( $a = 0; $a < $k; $a++ ) {
+        $out = pps_json_requote( $s, array( $a => true ), $d );
+        if ( pps_json_object_ok( $out ) ) return $out;
+    }
+    for ( $a = 0; $a < $k; $a++ ) {
+        for ( $b = $a + 1; $b < $k; $b++ ) {
+            if ( ++$tries > 3000 ) return null;
+            $out = pps_json_requote( $s, array( $a => true, $b => true ), $d );
+            if ( pps_json_object_ok( $out ) ) return $out;
+        }
+    }
+    return null;
+}
+
+/** One pass of pps_json_restore_escapes(): a doubtful quote whose number is a key of $as_text is text. */
+function pps_json_requote( $s, $as_text, &$doubtful ) {
+    $out = ''; $in = false; $n = strlen( $s ); $doubtful = 0;
+    $next = function( $j ) use ( $s, $n ) {
+        while ( $j < $n && strpos( " \t\r\n", $s[ $j ] ) !== false ) $j++;
+        return $j;
+    };
+    for ( $i = 0; $i < $n; $i++ ) {
+        $c = $s[ $i ];
+        if ( ! $in ) { $out .= $c; if ( $c === '"' ) $in = true; continue; }
+        if ( $c === '\\' ) { $out .= '\\\\'; continue; }
+        if ( $c === '"' ) {
+            $j  = $next( $i + 1 );
+            $nx = $j < $n ? $s[ $j ] : '';
+            $close = ( $nx === '' || strpos( ':}]', $nx ) !== false );
+            if ( ! $close && $nx === ',' ) {
+                $rest = (string) substr( $s, $next( $j + 1 ), 64 );
+                $value = $rest !== '' && ( strpos( '"{[', $rest[0] ) !== false
+                    || preg_match( '/^(?:-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)\s*(?:[,\]}]|$)/', $rest ) === 1 );
+                if ( $value ) {
+                    $close = empty( $as_text[ $doubtful ] );
+                    $doubtful++;
+                }
+            }
+            if ( $close ) { $out .= '"'; $in = false; } else { $out .= '\\"'; }
+            continue;
+        }
+        if ( ord( $c ) < 0x20 ) { $out .= sprintf( '\\u%04x', ord( $c ) ); continue; }
+        $out .= $c;
+    }
+    return $out;
+}
+
+/** The specification JSON of a cart line or order line, healed if it can be. '' when it cannot. */
+function pps_heal_metadata( $json, $b64 = '' ) {
+    if ( pps_json_object_ok( $json ) ) return $json;
+    if ( is_string( $b64 ) && $b64 !== '' ) {
+        $d = base64_decode( $b64, true );
+        if ( pps_json_object_ok( $d ) ) return $d;
+    }
+    $r = pps_json_restore_escapes( $json );
+    return $r !== null ? $r : '';
+}
+
+function pps_heal_cart_line( $ci ) {
+    if ( ! is_array( $ci ) || ! isset( $ci['pps_metadata'] ) || ! is_string( $ci['pps_metadata'] ) ) return $ci;
+    $healed = pps_heal_metadata( $ci['pps_metadata'], (string) ( $ci['pps_metadata_b64'] ?? '' ) );
+    if ( $healed !== '' ) {
+        $ci['pps_metadata']     = $healed;
+        $ci['pps_metadata_b64'] = base64_encode( $healed );
+    }
+    return $ci;
+}
+
+// A line put back by add_to_cart() (the share link, a saved cart) is healed before
+// WooCommerce keys it, so the Edit Specs link and the session both carry good JSON.
+add_filter( 'woocommerce_add_cart_item_data', function( $data ) {
+    try { return pps_heal_cart_line( $data ); } catch ( \Throwable $e ) { return $data; }
+}, 1 );
+
+/**
+ * Orders already placed through a share link carry the damaged JSON. Repair each such line
+ * once and write what checkout could not: Job Ticket, PPS-Spec, Add-ons, production start.
+ * Nothing that was written is replaced. Returns the number of lines repaired.
+ */
+function pps_repair_order_metadata( $order ) {
+    if ( is_numeric( $order ) ) $order = wc_get_order( $order );
+    if ( ! is_object( $order ) || ! method_exists( $order, 'get_items' ) ) return 0;
+    $fixed = 0;
+    foreach ( $order->get_items() as $item ) {
+        $raw = $item->get_meta( '_pps_metadata' );
+        if ( ! is_string( $raw ) || $raw === '' || pps_json_object_ok( $raw ) ) continue;
+        $healed = pps_heal_metadata( $raw );
+        if ( $healed === '' ) continue;
+        $full = json_decode( $healed, true );
+        $item->update_meta_data( '_pps_metadata', $healed );
+
+        $files = json_decode( (string) $item->get_meta( '_pps_artwork_files' ), true );
+        $values = array(
+            'pps_metadata'      => $healed,
+            'pps_summary'       => (string) $item->get_meta( '_pps_summary' ),
+            'pps_proof_hash'    => (string) $item->get_meta( '_pps_proof_hash' ),
+            'pps_artwork_path'  => (string) $item->get_meta( '_pps_artwork_path' ),
+            'pps_artwork_files' => is_array( $files ) ? $files : array(),
+        );
+        $prepress = (string) $item->get_meta( 'PPS-Prepress-Review' );
+        $tz = pps_shop_timezone();
+        $d  = (string) $item->get_meta( '_pps_delivery_date' );
+        try {
+            $delivery = new DateTime( $d !== '' ? $d : (string) ( $full['estimatedDeliveryDate'] ?? 'now' ), new DateTimeZone( $tz ) );
+        } catch ( \Throwable $e ) { $delivery = new DateTime( 'now', new DateTimeZone( $tz ) ); }
+
+        if ( $item->get_meta( 'Job Ticket' ) === '' ) {
+            $ticket = pps_job_ticket( $full, $values, $delivery, $prepress );
+            if ( $ticket !== '' ) $item->add_meta_data( 'Job Ticket', $ticket, true );
+        }
+        if ( $item->get_meta( 'PPS-Spec' ) === '' ) {
+            list( $spec, $addons ) = pps_build_spec( $full, $values['pps_summary'], $prepress, intval( $full['requestedBizDays'] ?? 5 ) );
+            $item->add_meta_data( 'PPS-Spec', $spec, true );
+            if ( $addons && $item->get_meta( 'Add-ons' ) === '' ) $item->add_meta_data( 'Add-ons', implode( '; ', $addons ), true );
+        }
+        $pp = pps_production_paper_line( $full );
+        if ( $pp !== '' && $item->get_meta( 'Production Paper' ) === '' ) $item->add_meta_data( 'Production Paper', $pp, true );
+        if ( ! empty( $full['productionStartDate'] ) && $item->get_meta( 'PPS-Production-Start' ) === '' ) {
+            $item->add_meta_data( 'PPS-Production-Start', $full['productionStartDate'], true );
+        }
+        $item->save();
+        $fixed++;
+    }
+    if ( $fixed ) {
+        $order->add_order_note( sprintf( 'Job details repaired on %d line%s: the share-cart link had damaged the specification, so checkout wrote no Job Ticket or PPS-Spec. Both are now written from the repaired specification.', $fixed, $fixed === 1 ? '' : 's' ) );
+        $order->save();
+    }
+    return $fixed;
+}
+
+add_action( 'admin_init', function() {
+    try {
+        if ( get_option( 'pps_sharecart_repair_v1' ) || ! function_exists( 'wc_get_orders' ) ) return;
+        update_option( 'pps_sharecart_repair_v1', time(), false );
+        $ids = wc_get_orders( array(
+            'limit' => 300, 'return' => 'ids', 'status' => array_keys( wc_get_order_statuses() ),
+            'date_created' => '>' . ( time() - 400 * DAY_IN_SECONDS ),
+            'created_via'  => 'Direct - ShareCart',
+        ) );
+        $log = array();
+        foreach ( (array) $ids as $id ) {
+            $n = pps_repair_order_metadata( $id );
+            if ( $n ) $log[] = $id . ':' . $n;
+        }
+        update_option( 'pps_sharecart_repair_v1', array( 'at' => time(), 'checked' => count( (array) $ids ), 'repaired' => $log ), false );
+        if ( $log ) {
+            delete_transient( 'pps_missive_panel_open' );
+            if ( function_exists( 'wp_schedule_single_event' ) ) {
+                foreach ( array( 'pps_ship_schedule_refresh', 'pps_paper_report_refresh', 'pps_finishing_report_refresh' ) as $h ) wp_schedule_single_event( time() + 5, $h );
+            }
+        }
+    } catch ( \Throwable $e ) { error_log( '[pps] share-cart repair: ' . $e->getMessage() ); }
+} );
 
 // ═══════════════════════════════════════════════════════════════
 // CART: OVERRIDE PRICE
