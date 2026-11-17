@@ -56,10 +56,10 @@ import subprocess
 import sys
 
 try:
-    from PIL import Image, ImageCms, ImageOps, PngImagePlugin
+    from PIL import Image, ImageCms, ImageDraw, ImageFont, ImageOps, PngImagePlugin
 except ImportError:
     subprocess.run([sys.executable, "-m", "pip", "install", "--quiet", "pillow"], check=True)
-    from PIL import Image, ImageCms, ImageOps, PngImagePlugin
+    from PIL import Image, ImageCms, ImageDraw, ImageFont, ImageOps, PngImagePlugin
 
 Image.MAX_IMAGE_PIXELS = 400_000_000  # generous, but still a decompression-bomb guard
 
@@ -69,6 +69,8 @@ Image.MAX_IMAGE_PIXELS = 400_000_000  # generous, but still a decompression-bomb
 # PNG tEXt is UTF-8 and would keep it, but a claim that differs by format is its
 # own trap, so the house default stays ASCII everywhere.
 DEFAULT_RIGHTS = f"Copyright {datetime.date.today().year} Priority Print Service"
+DEFAULT_MARK = "priorityprintservice.com"
+DEFAULT_RIGHTS_URL = "https://priorityprintservice.com/"
 
 EXTS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".bmp", ".gif"}
 SRGB = ImageCms.createProfile("sRGB")
@@ -144,6 +146,118 @@ def exif_safe(text):
                 .encode("ascii", "ignore").decode("ascii").strip())
 
 
+def entity_name(rights_string):
+    """Strip a leading "Copyright 2026 " / "(c) 2026 " so name fields get a name.
+
+    dc:rights wants the full notice, but dc:creator, photoshop:Credit and
+    plus:LicensorName want who you are. Feeding the notice into all four makes a
+    licensing lookup read "Copyright 2026 Priority Print Service" as a company
+    name, which is wrong and looks careless to anyone inspecting the file.
+    """
+    return re.sub(r"^\s*(copyright|\(c\)|©)\s*\d{0,4}\s*", "", rights_string,
+                  flags=re.I).strip() or rights_string
+
+
+def build_xmp(args):
+    """XMP rights packet — the part machines read.
+
+    EXIF Copyright is a human-readable string and nothing more. XMP is where the
+    structured, machine-addressable claims live, and two of these fields do real
+    work rather than just asserting a wish:
+
+      xmpRights:WebStatement — URL of your terms. Google Images surfaces this.
+      plus:LicensorURL      — where to go to license the image. With matching
+                              schema.org ImageObject markup on the page, this is
+                              what earns the "Licensable" label in Google Images
+                              and gives a referral path back to the site.
+
+    plus:DataMining is the IPTC/PLUS field for declaring "do not mine this for
+    AI/ML training". It is a DECLARATION, not an enforcement mechanism: honest
+    crawlers may honour it, scrapers will not, and nothing here stops a
+    screenshot. It costs nothing to assert and is the correct place to assert it,
+    which is the whole of its value — do not oversell it to anyone.
+    """
+    if not args.copyright:
+        return None
+    holder = args.copyright
+    creator = args.credit or entity_name(holder)
+    terms = args.rights_url or ""
+    licensor = args.licensor_url or terms
+
+    def esc(s):
+        return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+    web = f"<xmpRights:WebStatement>{esc(terms)}</xmpRights:WebStatement>" if terms else ""
+    plus = ""
+    if licensor:
+        plus = (
+            '<plus:Licensor><rdf:Seq><rdf:li rdf:parseType="Resource">'
+            f"<plus:LicensorName>{esc(entity_name(holder))}</plus:LicensorName>"
+            f"<plus:LicensorURL>{esc(licensor)}</plus:LicensorURL>"
+            "</rdf:li></rdf:Seq></plus:Licensor>"
+        )
+    mining = ""
+    if args.no_ai:
+        mining = ("<plus:DataMining "
+                  'rdf:resource="http://ns.useplus.org/ldf/vocab/DMI-PROHIBITED-AIMLTRAINING"/>')
+
+    packet = (
+        '<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>'
+        '<x:xmpmeta xmlns:x="adobe:ns:meta/">'
+        '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+        '<rdf:Description rdf:about=""'
+        ' xmlns:dc="http://purl.org/dc/elements/1.1/"'
+        ' xmlns:xmpRights="http://ns.adobe.com/xap/1.0/rights/"'
+        ' xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/"'
+        ' xmlns:plus="http://ns.useplus.org/ldf/xmp/1.0/">'
+        f"<dc:rights><rdf:Alt><rdf:li xml:lang=\"x-default\">{esc(holder)}</rdf:li>"
+        "</rdf:Alt></dc:rights>"
+        f"<dc:creator><rdf:Seq><rdf:li>{esc(creator)}</rdf:li></rdf:Seq></dc:creator>"
+        "<xmpRights:Marked>True</xmpRights:Marked>"
+        f"{web}"
+        f"<photoshop:Credit>{esc(creator)}</photoshop:Credit>"
+        f"{plus}{mining}"
+        "</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end=\"w\"?>"
+    )
+    return packet.encode("utf-8")
+
+
+def watermark(im, text, opacity=0.72):
+    """Small corner wordmark, sized to the image and readable on any background.
+
+    White fill with a dark outline rather than one or the other: these photos are
+    mostly dark print on near-white sweep, so a single-colour mark disappears on
+    one half of the set. The outline carries it on white, the fill carries it on
+    the dark pieces.
+
+    Kept deliberately small and in the corner. A watermark that spoils the product
+    shot defeats the point of a portfolio photo — this is attribution, not DRM,
+    and anyone determined can crop it off in seconds.
+    """
+    W, H = im.size
+    size = max(13, int(W * 0.018))
+    stroke = max(1, size // 14)
+    for path in ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                 "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"):
+        if os.path.exists(path):
+            font = ImageFont.truetype(path, size)
+            break
+    else:
+        font = ImageFont.load_default()
+
+    layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    pad = int(W * 0.022)
+    box = d.textbbox((0, 0), text, font=font, stroke_width=stroke)
+    x = W - (box[2] - box[0]) - pad
+    y = H - (box[3] - box[1]) - pad - int(size * 0.3)
+    a = int(255 * opacity)
+    d.text((x, y), text, font=font, fill=(255, 255, 255, a),
+           stroke_width=stroke, stroke_fill=(0, 0, 0, int(a * 0.85)))
+    return Image.alpha_composite(im.convert("RGBA"), layer).convert(
+        "RGBA" if im.mode in ("RGBA", "LA") else "RGB")
+
+
 def rights_tags(args):
     """Build the only metadata we deliberately put back after stripping.
 
@@ -164,11 +278,13 @@ def rights_tags(args):
     return exif, png
 
 
-def encode(im, fmt, path, quality, exif=None, png=None):
+def encode(im, fmt, path, quality, exif=None, png=None, xmp=None):
     if fmt == "JPEG":
         kw = {"quality": quality, "optimize": True, "progressive": True, "subsampling": 2}
         if exif is not None:
             kw["exif"] = exif.tobytes()
+        if xmp:
+            kw["xmp"] = xmp
         im.save(path, "JPEG", **kw)
     elif fmt == "PNG":
         im.save(path, "PNG", optimize=True, pnginfo=png)
@@ -176,6 +292,8 @@ def encode(im, fmt, path, quality, exif=None, png=None):
         kw = {"quality": quality, "method": 6}
         if exif is not None:
             kw["exif"] = exif.tobytes()
+        if xmp:
+            kw["xmp"] = xmp
         im.save(path, "WEBP", **kw)
     return os.path.getsize(path)
 
@@ -231,7 +349,10 @@ def process(path, args):
     outputs = []
     primary = os.path.join(args.out, slug + suffix)
     exif_tags, png_tags = rights_tags(args)
-    encode(im, fmt, primary, args.quality, exif_tags, png_tags)
+    xmp_packet = build_xmp(args)
+    if args.watermark:
+        im = watermark(im, args.watermark)
+    encode(im, fmt, primary, args.quality, exif_tags, png_tags, xmp_packet)
     outputs.append(primary)
 
     # Occasionally the cleaned file is LARGER than the source — typically a tiny,
@@ -245,7 +366,7 @@ def process(path, args):
     if args.webp:
         p = os.path.join(args.out, slug + ".webp")
         if p != primary:
-            encode(im, "WEBP", p, args.quality, exif_tags, png_tags)
+            encode(im, "WEBP", p, args.quality, exif_tags, png_tags, xmp_packet)
             outputs.append(p)
     return {
         "source": path,
@@ -258,6 +379,7 @@ def process(path, args):
         "colour_note": note,
         "rotation_note": rotation_note,
         "rights": args.copyright or "",
+        "watermark": args.watermark or "",
         "alpha": alpha,
         "grew": grew,
         # Filled in per job — the pipeline cleans pixels, a human or a vision pass
@@ -283,6 +405,14 @@ def main():
                     help=f"embed a copyright claim; bare flag uses \"{DEFAULT_RIGHTS}\"")
     ap.add_argument("--credit", default=None,
                     help="creator/Artist value; defaults to the copyright holder")
+    ap.add_argument("--watermark", nargs="?", const=DEFAULT_MARK, default=None,
+                    help=f"visible corner wordmark; bare flag uses \"{DEFAULT_MARK}\"")
+    ap.add_argument("--rights-url", default=None,
+                    help="URL of your terms (XMP xmpRights:WebStatement)")
+    ap.add_argument("--licensor-url", default=None,
+                    help="licensing/contact URL (XMP plus:LicensorURL); defaults to --rights-url")
+    ap.add_argument("--no-ai", action="store_true",
+                    help="declare plus:DataMining prohibited for AI/ML training (advisory only)")
     args = ap.parse_args()
 
     files = []
