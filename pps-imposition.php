@@ -484,6 +484,10 @@ add_action( 'wp_ajax_pps_impose_list', function() {
                 // (it still imposes, flagged UNAPPROVED), never a refusal.
                 // Empty for pre-hash orders, which impose unflagged.
                 'proof_hash'    => (string) $item->get_meta( '_pps_proof_hash' ),
+                // Brief A (1.67): the raw upload's hash and the soft-proof profile, written by the
+                // proofer at approval (docs/PROOFING_PIPELINE_DESIGN.md §3.2). Empty until it does.
+                'raw_hash'      => (string) $item->get_meta( '_pps_raw_hash' ),
+                'proof_profile' => (string) $item->get_meta( '_pps_proof_profile' ),
                 'imposed'       => $imposed,
                 'files_listed'  => is_array( $files ),
             );

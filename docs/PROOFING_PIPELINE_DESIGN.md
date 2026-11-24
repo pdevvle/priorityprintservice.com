@@ -98,10 +98,16 @@ refusal** (owner, 2026-09-02) unless §6 changes it — a mismatch flags
 `_UNAPPROVED` everywhere; a file matching **R** instead of **P** is flagged
 `RAW` (new, same mechanism) rather than UNAPPROVED.
 
-Where `_pps_proof_hash` is written today: `pps-proof-status.php`, which is
-**on staging/production and not in the repo** (9,457 bytes on staging). The
-proofer session brings it into the repo before changing it (CLAUDE.md
-rule: a server-only file is one deploy from being undone).
+Where `_pps_proof_hash` is written today (checked 2026-11-24): the
+calculator computes the SHA-256 of the print-ready bytes client-side (it is
+in the manifest) and the order code stores it on the line item.
+`pps-proof-status.php` (git 7c60ce2 on `pps-pricing-config`, 9,457 bytes)
+exists on **staging only — it is not on production**, and production's
+`pps-calculators.php` (471,729 bytes, 2026-10-27) is far ahead of the
+imposition branch's copy (343,536 bytes, 2026-08-20); the newest copy in
+git is on `claude/woocommerce-domain-search-ly4vff`. The proofer session
+must locate the live writer on that line before adding the four new keys,
+and work from that branch, not from the imposition branch.
 
 ### 3.3 Manifest
 
@@ -212,9 +218,13 @@ the retouched result, and write an order note. Whether the customer must
 re-approve is §6.
 
 ### A.4 Hygiene
-- Bring **`pps-missive-impose.php`** (production only, 17,122 bytes) into
-  the repo first; then give it the same picker / raw-file offer and the
-  flattened-proof warning, since it is the path that imposed 88056.
+- **`pps-missive-impose.php`** is in git (d4ced0f, 2026-10-19, on the
+  chatgpt-business / design-it-online-live / proofer-parity-staging lines)
+  and byte-identical in size to production (17,122). Brought onto the
+  imposition branch 2026-11-24 unchanged, then given the Brief A row fields
+  and the RETOUCHED_ upload prefix. It serves the same `imposition-tool.html`
+  as wp-admin, so the picker, the raw-file offer and the flattened-proof
+  warning reach the Missive path through the tool itself.
 - The tool's press-safety passes remain and become no-ops on files the
   proofer already normalised (they are idempotent; verify byte-identity on
   a normalised fixture).
@@ -233,7 +243,7 @@ re-approve is §6.
   tolerance; no RGB anywhere in the output.
 
 ### A.6 Order of work
-1. A.1 (1–3) + A.4 Missive panel import — one release, no server work.
+1. A.1 (1–4) + A.4 Missive panel import — **shipped as 1.67 (2026-11-24)**, no server work.
 2. A.2 + A.3 once the render endpoint (B.4) exists on staging.
 3. A.1 (4) with the proofer's OutputIntent landing.
 

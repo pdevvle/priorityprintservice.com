@@ -743,6 +743,69 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### Brief A, release 1: flattened-proof guardrails, RGB diff, two-hash approval, OutputIntent (1.67)
+
+  From `docs/PROOFING_PIPELINE_DESIGN.md` §4 (A.1 and A.4). Order 88056's
+  print-ready file was a canvas + jsPDF raster of a vector CMYK export; the
+  tool imposed it faithfully and the press got RGB pixels. Nothing here
+  refuses — every verdict is a flag the operator can act on.
+
+  - **`inspectFlatProof(doc)`** — a file is a flattened proof when its
+    producer/creator says jsPDF, or when every non-blank page's only
+    painting is one image XObject drawn once (no text, no vector paint, no
+    forms). Both paths are reported separately (a scanner file is flat by
+    structure with an honest producer). Warning heads the report, filename
+    `_FLATPROOF`, toolbar badge, red banner in the job strip; when the order
+    folder holds a raw upload (`rawCandidate()`: a PDF that is not a
+    print-ready / clean / imposed / preview, else a retouched file, else a
+    raster) the banner offers it with one button → `loadOrder(row, file)`.
+    Manual drops are checked too (no offer — no folder).
+  - **`rgbCensus(doc)`** — RGB image XObjects (DeviceRGB, CalRGB, ICCBased
+    N=3, Indexed over RGB) and RGB colour operators (`rg`/`RG`, and
+    `sc/scn/SC/SCN` after a `cs/CS` that set an RGB space by name or through
+    the resources' ColorSpace dict), across every page and every reachable
+    form, each XObject once. Run on the source (front + back) in the
+    preflight stage and on each output part after the ink guard. Source has
+    none and output has some → `p.rgbLeak`, red warning, `_RGB` on the
+    filename, toolbar badge — today that is exactly Retouch / Rasterise /
+    greyscale, which render through an RGB canvas until A.2's CMYK render
+    exists. Source with RGB → an informational note. Inline images are not
+    counted.
+  - **Two-hash approval** — `approvalState(bytes, P, R)`: `verified` (P),
+    `raw` (R — the customer's original; amber, `_RAW`, its own banner and
+    badge, bulk-impose advisory), `mismatch`, `unbound`, `unverifiable`.
+    Queue rows carry `raw_hash` and `proof_profile`
+    (`_pps_raw_hash`, `_pps_proof_profile`) from both PHP hosts; empty until
+    the proofer writes them, in which case nothing changes.
+  - **OutputIntents carried** — `carryOutputIntents(src, out)` copies the
+    source catalog's `/OutputIntents` onto each output part with
+    `PDFObjectCopier` (pdf-lib copies pages, not the catalog), noted in the
+    report. Verified on a fixture with a GTS_PDFX intent through saddle,
+    flat 2-sided and both perfect-bound halves.
+  - **`loadPdf()` now loads with `updateMetadata:false`** — pdf-lib was
+    rewriting `/Producer` to its own name at load, which erased the jsPDF
+    signature; every output this tool saves sets its own producer anyway.
+  - **`pps-missive-impose.php`** brought onto the imposition branch from
+    d4ced0f (same bytes as production), then given the two row fields and
+    the `RETOUCHED_` upload prefix with its order note. It serves the same
+    tool file, so the banners and the raw-file offer reach the Missive path
+    unchanged.
+
+  Verified (`ui_briefA.mjs`, 25, fixtures `fx_cmyk8.pdf` — vector CMYK, 8
+  pages, GTS_PDFX intent; `fx_flatproof.pdf` — its RGB JPEG render with
+  producer jsPDF; `fx_flatstruct.pdf` — same with a scanner producer;
+  `fx_rgbfill.pdf`): detection by producer and by structure; census counts;
+  the five approval states; a CMYK source imposes with zero RGB in the output
+  and the intent carried; the flat proof flags without a leak; rasterising
+  one page of a CMYK book reports RGB ADDED; flats, perfect bound and a
+  retouched saddle run through the wrapper; the queue UI shows the banner,
+  offers the raw file, swaps to it, and the filename goes `_FLATPROOF` →
+  `_RAW`. Note: the inline script passed Babel's 500 KB styling threshold
+  (a console note, not an error).
+
+  Still open from Brief A: A.2 CMYK rasters and A.3 re-proof hook (need the
+  render endpoint), A.1(4) is done.
+
   ### Run ceiling raised to 20,000 (1.66)
 
   Owner: "up the cap from 2000 pages." `SEQ_MAX` governs the page sequence,
