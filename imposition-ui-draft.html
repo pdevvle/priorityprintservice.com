@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Imposition — UI draft</title>
+<style>
+:root{--bg:#0f1115;--panel:#1a1d23;--panel2:#1e2128;--line:rgba(255,255,255,.08);--line2:rgba(255,255,255,.14);--t:#e8eaf0;--t2:rgba(255,255,255,.55);--t3:rgba(255,255,255,.38);--pink:#e91e8c;--ok:#4ade80;--warn:#fbbf24;--err:#f87171;--blue:#4ea1ff;--r:10px;font-size:13px}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--t);font:13px/1.45 -apple-system,Segoe UI,Inter,system-ui,sans-serif}
+a{color:var(--blue)}code{font:11.5px ui-monospace,Menlo,monospace;background:rgba(255,255,255,.07);padding:1px 5px;border-radius:4px}
+.app{display:grid;grid-template-rows:auto auto 1fr;height:100vh}
+/* ── 1. truth bar ── */
+.truth{display:flex;align-items:center;gap:10px;padding:8px 14px;background:#131620;border-bottom:1px solid var(--line2);flex-wrap:wrap}
+.truth .job{font-weight:700;font-size:14px}.truth .job small{color:var(--t3);font-weight:500;margin-left:8px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.3px;border:1px solid}
+.pill.ok{color:var(--ok);border-color:rgba(74,222,128,.4);background:rgba(74,222,128,.1)}.pill.warn{color:var(--warn);border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.1)}.pill.err{color:var(--err);border-color:rgba(248,113,113,.45);background:rgba(248,113,113,.12)}.pill.mute{color:var(--t3);border-color:var(--line2)}
+.pill b{font-weight:800}.truth .sp{flex:1}
+.btn{background:linear-gradient(135deg,#e91e8c,#c2185b);color:#fff;border:0;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer;font-size:12.5px}.btn.sec{background:#2a2e36;border:1px solid var(--line2)}.btn.ghost{background:none;border:1px solid var(--line2);color:var(--t2)}.btn:disabled{opacity:.4;cursor:not-allowed}
+/* ── 2. step rail ── */
+.rail{display:flex;gap:4px;padding:6px 14px;background:var(--panel);border-bottom:1px solid var(--line);overflow:auto}
+.step{display:flex;align-items:center;gap:8px;padding:7px 12px;border-radius:8px;cursor:pointer;color:var(--t2);white-space:nowrap;border:1px solid transparent}
+.step .n{width:20px;height:20px;border-radius:50%;background:rgba(255,255,255,.08);display:grid;place-items:center;font-size:11px;font-weight:700}
+.step.on{background:#262a33;color:var(--t);border-color:var(--line2)}.step.on .n{background:var(--pink);color:#fff}
+.step.done .n{background:rgba(74,222,128,.25);color:var(--ok)}.step .st{font-size:11px;color:var(--t3)}
+.step.flag .st{color:var(--warn)}
+/* ── 3. workspace ── */
+.ws{display:grid;grid-template-columns:380px 1fr 300px;min-height:0}
+.col{min-height:0;overflow:auto}
+.left{background:var(--panel);border-right:1px solid var(--line);padding:12px}
+.right{background:var(--panel);border-left:1px solid var(--line);padding:12px}
+.card{background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:12px;margin-bottom:10px}
+.card h3{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--t3);display:flex;align-items:center;gap:8px}
+.card h3 .right{margin-left:auto;background:none;border:0;padding:0}
+.lbl{display:block;font-size:11px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;margin:8px 0 4px}
+.seg{display:inline-flex;border:1px solid var(--line2);border-radius:8px;overflow:hidden}.seg.block{display:flex}.seg button{flex:1;background:none;border:0;color:var(--t2);padding:7px 10px;font-size:12px;cursor:pointer;border-right:1px solid var(--line)}.seg button:last-child{border-right:0}.seg button.on{background:rgba(233,30,140,.18);color:#fff;font-weight:700}
+.hint{font-size:11.5px;color:var(--t3);margin-top:4px}
+input,select{background:#12151b;border:1px solid var(--line2);color:var(--t);border-radius:6px;padding:7px 9px;font-size:13px;width:100%}
+.row{display:flex;gap:8px;align-items:flex-end}.row>*{flex:1}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:12px}.kv dt{color:var(--t3)}.kv dd{margin:0}
+.file{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;background:#15181f}
+.file.on{border-color:rgba(233,30,140,.6);background:rgba(233,30,140,.07)}.file .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.file .tag{font-size:10.5px;color:var(--t3);text-transform:uppercase;letter-spacing:.4px}
+/* viewport */
+.vp{display:grid;grid-template-rows:auto 1fr auto;min-height:0;background:var(--bg)}
+.vpbar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);font-size:12px;color:var(--t2);flex-wrap:wrap}
+.vpbar .zoom{display:inline-flex;border:1px solid var(--line2);border-radius:6px;overflow:hidden}.vpbar .zoom button{background:none;border:0;color:var(--t2);padding:4px 9px;cursor:pointer;border-right:1px solid var(--line)}.vpbar .zoom button:last-child{border-right:0}
+.sheets{overflow:auto;padding:20px;display:flex;gap:28px;align-items:flex-start}
+.sheet{flex:0 0 auto;background:#fff;box-shadow:0 0 0 1px rgba(255,255,255,.12),0 14px 40px rgba(0,0,0,.6);position:relative}
+.sheet .cap{position:absolute;left:0;top:-20px;font-size:11px;color:var(--t3);white-space:nowrap}
+.cell{position:absolute;background:linear-gradient(135deg,#2f4f9a,#7a3f7a);outline:1px dashed rgba(0,0,0,.35)}
+.cell.blank{background:#f3f3f3;outline:1px dashed rgba(0,0,0,.2)}
+.cell::after{content:attr(data-p);position:absolute;left:4px;top:2px;font-size:10px;color:#fff;opacity:.85}
+.mark{position:absolute;background:#000}
+.slug{position:absolute;left:14px;bottom:4px;font:8px ui-monospace,monospace;color:#000}
+.report{border-top:1px solid var(--line);padding:8px 12px;max-height:150px;overflow:auto;font-size:12px}
+.report .w{display:flex;gap:8px;padding:3px 0;color:var(--t2)}.report .w.err{color:var(--err)}.report .w.warn{color:var(--warn)}.report .w.ok{color:var(--ok)}
+/* inspector */
+.ins h4{margin:0 0 6px;font-size:12px}
+.check{display:flex;align-items:flex-start;gap:8px;font-size:12px;margin:6px 0}.check input{width:auto;margin-top:3px}
+.sub{font-size:11px;color:var(--t3)}
+.notes{font-size:11px;color:var(--t3);line-height:1.5}
+.ann{position:fixed;right:14px;bottom:14px;background:#d40;color:#fff;font:11px/1.2 monospace;padding:4px 8px;border-radius:4px;font-weight:700}
+.banner{padding:10px 12px;border-radius:8px;font-size:12px;margin-bottom:10px;border:1px solid}
+.banner.err{background:rgba(248,113,113,.1);border-color:rgba(248,113,113,.45)}.banner.warn{background:rgba(251,191,36,.1);border-color:rgba(251,191,36,.45)}.banner.ok{background:rgba(74,222,128,.08);border-color:rgba(74,222,128,.35)}
+.banner b{display:block;margin-bottom:3px}
+.about{max-width:980px;margin:0 auto;padding:28px 20px 60px;color:var(--t2);line-height:1.6}
+.about h1{color:var(--t);font-size:22px;margin:0 0 6px}.about h2{color:var(--t);font-size:15px;margin:22px 0 6px}
+.about table{border-collapse:collapse;width:100%;font-size:12.5px}.about td,.about th{border:1px solid var(--line2);padding:6px 9px;text-align:left;vertical-align:top}.about th{color:var(--t);background:rgba(255,255,255,.04)}
+.tabs{display:flex;gap:6px;padding:10px 14px;border-bottom:1px solid var(--line);background:#0c0e12}.tabs button{background:none;border:1px solid var(--line2);color:var(--t2);padding:6px 12px;border-radius:7px;cursor:pointer}.tabs button.on{color:#fff;background:#262a33}
+@media (max-width:1100px){.ws{grid-template-columns:1fr}.left,.right{border:0}}
+</style></head>
+<body>
+<div class="tabs"><button class="on" onclick="show('draft')">The draft</button><button onclick="show('why')">Why this shape</button><button onclick="show('states')">States &amp; flags</button></div>
+
+<div id="draft" class="app" style="height:calc(100vh - 47px)">
+  <!-- 1. TRUTH BAR: the state of the invariant, always visible -->
+  <div class="truth">
+    <div class="job">Order #88056 · i45136 <small>BOP2026 Schedule Booklet · Small Booklet Printing · 3.5 × 5.5 saddle · 500</small></div>
+    <span class="pill ok">✓ APPROVED FILE <b>P 94…96db</b></span>
+    <span class="pill ok">VECTOR · CMYK · 0 RGB</span>
+    <span class="pill ok">PRICED 2-UP = PLACED</span>
+    <span class="pill mute">GRACoL2013 CRPC6 intent</span>
+    <span class="sp"></span>
+    <button class="btn ghost">Setups ▾</button>
+    <button class="btn sec">⬇ Download</button>
+    <button class="btn">☁ Send to Drive</button>
+  </div>
+  <!-- 2. STEP RAIL: setup order, each step says its state while collapsed -->
+  <div class="rail">
+    <div class="step done"><span class="n">1</span><div>Job<div class="st">saddle · 3.5×5.5 · 2-sided · 500</div></div></div>
+    <div class="step done"><span class="n">2</span><div>Artwork<div class="st">BOP_PRESS.pdf · 8 pp · verified</div></div></div>
+    <div class="step on"><span class="n">3</span><div>Sheet &amp; layout<div class="st">13×19 · 2 spreads/side · butt</div></div></div>
+    <div class="step"><span class="n">4</span><div>Pages &amp; signatures<div class="st">repeat · no creep · 8 pp = 2 sigs</div></div></div>
+    <div class="step flag"><span class="n">5</span><div>Bleed &amp; fit<div class="st">⚠ file bleed 0.125 · crop 100%</div></div></div>
+    <div class="step"><span class="n">6</span><div>Press prep<div class="st">safety on · no raster · no blanks</div></div></div>
+    <div class="step"><span class="n">7</span><div>Marks &amp; output<div class="st">crop · fold · slug K</div></div></div>
+  </div>
+  <!-- 3. WORKSPACE -->
+  <div class="ws">
+    <!-- LEFT: only the active step's controls -->
+    <div class="col left">
+      <div class="card">
+        <h3>Press sheet</h3>
+        <div class="seg block"><button class="on">13×19</button><button>13×27.5</button><button>12×18</button><button>Custom</button></div>
+        <div class="row" style="margin-top:8px"><div><span class="lbl">Orientation</span><div class="seg block"><button class="on">Lying 19 wide</button><button>Standing 13 wide</button></div></div><div><span class="lbl">Imageable margin</span><input value="0"></div></div>
+        <div class="hint">Prints the whole 19 × 13″. Marks and slug sit at the edge; type a margin if the press cannot image it.</div>
+      </div>
+      <div class="card">
+        <h3>Layout on the sheet</h3>
+        <div class="seg block"><button class="on">Priced 2 spreads/side</button><button>Manual grid…</button><button>Fill the sheet</button></div>
+        <div class="row" style="margin-top:8px"><div><span class="lbl">Spread orientation</span><div class="seg block"><button class="on">Auto</button><button>Along</button><button>Across</button></div></div></div>
+        <div class="row" style="margin-top:8px"><div><span class="lbl">Position</span><div class="seg block"><button class="on">Jog to corner</button><button>Centre</button><button>Custom</button></div></div><div><span class="lbl">Gutter</span><div class="seg block"><button class="on">Butt</button><button>0.25</button><button>Per gap…</button></div></div></div>
+        <div class="hint">Now: 2 × 1 spreads along the long edge, butt-cut at the spine, jogged 0.5″ to the lower-right for the cutter. 500 books = 250 sheets.</div>
+      </div>
+      <div class="card">
+        <h3>Duplex</h3>
+        <div class="row"><div><span class="lbl">Flip edge</span><div class="seg block"><button class="on">Short (13″)</button><button>Long (19″)</button></div></div><div><span class="lbl">Back rotation</span><div class="seg block"><button class="on">Auto tumble</button><button>None</button><button>180°</button></div></div></div>
+        <div class="hint">Backs mirror to the lower-left through the short-edge flip, so front and back share one registration corner.</div>
+      </div>
+    </div>
+    <!-- CENTRE: the sheets, with the report under them -->
+    <div class="vp">
+      <div class="vpbar">
+        <span class="zoom"><button>Fit 2</button><button>−</button><button>+</button><button>100%</button><button>Rulers</button></span>
+        <span>Front · Back · 2 of 2 sheets</span>
+        <span class="pill ok">2-UP PLACED</span>
+        <span class="pill mute">PREVIEW · full run on download</span>
+        <span class="sp" style="flex:1"></span>
+        <span>13×19 lying 19 wide × 13 tall · spine gets no bleed</span>
+      </div>
+      <div class="sheets">
+        <div class="sheet" style="width:570px;height:390px"><span class="cap">FRONT · SIG 1 (pages 8 | 1)  ·  2 spreads</span>
+          <div class="cell" data-p="8" style="left:52px;top:63px;width:225px;height:255px"></div><div class="cell" data-p="1" style="left:277px;top:63px;width:225px;height:255px"></div>
+          <div class="mark" style="left:40px;top:62px;width:10px;height:1px"></div><div class="mark" style="left:51px;top:50px;width:1px;height:10px"></div><div class="mark" style="left:504px;top:62px;width:10px;height:1px"></div><div class="mark" style="left:502px;top:50px;width:1px;height:10px"></div>
+          <div class="mark" style="left:40px;top:318px;width:10px;height:1px"></div><div class="mark" style="left:51px;top:320px;width:1px;height:10px"></div><div class="mark" style="left:504px;top:318px;width:10px;height:1px"></div><div class="mark" style="left:502px;top:320px;width:1px;height:10px"></div>
+          <div class="slug">PPS IMPOSED · FRONT · Order 88056 · BOP2026 · pages 3.5x5.5in · 2-up on 13x19 · BUTT-CUT · qty 500 = 250 sheets · DUPLEX FLIP ON SHORT (13in) EDGE · 2026-11-24</div></div>
+        <div class="sheet" style="width:570px;height:390px"><span class="cap">BACK · SIG 1 (pages 2 | 7)</span>
+          <div class="cell" data-p="2" style="left:68px;top:63px;width:225px;height:255px"></div><div class="cell" data-p="7" style="left:293px;top:63px;width:225px;height:255px"></div>
+          <div class="slug">PPS IMPOSED · BACK · Order 88056 · BOP2026 · pages 3.5x5.5in · 2-up on 13x19 · 2026-11-24</div></div>
+      </div>
+      <div class="report">
+        <div class="w ok">✓ Approval hash verified — byte-for-byte the file the customer approved. Source: vector, CMYK, 0 RGB images, 0 RGB operators. OutputIntent GRACoL2013_CRPC6 carried.</div>
+        <div class="w warn">⚠ page 1–8: bleed is 0.125″ on every edge (file's own); nothing synthesized.</div>
+        <div class="w">Spread 7.0×5.5″ · spine gets no bleed · signatures fold + nest, outermost = cover · 8 pages = 2 signatures · repeat: each sheet carries one signature twice.</div>
+        <div class="w">Block jogged 0.5″ to the lower-right; backs mirror through the short-edge flip. Marks and slug K only.</div>
+      </div>
+    </div>
+    <!-- RIGHT: inspector — what the file is, what will print, what to decide -->
+    <div class="col right ins">
+      <div class="banner ok"><b>What the press gets</b>The customer's vectors and CMYK, untouched. 2 spreads per side, 250 sheets, duplex short-edge flip. Nothing in this run changes page content.</div>
+      <div class="card"><h3>This file</h3>
+        <dl class="kv"><dt>Picked</dt><dd>BOP_PRESS.pdf <span class="sub">raw upload</span></dd><dt>Pages</dt><dd>8 · 3.75 × 5.75 (bleed-inclusive)</dd><dt>Type</dt><dd>vector · DIN 2014 embedded</dd><dt>Colour</dt><dd>CMYK only · GRACoL2013 intent</dd><dt>Approval</dt><dd><span style="color:var(--ok)">verified P</span> · R known</dd><dt>Transforms</dt><dd>none in manifest (crop 100%)</dd></dl>
+        <span class="lbl">Other files in the folder</span>
+        <div class="file on"><span class="nm">BOP_PRESS.pdf</span><span class="tag">raw</span></div>
+        <div class="file"><span class="nm">BOP_print-ready.pdf</span><span class="tag" style="color:var(--err)">flat proof</span></div>
+        <div class="file"><span class="nm">IMPOSED_…_4spread_13x19.pdf</span><span class="tag">imposed</span></div>
+      </div>
+      <div class="card"><h3>Decisions this run</h3>
+        <label class="check"><input type="checkbox" checked><div>Press safety on<div class="sub">overprint off, hairlines 0.25 pt, annots flattened — no-ops on a normalised file</div></div></label>
+        <label class="check"><input type="checkbox"><div>Retouch pages…<div class="sub">rasterises the page (CMYK once the render exists); flags RETOUCHED</div></div></label>
+        <label class="check"><input type="checkbox"><div>Insert blank pages / sheets<div class="sub">by rule: after, before, every N, start, end, pad to 4</div></div></label>
+        <label class="check"><input type="checkbox"><div>Sequences<div class="sub">page run · sheet run</div></div></label>
+      </div>
+      <div class="card"><h3>Before it leaves</h3>
+        <div class="notes">Filename: <code>IMPOSED_Order-88056-i45136_BOP2026_3.5x5.5_saddle_2spread_13x19.pdf</code><br>Flags: none. Will file to the order's Drive folder and note the order.<br>Full run on download: 250 sheets, no preview cap.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="why" class="about" style="display:none">
+  <h1>Why this shape</h1>
+  <p>The current tool is nine accordion sections stacked on the left, a job strip, a viewport and a report that has to be unfolded. Every control is reachable, and every state is somewhere, but the operator has to assemble the picture: is this the approved file, is it vector, does the placed count match the priced count, what will the press actually receive. The draft turns that around. The <b>truth bar</b> says the state of the one thing that matters, all the time. The <b>step rail</b> is the setup order, and each step summarises itself while it is closed so the whole job is readable in one line. The <b>inspector</b> on the right answers "what is this file and what will print" without a scroll. The sheets stay in the centre at the same zoom they have today.</p>
+  <h2>The truth bar</h2>
+  <p>Four pills, left to right: the approval state against both hashes (verified P, raw R, unapproved, unbound); the colour verdict (vector or flat, CMYK or RGB count, intent); priced versus placed; the profile. Red pills are the ones you act on before sending. It replaces today's badges scattered across the toolbar, the Artwork section and the job strip.</p>
+  <h2>The step rail</h2>
+  <table><tr><th>Step</th><th>Holds</th><th>Collapsed line</th></tr>
+  <tr><td>1 Job</td><td>product, finished size, orientation on sheet, sides, quantity, order/item, job name</td><td>saddle · 3.5×5.5 · 2-sided · 500</td></tr>
+  <tr><td>2 Artwork</td><td>file picker from the folder, drop zones, back file, gang combo, approval and type verdict, manifest transforms, Retouch</td><td>BOP_PRESS.pdf · 8 pp · verified</td></tr>
+  <tr><td>3 Sheet &amp; layout</td><td>press sheet, orientation, margin, priced/manual/fill, spread orientation, position, gutters, duplex flip</td><td>13×19 · 2 spreads/side · butt</td></tr>
+  <tr><td>4 Pages &amp; signatures</td><td>signature order, creep, multi-page collation, perfect-bound halves, page sequence, blank pages</td><td>repeat · no creep · 8 pp = 2 sigs</td></tr>
+  <tr><td>5 Bleed &amp; fit</td><td>crop/fill/fit, add-bleed mode, per-page overrides, pull-off, art scale</td><td>⚠ file bleed 0.125 · crop 100%</td></tr>
+  <tr><td>6 Press prep</td><td>press safety, greyscale, rasterise, sheet sequence, blank sheets / slipsheets</td><td>safety on · no raster · no blanks</td></tr>
+  <tr><td>7 Marks &amp; output</td><td>crop marks, fold guides, slug, filename preview, Drive filing</td><td>crop · fold · slug K</td></tr></table>
+  <p>Only the active step's controls are on screen. A step with a warning shows it in amber in its own line, so a problem is never buried in a closed section. The Specialty/Press-prep split of the current tool goes away: things that change page content (step 5 and Retouch) are separated from things that arrange sheets (steps 3, 4, 6).</p>
+  <h2>The inspector</h2>
+  <p>Three cards. <b>This file</b>: what was picked, its pages and size, vector or raster, colour, approval, the transforms the customer applied (from the manifest), and the other files in the folder with their roles, one click to swap. <b>Decisions this run</b>: the few switches that change content or add material, each with a one-line consequence. <b>Before it leaves</b>: the filename with its flags, where it files, and the full-run figures. Nothing here is new capability; it is the existing report, sorted by what the operator needs to know rather than by when the engine found it.</p>
+  <h2>What stays</h2>
+  <p>The engine, every setting, every flag token, saved setups, the queue (it becomes the landing view before a job is loaded, and step 2's picker once one is), the preview cap, the Missive path (same file, same tool). The controls keep the segment-not-dropdown rule. The sheets viewport and rulers are unchanged.</p>
+  <h2>What it costs</h2>
+  <p>A reshuffle of the controls column into a step model and a new inspector; roughly the size of the 1.60 reorganisation. The harnesses that drive segments by data attribute keep working if the attributes are kept. I would do it after Brief A ships and once the proofer's manifest carries transforms, since the inspector's best card depends on that.</p>
+</div>
+
+<div id="states" class="about" style="display:none">
+  <h1>States and flags the truth bar shows</h1>
+  <table><tr><th>Pill</th><th>Green</th><th>Amber</th><th>Red</th></tr>
+  <tr><td>Approval</td><td>verified P — the approved print file</td><td>RAW — the customer's original; UNBOUND — pre-hash order; UNVERIFIABLE — no crypto on this page</td><td>UNAPPROVED — matches neither hash</td></tr>
+  <tr><td>Content</td><td>vector · CMYK · 0 RGB</td><td>source carries RGB (converted by the RIP)</td><td>FLAT PROOF (jsPDF / one image per page); RGB ADDED by a pass here</td></tr>
+  <tr><td>Count</td><td>priced = placed</td><td>MANUAL GRID / STEP AND REPEAT / FILL (deliberate)</td><td>MISMATCH — fewer than priced fit</td></tr>
+  <tr><td>Profile</td><td>intent carried</td><td>no intent in source</td><td>—</td></tr></table>
+  <h2>Filename tokens, unchanged</h2>
+  <p><code>_FLATPROOF</code> <code>_RGB</code> <code>_RAW</code> <code>_UNAPPROVED</code> <code>_RETOUCHED</code> <code>_FONTS</code> <code>_OVERFLOW</code> — the truth bar is the same facts, read before the file is made.</p>
+  <h2>A flattened proof, as the draft shows it</h2>
+  <div class="banner err" style="max-width:720px"><b>⚠ FLATTENED PROOF</b>BOP_print-ready.pdf is a rasterised copy (producer jsPDF 2.5.1). Live type, CMYK builds and spot colours are gone; the press would get RGB pixels. The raw upload BOP_PRESS.pdf is in the folder — <u>use it</u>. If you continue, the output is flagged FLATPROOF.</div>
+  <div class="banner warn" style="max-width:720px"><b>RAW UPLOAD</b>BOP_PRESS.pdf is the customer's original, not the print file they approved. Their proof applied no transforms (manifest: crop 100% on every page), so it prints identically. Output flagged RAW.</div>
+</div>
+<div class="ann">UI DRAFT · 2026-11-24 · not wired</div>
+<script>
+function show(id){for(const k of ['draft','why','states']){document.getElementById(k).style.display=k===id?(k==='draft'?'grid':'block'):'none';}document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.textContent.trim().toLowerCase().startsWith(id==='draft'?'the draft':id==='why'?'why':'states')));}
+document.querySelectorAll('.step').forEach(s=>s.addEventListener('click',()=>{document.querySelectorAll('.step').forEach(x=>x.classList.remove('on'));s.classList.add('on');}));
+document.querySelectorAll('.seg button').forEach(b=>b.addEventListener('click',()=>{b.parentElement.querySelectorAll('button').forEach(x=>x.classList.remove('on'));b.classList.add('on');}));
+</script>
+</body></html>

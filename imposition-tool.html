@@ -135,7 +135,7 @@
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-11-02 08:00 UTC · IMPOSE-V1.66</div>
+<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-11-24 00:00 UTC · IMPOSE-V1.67</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -1081,7 +1081,10 @@ async function carryGroups(out, embeds) {
 // ink and nine "syntax error in content stream" faults, no warning. So refuse
 // at load, by name, with what to do about it.
 async function loadPdf(bytes, what) {
-  const doc = await PL.PDFDocument.load(bytes, { ignoreEncryption: true });
+  // updateMetadata:false — pdf-lib otherwise rewrites /Producer and /Creator
+  // at load, which erased the "jsPDF" signature the flattened-proof check
+  // reads (Brief A). Every output this tool saves sets its own producer.
+  const doc = await PL.PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
   if (doc.isEncrypted) {
     throw new Error(`"${what || "This file"}" is encrypted (an owner/permissions password). The browser cannot decrypt it, so its pages would impose as garbage and Fiery would print blank sheets. Remove the security first — Acrobat: File → Properties → Security → No Security (or re-export from the source) — then drop it again.`);
   }
@@ -4291,6 +4294,8 @@ async function imposePdf(artBytes, backBytes, spec, gangFiles, onProgress) {
 async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
   const pre = [];
   const fontsMissing = [];                              // names let through on override → res.fontsMissing
+  let srcFlat = null, srcIntentDoc = null;              // Brief A: flattened-proof verdict; source doc holding /OutputIntents
+  const srcRGB = { images: 0, ops: 0, unknown: false }; // RGB in the source (front + back), to judge the output against
   lastRaster = null;                                    // never inherit a previous job's raster note
   let frontRaster = null;
   // Source preflight — on the bytes as dropped, before any pass rewrites them.
@@ -4306,6 +4311,10 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
     if (doc.__ppsMaskNote) pre.push(...doc.__ppsMaskNote);
     if (doc.__ppsPressNotes) pre.push(...doc.__ppsPressNotes);
     pre.push(...fontNotes(doc, "artwork", spec, fontsMissing));
+    // Brief A: what kind of file is this, and does it carry RGB at all?
+    try { srcFlat = inspectFlatProof(doc); const fn = flatProofNote(srcFlat, "the artwork"); if (fn) pre.push(fn); } catch (e) { srcFlat = null; }
+    try { const c = rgbCensus(doc); srcRGB.images += c.images; srcRGB.ops += c.ops; } catch (e) { srcRGB.unknown = true; }
+    try { if (doc.catalog.get(PL.PDFName.of("OutputIntents"))) srcIntentDoc = doc; } catch (e) {}
     try {
       // UserUnit scales a page's units; nothing here honours it, so say so.
       const uu = doc.getPage(0).node.get(PL.PDFName.of("UserUnit"));
@@ -4345,6 +4354,8 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
       const bb = await ppsToPdfBytes(backBytes, "back");
       if (lastRaster) { const n = rasterNote(lastRaster, tw, th); if (n) pre.push(n); lastRaster = null; }
       const bdoc = await loadPdf(bb, "back file");
+      try { const fb = inspectFlatProof(bdoc); const fn = flatProofNote(fb, "the back file"); if (fn) { pre.push(fn); if (!srcFlat || !(srcFlat.allFlat || srcFlat.byProducer)) srcFlat = fb; } } catch (e) {}
+      try { const c = rgbCensus(bdoc); srcRGB.images += c.images; srcRGB.ops += c.ops; } catch (e) { srcRGB.unknown = true; }
       if (bdoc.__ppsRepairNote) pre.push("⚠ " + bdoc.__ppsRepairNote);
       if (bdoc.__ppsClipNote) pre.push(bdoc.__ppsClipNote);
       if (bdoc.__ppsMaskNote) pre.push(...bdoc.__ppsMaskNote);
@@ -4449,6 +4460,24 @@ async function imposePdfStages(artBytes, backBytes, spec, gangFiles) {
         p.warnings.push(`Sheet side${empties.empty.length === 1 ? "" : "s"} ${empties.empty.slice(0, 12).join(", ")}${empties.empty.length > 12 ? " …" : ""} render${empties.empty.length === 1 ? "s" : ""} with no ink — fine if those source pages are blank; if not, the page did not embed.`);
       }
     } catch (e) { if (/NO INK/.test(e.message)) throw e; /* render failures are not verdicts */ }
+    // Brief A: the output may add no RGB the source lacked (marks and slug are
+    // K-only since 1.34), and it carries the source's OutputIntents.
+    try {
+      await progress("Checking colour spaces", 0.9);
+      const outDoc = await PL.PDFDocument.load(p.bytes, { ignoreEncryption: true });
+      const oc = rgbCensus(outDoc);
+      p.rgbCensus = { source: { images: srcRGB.images, ops: srcRGB.ops }, output: { images: oc.images, ops: oc.ops } };
+      if (!srcRGB.unknown && srcRGB.images + srcRGB.ops === 0 && oc.images + oc.ops > 0) {
+        p.rgbLeak = oc;
+        p.warnings = [`⚠ RGB ADDED — the source has no RGB at all, but the imposed output carries ${oc.images} RGB image${oc.images === 1 ? "" : "s"} and ${oc.ops} RGB colour operator${oc.ops === 1 ? "" : "s"}. A pass in this tool introduced it (Retouch / Rasterise / greyscale rasters are RGB until the CMYK render exists). Flagged _RGB.`, ...(p.warnings || [])];
+      } else if (srcRGB.images + srcRGB.ops > 0) {
+        p.warnings = [...(p.warnings || []), `Source carries RGB: ${srcRGB.images} image${srcRGB.images === 1 ? "" : "s"}, ${srcRGB.ops} colour operator${srcRGB.ops === 1 ? "" : "s"} — the RIP converts these with its own profile; colours there will not match a CMYK proof.`];
+      }
+      let changed = false;
+      if (srcIntentDoc && !outDoc.catalog.get(PL.PDFName.of("OutputIntents"))) changed = carryOutputIntents(srcIntentDoc, outDoc);
+      if (changed) { p.bytes = await outDoc.save({ useObjectStreams: false }); p.warnings = [...(p.warnings || []), "Source OutputIntent (press profile) carried onto the output."]; }
+    } catch (e) { p.warnings = [...(p.warnings || []), `colour-space check skipped (${e.message})`]; }
+    if (srcFlat && (srcFlat.allFlat || srcFlat.byProducer)) p.flatProof = srcFlat;
     if (greyNote) p.warnings = [greyNote, ...(p.warnings || [])];
     if (retouched) p.retouched = retouched;
     if (seqNote) p.warnings = [seqNote, ...(p.warnings || [])];
@@ -4891,17 +4920,159 @@ async function sha256Hex(bytes) {
 
 // Compare downloaded bytes against an order's approved hash.
 // → "unbound" (order predates hashing) | "verified" | "mismatch" | "unverifiable"
-async function approvalState(bytes, expected) {
-  const want = String(expected || "").toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(want)) return { state: "unbound", got: "", want: "" };
+// ── Brief A (1.67): is this file a flattened proof, and does it carry RGB? ──
+// Order 88056 reached the press as 300 DPI RGB JPEG pages: the calculator's
+// print-ready file was a canvas + jsPDF raster of the customer's vector CMYK
+// export. Until the proofer builds vector print files (Brief B), the tool has
+// to recognise the flattened kind — and afterwards it has to prove the output
+// added no RGB of its own. docs/PROOFING_PIPELINE_DESIGN.md §4.
+const FLAT_PRODUCER = /jsPDF/i;
+const PAINT_OPS = new Set(["Tj", "TJ", "'", "\"", "f", "F", "f*", "B", "B*", "b", "b*", "S", "s", "sh", "BI"]);
+function docProducerInfo(doc) {
+  let producer = "", creator = "";
+  try { producer = doc.getProducer() || ""; } catch (e) {}
+  try { creator = doc.getCreator() || ""; } catch (e) {}
+  return { producer, creator };
+}
+function streamText(st) {
+  try { return new TextDecoder("latin1").decode(PL.decodePDFRawStream(st).decode()); } catch (e) { return ""; }
+}
+function pageContentText(page) {
+  const ctx = page.doc.context;
+  const c = page.node.get(PL.PDFName.of("Contents")); if (!c) return "";
+  const cv = ctx.lookup(c);
+  const items = cv instanceof PL.PDFArray ? cv.asArray() : [c];
+  return items.map(it => { const st = ctx.lookup(it); return st instanceof PL.PDFStream ? streamText(st) : ""; }).join("\n");
+}
+// Every XObject reachable from a page's resources, once each (by ref), with
+// the resources it lives in — images and forms, nested forms included.
+function forEachXObject(doc, onImage, onForm) {
+  const ctx = doc.context, seen = new Set();
+  const visit = (res, depth) => {
+    if (!res || depth > 8) return;
+    const xo = asDict(res.lookup(PL.PDFName.of("XObject"))); if (!xo) return;
+    for (const [, ref] of xo.entries()) {
+      const key = String(ref); if (seen.has(key)) continue; seen.add(key);
+      const st = ctx.lookup(ref); if (!(st instanceof PL.PDFStream)) continue;
+      const sub = st.dict.get(PL.PDFName.of("Subtype")); const subs = sub ? String(sub) : "";
+      if (subs === "/Image") onImage(st, res);
+      else if (subs === "/Form") { const fr = asDict(st.dict.lookup(PL.PDFName.of("Resources"))); onForm(st, fr || res); visit(fr, depth + 1); }
+    }
+  };
+  for (const page of doc.getPages()) visit(pageResources(page.node), 0);
+}
+// Is a colour-space object RGB? Names, ICCBased N=3, CalRGB, Indexed over RGB.
+function isRGBColorSpace(ctx, cs, depth) {
+  if (!cs || (depth || 0) > 4) return false;
+  const o = cs instanceof PL.PDFRef ? ctx.lookup(cs) : cs;
+  if (o instanceof PL.PDFName) { const n = String(o); return n === "/DeviceRGB" || n === "/CalRGB" || n === "/RGB"; }
+  if (o instanceof PL.PDFArray && o.size() >= 1) {
+    const fam = String(o.get(0));
+    if (fam === "/CalRGB") return true;
+    if (fam === "/ICCBased") { const st = ctx.lookup(o.get(1)); const N = st && st.dict ? st.dict.get(PL.PDFName.of("N")) : null; return !!(N && typeof N.asNumber === "function" && N.asNumber() === 3); }
+    if (fam === "/Indexed" || fam === "/I") return isRGBColorSpace(ctx, o.get(1), (depth || 0) + 1);
+    if (fam === "/DeviceRGB") return true;
+  }
+  return false;
+}
+// RGB colour operators in one content stream: rg/RG outright, and sc/scn/SC/SCN
+// after a cs/CS that set an RGB space (by name or through the resources).
+function countRGBOps(text, res, ctx) {
+  if (!text) return 0;
+  const toks = tokenizeContent(text);
+  let n = 0, fillRGB = false, strokeRGB = false, lastName = null;
+  const csDict = res ? asDict(res.lookup(PL.PDFName.of("ColorSpace"))) : null;
+  const named = name => {
+    if (name === "/DeviceRGB" || name === "/CalRGB" || name === "/RGB") return true;
+    if (!csDict) return false;
+    try { return isRGBColorSpace(ctx, csDict.get(PL.PDFName.of(name.slice(1))), 0); } catch (e) { return false; }
+  };
+  for (const t of toks) {
+    if (t.k === "name") { lastName = t.v; continue; }
+    if (t.k !== "op") continue;
+    switch (t.v) {
+      case "rg": n++; fillRGB = true; break;
+      case "RG": n++; strokeRGB = true; break;
+      case "g": case "k": fillRGB = false; break;
+      case "G": case "K": strokeRGB = false; break;
+      case "cs": fillRGB = !!(lastName && named(lastName)); break;
+      case "CS": strokeRGB = !!(lastName && named(lastName)); break;
+      case "sc": case "scn": if (fillRGB) n++; break;
+      case "SC": case "SCN": if (strokeRGB) n++; break;
+    }
+  }
+  return n;
+}
+// → { images, ops, pages }: RGB image XObjects and RGB colour operators across
+// every page and every form reachable from one, each XObject counted once.
+function rgbCensus(doc) {
+  const ctx = doc.context; let images = 0, ops = 0;
+  forEachXObject(doc,
+    (st) => { if (isRGBColorSpace(ctx, st.dict.get(PL.PDFName.of("ColorSpace")), 0)) images++; },
+    (st, res) => { ops += countRGBOps(streamText(st), res, ctx); });
+  for (const page of doc.getPages()) ops += countRGBOps(pageContentText(page), pageResources(page.node), ctx);
+  return { images, ops, pages: doc.getPageCount() };
+}
+// → { total, flat, blank, allFlat, byProducer, producer }. A page is "flat"
+// when its only painting is one image XObject drawn once with no text and no
+// vector paint — what a canvas → JPEG → jsPDF proof looks like, and what a
+// scanned or photo page also looks like, which is why this warns and offers
+// the raw upload instead of refusing.
+function inspectFlatProof(doc) {
+  const ctx = doc.context, n = doc.getPageCount();
+  let flat = 0, blank = 0;
+  for (const page of doc.getPages()) {
+    const res = pageResources(page.node);
+    let images = 0, forms = 0, fonts = 0;
+    const xo = res ? asDict(res.lookup(PL.PDFName.of("XObject"))) : null;
+    if (xo) for (const [, ref] of xo.entries()) { const st = ctx.lookup(ref); const sub = st && st.dict ? String(st.dict.get(PL.PDFName.of("Subtype")) || "") : ""; if (sub === "/Image") images++; else if (sub === "/Form") forms++; }
+    const fd = res ? asDict(res.lookup(PL.PDFName.of("Font"))) : null;
+    if (fd) for (const _ of fd.entries()) fonts++;
+    const toks = tokenizeContent(pageContentText(page));
+    let dos = 0, paint = 0;
+    for (const t of toks) if (t.k === "op") { if (t.v === "Do") dos++; else if (PAINT_OPS.has(t.v)) paint++; }
+    if (!dos && !paint) blank++;
+    else if (dos === 1 && !paint && images >= 1 && !forms) flat++;
+  }
+  const info = docProducerInfo(doc);
+  const byProducer = FLAT_PRODUCER.test(info.producer + " " + info.creator);
+  return { total: n, flat, blank, allFlat: n > 0 && flat > 0 && flat + blank === n, byProducer, producer: info.producer || info.creator || "" };
+}
+function flatProofNote(fp, what) {
+  if (!fp || !(fp.allFlat || fp.byProducer)) return null;
+  const why = fp.byProducer ? `its producer is "${fp.producer}" (the calculator's canvas + jsPDF export)` : `every page is a single full-page image (${fp.flat} of ${fp.total}${fp.blank ? `, ${fp.blank} blank` : ""})`;
+  return `⚠ FLATTENED PROOF — ${what} is a rasterised copy, not the customer's file: ${why}. Live type, CMYK builds and spot colours are gone and the press gets RGB pixels. Impose the raw upload from the order folder instead (the queue offers it); the output is flagged _FLATPROOF while this file is used.`;
+}
+// Carry the source's /OutputIntents onto an output document (pdf-lib copies
+// pages, not the catalog). Returns true when something was copied.
+function carryOutputIntents(srcDoc, outDoc) {
+  try {
+    const oi = srcDoc.catalog.get(PL.PDFName.of("OutputIntents")); if (!oi) return false;
+    const copier = PL.PDFObjectCopier.for(srcDoc.context, outDoc.context);
+    outDoc.catalog.set(PL.PDFName.of("OutputIntents"), copier.copy(srcDoc.context.lookup(oi)));
+    return true;
+  } catch (e) { return false; }
+}
+
+// Approval binding: P = the print file the customer approved (`_pps_proof_hash`),
+// R = the raw upload (`_pps_raw_hash`, Brief A). A file matching R is the
+// customer's original — flagged RAW, not UNAPPROVED. Advisory throughout
+// (owner, 2026-09-02): nothing here refuses.
+async function approvalState(bytes, expected, rawExpected) {
+  const norm = v => { const s = String(v || "").toLowerCase(); return /^[0-9a-f]{64}$/.test(s) ? s : ""; };
+  const want = norm(expected), wantRaw = norm(rawExpected);
+  if (!want && !wantRaw) return { state: "unbound", got: "", want: "" };
   const got = await sha256Hex(bytes);
-  if (!got) return { state: "unverifiable", got: "", want };
-  return { state: got === want ? "verified" : "mismatch", got, want };
+  if (!got) return { state: "unverifiable", got: "", want: want || wantRaw };
+  if (want && got === want) return { state: "verified", got, want };
+  if (wantRaw && got === wantRaw) return { state: "raw", got, want: want || wantRaw, wantRaw };
+  return { state: "mismatch", got, want: want || wantRaw };
 }
 
 // One sentence describing a non-clean approval state, or "" when nothing to say.
 function approvalNote(a, what, orderId) {
   if (!a || a.state === "verified" || a.state === "unbound") return "";
+  if (a.state === "raw") return `RAW UPLOAD — "${what}" is the customer's original file (hash ${a.got.slice(0, 12)}…), not the print-ready file they approved${a.want ? ` (${a.want.slice(0, 12)}…)` : ""}. Any crop, fit, rotation or scale they applied in the proof is NOT in this file; the output is flagged RAW. `;
   if (a.state === "unverifiable") {
     return `⚠ Order #${orderId} carries an approval hash but this page cannot verify it (no crypto.subtle — is wp-admin on HTTPS?). `;
   }
@@ -4920,7 +5091,7 @@ function imposedFilename(spec, layout) {
 }
 
 // Engine surface for headless tests / console debugging
-window.__ppsImpose = { parseSeq, imposePdf, computeLayout, flatImp, stickerImp, parseManifest, specFromRow, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf, sha256Hex, approvalState, BOOK_CALCS, isBoundCalc, isBookCalc, loadPdf, convertAlphaMasks, flattenVectorMasks, inpaintFMM, healTexture, applyStrokes, healPagesBytes, renderPageRaw, blankRuleItems, insertBlankPagesBytes, slipTargets, insertSlipsheets };
+window.__ppsImpose = { parseSeq, imposePdf, computeLayout, flatImp, stickerImp, parseManifest, specFromRow, imposedFilename, detectTrim, inspectPdfThreats, sanitizePdf, sha256Hex, approvalState, BOOK_CALCS, isBoundCalc, isBookCalc, loadPdf, convertAlphaMasks, flattenVectorMasks, inpaintFMM, healTexture, applyStrokes, healPagesBytes, renderPageRaw, blankRuleItems, insertBlankPagesBytes, slipTargets, insertSlipsheets, inspectFlatProof, rgbCensus, carryOutputIntents, approvalNote };
 
 // ═══════════════════════════════════════════════════════════════
 // UI
@@ -5431,6 +5602,13 @@ function rowPending(r) {
 // directed folder" — the match is a default, not a gate.
 const ROLE_TAG = { "print-ready": "print-ready", retouched: "RETOUCHED source", pdf: "PDF", raster: "image", preview: "preview", clean: "CLEAN copy", imposed: "imposed output" };
 function rowFiles(r) { return Array.isArray(r.files) ? r.files : []; }
+// The customer's own upload among an order folder's files, when the loaded
+// file is something else (a flattened print-ready copy): a PDF that is not a
+// print-ready / clean / imposed / preview, else a raster.
+function rawCandidate(files, notId) {
+  const ok = f => f && f.id !== notId && !/_print-ready\.pdf$/i.test(f.name || "");
+  return files.find(f => ok(f) && f.role === "pdf") || files.find(f => ok(f) && f.role === "retouched") || files.find(f => ok(f) && f.role === "raster") || null;
+}
 function rowPick(r, picks) {
   const files = rowFiles(r);
   const chosen = picks && picks[r.order_id + ":" + r.item_id];
@@ -6147,10 +6325,16 @@ function App() {
       .then(res => {
         if (seq !== genSeq.current) return null;
         const unappr = art && art.approval && art.approval.state === "mismatch";
+        const rawFlag = art && art.approval && art.approval.state === "raw";
         const fontsFlag = !!(res.fontsMissing && res.fontsMissing.length);
         const retouchFlag = !!(res.retouched || (res.parts && res.parts.some(p => p.retouched)));
+        const flatFlag = !!(res.flatProof || (res.parts && res.parts.some(p => p.flatProof)));
+        const rgbFlag = !!(res.rgbLeak || (res.parts && res.parts.some(p => p.rgbLeak)));
         const flagIt = (n, L) => {
           if (L && L.overflow) n = n.replace(/\.pdf$/i, "_OVERFLOW.pdf");
+          if (flatFlag) n = n.replace(/\.pdf$/i, "_FLATPROOF.pdf");
+          if (rgbFlag) n = n.replace(/\.pdf$/i, "_RGB.pdf");
+          if (rawFlag) n = n.replace(/\.pdf$/i, "_RAW.pdf");
           if (retouchFlag) n = n.replace(/\.pdf$/i, "_RETOUCHED.pdf");
           if (fontsFlag) n = n.replace(/\.pdf$/i, "_FONTS.pdf");
           if (unappr) n = n.replace(/\.pdf$/i, "_UNAPPROVED.pdf");
@@ -6275,10 +6459,12 @@ function App() {
       // approval check as a queue load — otherwise dragging in any file was a
       // silent bypass that still produced a clean output filename.
       const appr = slot === "back" ? null
-        : await approvalState(bytes, activeOrder && activeOrder.proof_hash);
+        : await approvalState(bytes, activeOrder && activeOrder.proof_hash, activeOrder && activeOrder.raw_hash);
+      let flatProof = null;
+      try { if (slot !== "back") { const fp = inspectFlatProof(await loadPdf(bytes, f.name)); flatProof = (fp.allFlat || fp.byProducer) ? fp : null; } } catch (e3) {}
       if (slot === "back") setBackArt({ bytes, name: f.name, pageCount, threats });
       else {
-        setArt({ bytes, name: f.name, pageCount, threats, approval: appr });
+        setArt({ bytes, name: f.name, pageCount, threats, approval: appr, flatProof });
         const aNote = approvalNote(appr, f.name, activeOrder && activeOrder.order_id);
         if (aNote) setNotice(aNote);
         setDetTrim(det ? { w: det.w, h: det.h } : null);
@@ -6355,20 +6541,25 @@ function App() {
       // sees the verdict on the same screen as the artwork. Advisory only: a
       // mismatch still loads, it just travels flagged. Hashed on the bytes as
       // filed, before any raster wrapping.
-      const appr = await approvalState(bytes, row.proof_hash);
+      const appr = await approvalState(bytes, row.proof_hash, row.raw_hash);
       // A JPEG/PNG picked from the folder is wrapped exactly as a dropped one.
       const pdfBytes = await ppsToPdfBytes(bytes, fileName);
       const doc = await loadPdf(pdfBytes, fileName);
       const pageCount = doc.getPageCount();
       let threats = [];
       try { threats = inspectPdfThreats(doc); } catch (e3) { threats = ["threat inspection failed — treat with care"]; }
-      setArt({ bytes, name: fileName, pageCount, threats, approval: appr });
+      // Brief A: a flattened proof (jsPDF / one image per page) is recognised
+      // at load so the raw upload can be offered before anything is imposed.
+      let flatProof = null;
+      try { const fp = inspectFlatProof(doc); flatProof = (fp.allFlat || fp.byProducer) ? fp : null; } catch (e4) {}
+      setArt({ bytes, name: fileName, pageCount, threats, approval: appr, flatProof });
       setAddBleedPages({});
       setBackArt(null);
       let note = `Loaded order #${row.order_id} artwork (${fileName}, ${pageCount} page${pageCount === 1 ? "" : "s"}). Review the preview, then Send to Drive.`;
       if (offMatch) note = `Imposing "${fileName}" from the order folder — NOT the file the queue matched for this item (${row.art_file_name}). ` + note;
       if (appr.state === "verified") note = `✓ Approval hash verified — byte-for-byte the file the customer approved. ` + note;
       else note = approvalNote(appr, fileName, row.order_id) + note;
+      if (flatProof) { const rc = rawCandidate(rowFiles(row), fileId); note = `⚠ FLATTENED PROOF — "${fileName}" is a rasterised copy (${flatProof.byProducer ? "producer " + flatProof.producer : flatProof.flat + " of " + flatProof.total + " pages are single images"}); the press would get RGB pixels.${rc ? ` The raw upload "${rc.name}" is in the folder — use it.` : ""} ` + note; }
       try {
         const det = detectTrim(doc, +bleedIn);
         const specL = Math.max(s.trimLong, s.trimShort), specS = Math.min(s.trimLong, s.trimShort);
@@ -6442,9 +6633,11 @@ function App() {
         // Bulk imposes a mismatched file like any other, but never quietly:
         // the output carries UNAPPROVED and the row is listed in the summary
         // so a headless run can't bury an unapproved file in the Drive folder.
-        const appr = await approvalState(bytes, row.proof_hash);
+        const appr = await approvalState(bytes, row.proof_hash, row.raw_hash);
         if (appr.state === "mismatch") {
           advisories.push(`${label}: APPROVAL MISMATCH — imposed and filed as UNAPPROVED (${appr.got.slice(0, 12)}… vs approved ${appr.want.slice(0, 12)}…).`);
+        } else if (appr.state === "raw") {
+          advisories.push(`${label}: the matched file is the RAW upload, not the approved print file — filed flagged _RAW.`);
         } else if (appr.state === "unverifiable") {
           advisories.push(`${label}: carries an approval hash but this page cannot verify it (no crypto.subtle — is wp-admin on HTTPS?).`);
         }
@@ -6452,6 +6645,9 @@ function App() {
         let filename = imposedFilename(s, res.layout);
         if (res.layout && res.layout.overflow) { filename = filename.replace(/\.pdf$/i, "_OVERFLOW.pdf"); advisories.push(`${label}: OVERFLOW — the block runs ${res.layout.overflow.offLong.toFixed(3)}×${res.layout.overflow.offShort.toFixed(3)}″ past the printable area; filed flagged _OVERFLOW.`); }
         if (appr.state === "mismatch") filename = filename.replace(/\.pdf$/i, "_UNAPPROVED.pdf");
+        if (appr.state === "raw") filename = filename.replace(/\.pdf$/i, "_RAW.pdf");
+        if (res.flatProof) { filename = filename.replace(/\.pdf$/i, "_FLATPROOF.pdf"); advisories.push(`${label}: FLATTENED PROOF — the matched file is a rasterised copy (${res.flatProof.byProducer ? "producer " + res.flatProof.producer : "one image per page"}); filed flagged _FLATPROOF. Load the order and pick the raw upload to impose vectors.`); }
+        if (res.rgbLeak) { filename = filename.replace(/\.pdf$/i, "_RGB.pdf"); advisories.push(`${label}: RGB ADDED by a pass in the tool — filed flagged _RGB.`); }
         const fd = new FormData();
         fd.append("action", "pps_impose_upload");
         fd.append("nonce", CFG.nonce);
@@ -7551,6 +7747,26 @@ function App() {
                 </div>
               </div>
             )}
+            {art && art.approval && art.approval.state === "raw" && (
+              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 6, background: "rgba(245,158,11,.12)", border: "1px solid rgba(245,158,11,.5)", fontSize: 12 }} data-raw-banner>
+                <b style={{ color: "#fbbf24" }}>RAW UPLOAD</b>
+                <div style={{ color: "rgba(255,255,255,.55)", marginTop: 3 }}>
+                  This is the customer's original file, byte for byte — not the print-ready file they approved. Any crop, fit, rotation or scale they applied in the proof is not in it; check the manifest's per-page detail. The output filename carries <b>RAW</b>.
+                </div>
+              </div>
+            )}
+            {art && art.flatProof && (
+              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 6, background: "rgba(233,30,60,.12)", border: "1px solid rgba(233,30,60,.5)", fontSize: 12 }} data-flatproof-banner>
+                <b style={{ color: "#ff5f7a" }}>⚠ FLATTENED PROOF</b>
+                <div style={{ color: "rgba(255,255,255,.55)", marginTop: 3 }}>
+                  This file is a rasterised copy, not the customer's artwork: {art.flatProof.byProducer ? <>its producer is <code>{art.flatProof.producer}</code></> : <>{art.flatProof.flat} of {art.flatProof.total} pages are a single full-page image</>}. Live type, CMYK builds and spot colours are gone; the press would get RGB pixels. The output is flagged <b>FLATPROOF</b> while it is used.
+                </div>
+                {(() => { const rc = activeOrder ? rawCandidate(rowFiles(activeOrder), activeOrder.art_file_id) : null; return rc ? (
+                  <button type="button" className="imp-btn" data-use-raw style={{ marginTop: 8, padding: "6px 11px", fontSize: 12 }} disabled={!!queueBusy}
+                          onClick={() => loadOrder(activeOrder, rc)}>Use the raw upload instead: {rc.name}</button>
+                ) : <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.45)", marginTop: 6 }}>No raw upload is in the order folder — ask for the customer's original file.</div>; })()}
+              </div>
+            )}
             {art && art.approval && art.approval.state === "unverifiable" && (
               <div style={{ marginTop: 8, fontSize: 12, color: "#ffb454" }}>
                 ⚠ This order carries an approval hash but the page can't verify it (no crypto.subtle — is wp-admin on HTTPS?).
@@ -7612,6 +7828,9 @@ function App() {
             )}
             <div className="grp" style={{ fontSize: 12, color: "rgba(255,255,255,.55)", gap: 8 }}>
               {viewLay && viewLay.overflow && <span className="imp-badge err" data-overflow title="The block is larger than the printable area — laid out as asked and centred; the outer pieces print cut short.">OVERFLOW {viewLay.overflow.offLong > EPS ? `${viewLay.overflow.offLong.toFixed(2)}″ WIDE` : ""}{viewLay.overflow.offLong > EPS && viewLay.overflow.offShort > EPS ? " · " : ""}{viewLay.overflow.offShort > EPS ? `${viewLay.overflow.offShort.toFixed(2)}″ TALL` : ""}</span>}
+              {viewRes && viewRes.flatProof && <span className="imp-badge err" data-flatproof title="The source is a rasterised proof (jsPDF / one image per page): the press gets RGB pixels. Impose the raw upload instead.">FLAT PROOF</span>}
+              {viewRes && viewRes.rgbLeak && <span className="imp-badge err" data-rgbleak title={`The output carries RGB the source did not have: ${viewRes.rgbLeak.images} image(s), ${viewRes.rgbLeak.ops} operator(s).`}>RGB ADDED</span>}
+              {art && art.approval && art.approval.state === "raw" && <span className="imp-badge warn" data-raw title="This is the customer's raw upload, not the print file they approved — their proof transforms are not in it.">RAW UPLOAD</span>}
               {viewRes && viewRes.retouched && <span className="imp-badge warn" data-retouched title={viewRes.retouched + " — spot-healed pages are rasterised at 300 DPI; this is not the file the customer approved. The filename carries _RETOUCHED."}>RETOUCHED</span>}
               {parityBadge}
               <span>{sheetSummary}</span>
