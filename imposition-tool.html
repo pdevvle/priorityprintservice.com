@@ -3,7 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PPS Imposition Tool · build 2026-07-12</title>
+<title>PPS Imposition Tool</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone@7.26.9/babel.min.js"></script>
@@ -11,131 +15,285 @@
 <script>pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
 <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <style>
+  /* ── the calculator's skin, as the proofer wears it (1.68) ──────────────
+     Tokens, type and control shapes are the ones proof-ui-draft.html lifted
+     from calc-preview-test.html, so the imposition tool reads as the same
+     product as the proof the customer approved on — same cyan, same magenta,
+     same inset segmented control, same condensed check list. Light by
+     default (wp-admin is light); the dark skin is the calculator's, keyed
+     off the same data-pps-theme attribute, remembered per browser. Every
+     colour in the UI is a token: a rule written against a name this block
+     does not define falls back to the browser default silently, which is
+     why the style harness resolves every var() in both skins. */
+  :root{
+    --pps-display:'Montserrat','Segoe UI','Helvetica Neue',Arial,sans-serif;
+    --pps-sans:'Work Sans','Segoe UI','Helvetica Neue',Arial,sans-serif;
+    --mono:ui-monospace,Menlo,Consolas,monospace;
+    --bp-surface:#fff; --bp-surface-2:#f6f7f9; --bp-line:#e3e8ef;
+    --bp-ink:#0f172a; --bp-dim:#475569; --bp-faint:#64748b;
+    --bp-btn:#f1f4f8; --bp-info:#1d4ed8; --bp-warn:#92400e; --bp-scrim:rgba(15,23,42,.55);
+    --bp-page:#f6f7f9;
+    --cyan:#007eff; --magenta:#d1246a; --green:#38a169; --bp-red:#b91c1c;
+    --magenta-tint:#fce8ef; --cyan-tint:#e0edff; --yellow-tint:#fef5e0; --yellow-line:#f0a830;
+    --green-tint:rgba(56,161,105,.12);
+    /* the viewport bed: the sheets are paper white, so the bed must not be */
+    --stage:#e9edf3; --ruler:#eef1f5;
+    --shadow-card:0 1px 2px rgba(16,24,40,.05);
+    --shadow-sheet:0 4px 6px rgba(16,24,40,.06), 0 12px 28px rgba(16,24,40,.18);
+  }
+  :root[data-pps-theme="dark"]{
+    --bp-surface:#161b22; --bp-surface-2:#0f151d; --bp-line:#2a3340;
+    --bp-ink:#e6edf6; --bp-dim:#9fb0c6; --bp-faint:#7183a0;
+    --bp-btn:#0f151d; --bp-info:#60a5fa; --bp-warn:#f0a830; --bp-scrim:rgba(2,6,12,.66);
+    --bp-page:#0d1117;
+    --magenta:#f0578f; --green:#5bc98a; --bp-red:#f87171;
+    --magenta-tint:#2a1420; --cyan-tint:#12243a; --yellow-tint:#2a2113; --yellow-line:#6b5320;
+    --green-tint:rgba(91,201,138,.14);
+    --stage:#0a0d12; --ruler:#131820;
+    --shadow-sheet:0 4px 6px rgba(0,0,0,.3), 0 12px 28px rgba(0,0,0,.55);
+  }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  body { margin:0; padding:0; background:#14161b; color:#e8eaf0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
-  ::-webkit-scrollbar{width:10px;height:10px} ::-webkit-scrollbar-thumb{background:#3a3e46;border-radius:5px}
-  input, select, button { font-family: inherit; }
+  [hidden]{display:none!important}
+  body { margin:0; padding:0; background:var(--bp-page); color:var(--bp-ink); font-family:var(--pps-sans); font-size:14px; }
+  ::-webkit-scrollbar{width:10px;height:10px} ::-webkit-scrollbar-thumb{background:var(--bp-line);border-radius:5px}
+  input, select, button { font-family: inherit; color:inherit; }
   input[type="number"], input[type="text"], select {
-    background:#1e2128; border:1px solid rgba(255,255,255,.12); color:#e8eaf0;
-    border-radius:6px; padding:8px 10px; font-size:14px; width:100%;
+    background:var(--bp-surface); border:1px solid var(--bp-line); color:var(--bp-ink);
+    border-radius:10px; padding:8px 11px; font-size:13.5px; width:100%;
+    box-shadow:inset 0 1px 2px rgba(16,24,40,.04);
   }
-  input:focus, select:focus { outline:none; border-color:#e91e8c; }
+  input:focus, select:focus { outline:none; border-color:var(--cyan); box-shadow:0 0 0 3px rgba(0,126,255,.14); }
+  input[type="checkbox"], input[type="radio"] { accent-color:var(--cyan); }
+  input[type="range"] { accent-color:var(--cyan); }
+  code { font-family:var(--mono); font-size:.92em; background:var(--bp-surface-2); border:1px solid var(--bp-line); border-radius:4px; padding:1px 4px; color:var(--bp-info); }
+  a { color:var(--cyan); }
+  h1,h2,h3,h4 { font-family:var(--pps-display); letter-spacing:-.01em; }
+  /* buttons: cyan is the one action colour; everything else is a bordered
+     surface that turns cyan on hover — the proofer's filebtn / pkgbtn */
   .imp-btn {
-    background:linear-gradient(135deg,#e91e8c,#c2185b); color:#fff; border:none;
-    border-radius:8px; padding:12px 18px; font-size:14px; font-weight:700;
-    cursor:pointer; transition:filter .15s;
+    background:var(--cyan); color:#fff; border:1px solid var(--cyan);
+    border-radius:8px; padding:9px 16px; font-size:13px; font-weight:600;
+    cursor:pointer; transition:all .18s cubic-bezier(.4,0,.2,1); line-height:1.25;
+    box-shadow:0 1px 2px rgba(0,126,255,.35);
   }
-  .imp-btn:hover{filter:brightness(1.12)} .imp-btn:disabled{opacity:.4;cursor:not-allowed;filter:none}
-  .imp-btn.sec { background:#2a2e36; border:1px solid rgba(255,255,255,.14); }
-  .imp-card { background:#1a1d23; border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:16px; }
-  .imp-drop { border:2px dashed rgba(255,255,255,.18); border-radius:12px; padding:22px 14px; text-align:center;
+  .imp-btn:hover:not(:disabled){filter:brightness(1.08); transform:translateY(-1px); box-shadow:0 4px 12px rgba(0,126,255,.32)}
+  .imp-btn:active:not(:disabled){transform:none}
+  .imp-btn:disabled{opacity:.45;cursor:not-allowed;filter:none;transform:none;box-shadow:none}
+  .imp-btn.sec { background:var(--bp-surface); color:var(--bp-dim); border-color:var(--bp-line); box-shadow:none; font-weight:500; }
+  .imp-btn.sec:hover:not(:disabled){ background:rgba(0,126,255,.06); border-color:var(--cyan); color:var(--cyan); filter:none; transform:none; box-shadow:none }
+  .imp-btn.sec.on, .imp-toolbar .tb.on { background:var(--cyan); border-color:var(--cyan); color:#fff; font-weight:600; box-shadow:0 1px 2px rgba(0,126,255,.35); }
+  .imp-card { background:var(--bp-surface); border:1px solid var(--bp-line); border-radius:12px; padding:14px 16px; box-shadow:var(--shadow-card); }
+  .imp-drop { border:2px dashed var(--bp-line); border-radius:12px; padding:18px 14px; text-align:center; background:var(--bp-surface-2);
     cursor:pointer; transition:border-color .15s, background .15s; }
-  .imp-drop:hover, .imp-drop.over { border-color:#e91e8c; background:rgba(233,30,140,.06); }
-  .imp-badge { display:inline-block; padding:3px 9px; border-radius:20px; font-size:11px; font-weight:700; letter-spacing:.3px; }
-  .imp-badge.ok  { background:rgba(34,197,94,.15);  color:#4ade80; border:1px solid rgba(34,197,94,.35); }
-  .imp-badge.warn{ background:rgba(245,158,11,.15); color:#fbbf24; border:1px solid rgba(245,158,11,.35); }
-  .imp-badge.err { background:rgba(239,68,68,.15);  color:#f87171; border:1px solid rgba(239,68,68,.35); }
-  table.imp-q { width:100%; border-collapse:collapse; font-size:13px; }
-  table.imp-q th { text-align:left; padding:8px 10px; color:rgba(255,255,255,.45); font-size:11px; text-transform:uppercase; letter-spacing:.5px; border-bottom:1px solid rgba(255,255,255,.08); }
-  table.imp-q td { padding:9px 10px; border-bottom:1px solid rgba(255,255,255,.05); vertical-align:middle; }
-  .lbl { font-size:11px; font-weight:700; color:rgba(255,255,255,.45); text-transform:uppercase; letter-spacing:.5px; margin-bottom:5px; display:block; }
-  /* ── 1.33 layout: controls accordion left, job strip + viewport right ── */
-  .imp-app { padding:10px 14px 40px; }
-  .imp-shell { display:flex; gap:14px; align-items:flex-start; }
-  .imp-side { flex:0 0 400px; min-width:340px; position:sticky; top:8px; max-height:calc(100vh - 16px); overflow:auto;
-              background:#1a1d23; border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:10px; }
-  .imp-side-h { font-size:14px; font-weight:700; padding:4px 6px 10px; display:flex; align-items:center; justify-content:space-between; }
-  .imp-progress { position:relative; display:inline-block; width:240px; height:18px; background:rgba(255,255,255,.08); border-radius:9px; overflow:hidden; vertical-align:middle; }
-  .imp-progress .fill { position:absolute; left:0; top:0; bottom:0; background:#4ea1ff; transition:width .15s linear; }
-  .imp-progress .txt { position:relative; font-size:10.5px; line-height:18px; padding:0 9px; color:#fff; white-space:nowrap; font-weight:600; }
+  .imp-drop:hover, .imp-drop.over { border-color:var(--cyan); background:var(--cyan-tint); }
+  /* chips: the proofer's state pills — fail is solid magenta, warn is the amber tint, pass the green tint */
+  .imp-badge { display:inline-block; padding:2px 9px; border-radius:999px; font-size:10px; font-weight:700; letter-spacing:.02em; white-space:nowrap;
+               border:1px solid var(--bp-line); background:var(--bp-btn); color:var(--bp-dim); vertical-align:middle; }
+  .imp-badge.ok  { background:var(--green-tint); color:var(--green); border-color:var(--green); }
+  .imp-badge.warn{ background:var(--yellow-tint); color:var(--bp-warn); border-color:var(--yellow-line); }
+  .imp-badge.err { background:var(--magenta); color:#fff; border-color:var(--magenta); }
+  table.imp-q { width:100%; border-collapse:collapse; font-size:12.5px; }
+  table.imp-q th { text-align:left; padding:7px 10px; color:var(--bp-faint); font-family:var(--pps-display); font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.08em; border-bottom:1px solid var(--bp-line); }
+  table.imp-q td { padding:8px 10px; border-bottom:1px solid var(--bp-line); vertical-align:middle; }
+  table.imp-q tr:last-child td { border-bottom:0; }
+  table.imp-q select { width:auto; }
+  .lbl { font-family:var(--pps-display); font-size:10px; font-weight:700; color:var(--bp-faint); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; display:block; }
+
+  /* ── 1.68 shell: header with the truth bar, step rail · viewport · inspector ── */
+  .imp-app { padding:14px 16px 40px; max-width:1900px; margin:0 auto; }
+  .imp-head { background:var(--bp-surface); border:1px solid var(--bp-line); border-radius:14px; padding:12px 16px 11px; margin-bottom:12px; box-shadow:var(--shadow-card); }
+  .imp-head-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .imp-head h1 { font-size:18px; font-weight:700; margin:0; color:var(--bp-ink); }
+  .imp-head .sub { font-size:12px; color:var(--bp-faint); }
+  .imp-head-actions { margin-left:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .imp-head .imp-btn.sec { padding:5px 11px; font-size:12px; }
+  /* truth bar: what is true about the job right now, one pill per fact */
+  .imp-truth { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px; padding-top:10px; border-top:1px solid var(--bp-line); }
+  .imp-pill { display:inline-flex; align-items:center; gap:7px; padding:5px 11px 5px 9px; border:1px solid var(--bp-line); border-radius:999px;
+              background:var(--bp-surface); font-size:11.5px; font-weight:600; color:var(--bp-dim); line-height:1.2; white-space:nowrap; max-width:100%; }
+  .imp-pill .dot { flex-shrink:0; width:8px; height:8px; border-radius:50%; background:var(--bp-faint); }
+  .imp-pill .k { font-weight:500; color:var(--bp-faint); }
+  .imp-pill.ok .dot { background:var(--green); }
+  .imp-pill.ok { border-color:var(--green); color:var(--green); }
+  .imp-pill.warn .dot { background:var(--yellow-line); }
+  .imp-pill.warn { border-color:var(--yellow-line); background:var(--yellow-tint); color:var(--bp-warn); }
+  .imp-pill.err .dot { background:#fff; }
+  .imp-pill.err { background:var(--magenta); border-color:var(--magenta); color:#fff; }
+  .imp-pill.err .k { color:rgba(255,255,255,.75); }
+  .imp-pill.unknown .dot { background:transparent; box-shadow:inset 0 0 0 1.5px var(--bp-faint); }
+  .imp-pill .imp-badge { margin-left:-3px; }
+
+  .imp-shell { display:grid; grid-template-columns:400px minmax(0,1fr) 300px; gap:14px; align-items:start; }
+  .imp-side { position:sticky; top:8px; max-height:calc(100vh - 16px); overflow:auto; min-width:0;
+              background:var(--bp-surface); border:1px solid var(--bp-line); border-radius:14px; padding:4px 14px 12px; box-shadow:var(--shadow-card); }
+  .imp-side-h { display:flex; align-items:baseline; justify-content:space-between; gap:8px; padding:12px 2px 10px; border-bottom:1px solid var(--bp-line); margin-bottom:8px; }
+  .imp-side-h h2 { margin:0; font-size:17px; font-weight:650; color:var(--bp-ink); }
+  .imp-side-h .imp-btn.sec { padding:2px 8px; font-size:11px; }
+  .imp-insp { min-width:0; background:var(--bp-surface); border:1px solid var(--bp-line); border-radius:14px; padding:12px 14px 14px; box-shadow:var(--shadow-card); position:sticky; top:8px; max-height:calc(100vh - 16px); overflow:auto; }
+  .imp-insp h3 { margin:0 0 8px; font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--bp-faint); }
+  .imp-insp-sec { padding:10px 0 12px; border-bottom:1px solid var(--bp-line); }
+  .imp-insp-sec:last-child { border-bottom:0; padding-bottom:0; }
+  .imp-insp-sec:first-child { padding-top:0; }
+  .imp-kv { display:grid; grid-template-columns:auto minmax(0,1fr); gap:3px 10px; font-size:11.5px; line-height:1.45; }
+  .imp-kv .k { color:var(--bp-faint); white-space:nowrap; }
+  .imp-kv .v { color:var(--bp-ink); font-weight:500; min-width:0; overflow-wrap:anywhere; }
+  .imp-kv .v.mono { font-family:var(--mono); font-size:10.5px; }
+  .imp-empty { font-size:11.5px; color:var(--bp-faint); line-height:1.5; }
+  /* the condensed check list, as the proofer's rail draws it: a state dot and a
+     name per finding, the explanation folded until clicked */
+  .chk-group + .chk-group { margin-top:10px; }
+  .chk-grouphead { display:flex; align-items:center; gap:6px; width:100%; margin:0 0 2px; padding:2px 2px 4px; background:none; border:0;
+                   font-family:var(--pps-display); font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--bp-faint); text-align:left; cursor:pointer; }
+  .chk-grouphead:hover { color:var(--cyan); }
+  .chk-group.notpassed .chk-grouphead { color:var(--magenta); }
+  .chk-group.notes .chk-grouphead { color:var(--bp-warn); }
+  .chk-group.passed .chk-grouphead { color:var(--green); }
+  .chk-grouphead .caret { margin-left:auto; font-size:11px; transition:transform .18s; }
+  .chk-group.open .chk-grouphead .caret { transform:rotate(180deg); }
+  .chk-group:not(.open) .chk-row { display:none; }
+  .chk-row { border-top:1px solid var(--bp-line); }
+  .chk-sum { display:flex; align-items:flex-start; gap:9px; width:100%; padding:7px 2px; background:none; border:0; cursor:pointer; font-family:inherit; text-align:left; color:var(--bp-ink); }
+  .chk-sum:hover .chk-label { color:var(--cyan); }
+  .chk-state { flex-shrink:0; width:9px; height:9px; margin-top:4px; border-radius:50%; background:var(--bp-faint); }
+  .chk-row.fail .chk-state { background:var(--magenta); }
+  .chk-row.warn .chk-state { background:var(--yellow-line); }
+  .chk-row.pass .chk-state { background:var(--green); }
+  .chk-row.unknown .chk-state { background:transparent; box-shadow:inset 0 0 0 1.5px var(--bp-faint); }
+  .chk-label { flex:1; min-width:0; font-size:12px; font-weight:600; line-height:1.4; color:inherit; transition:color .15s; overflow-wrap:anywhere; }
+  .chk-row:not(.open) .chk-label { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .chk-sum .caret { color:var(--bp-dim); font-size:11px; transition:transform .18s; margin-top:2px; }
+  .chk-row.open .chk-sum .caret { transform:rotate(180deg); }
+  .chk-text { margin:0 0 9px 18px; font-size:11.5px; line-height:1.5; color:var(--bp-faint); overflow-wrap:anywhere; }
+  .chk-text .imp-btn { margin-top:6px; }
+
+  /* the Imposition box: pinned, never collapses, ringed in the action colour */
+  .imp-box { border:1px solid var(--cyan); border-radius:12px; padding:12px 12px 6px; margin:4px 0 10px; background:var(--bp-surface); box-shadow:0 0 0 3px rgba(0,126,255,.08); }
+  .imp-box-h { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+  .imp-box-h .ttl { font-family:var(--pps-display); font-weight:700; font-size:14px; color:var(--bp-ink); }
+  .imp-box-sum { font-size:11.5px; color:var(--bp-dim); flex:1 1 160px; min-width:0; line-height:1.4; }
+  .imp-x { padding-bottom:20px; color:var(--bp-faint); font-size:13px; }
+  .imp-upline { display:flex; gap:8px; align-items:center; font-size:12.5px; padding-bottom:12px; flex-wrap:wrap; color:var(--bp-ink); }
+  .imp-upline .ok { color:var(--green); } .imp-upline .warn { color:var(--bp-warn); }
+  .imp-upline .imp-btn { padding:3px 9px; font-size:11px; }
+  .imp-tiles { display:flex; gap:6px; flex-wrap:wrap; }
+  .imp-tile { display:flex; flex-direction:column; align-items:center; gap:2px; padding:6px 7px 5px; border:1px solid var(--bp-line); border-radius:8px; background:var(--bp-surface);
+              cursor:pointer; font-family:inherit; color:var(--bp-dim); min-width:64px; transition:all .18s cubic-bezier(.4,0,.2,1); }
+  .imp-tile:hover { border-color:var(--cyan); color:var(--cyan); }
+  .imp-tile.on { background:var(--cyan-tint); border-color:var(--cyan); color:var(--cyan); box-shadow:inset 0 0 0 1px var(--cyan); }
+  .imp-tile.auto { justify-content:center; min-height:66px; }
+  .imp-tile.tight { border-style:dashed; }
+  .imp-tile.over { border-color:var(--magenta); }
+  .imp-tile-svg { display:block; }
+  .imp-tile-svg .sheet { fill:#fff; stroke:var(--bp-faint); stroke-width:1; }
+  :root[data-pps-theme="dark"] .imp-tile-svg .sheet { fill:#e9edf3; }
+  .imp-tile-svg .cells rect { fill:rgba(209,36,106,.22); stroke:var(--magenta); stroke-width:.8; }
+  .imp-tile.on .imp-tile-svg .cells rect { fill:rgba(0,126,255,.25); stroke:var(--cyan); }
+  .imp-tile-n { font-size:11.5px; font-weight:700; color:var(--bp-ink); }
+  .imp-tile.on .imp-tile-n { color:var(--cyan); }
+  .imp-tile-l { font-size:10px; }
+  .imp-link { background:none; border:0; padding:0; color:var(--cyan); font:inherit; cursor:pointer; text-decoration:underline; }
+  .imp-progress { position:relative; display:inline-block; width:240px; height:18px; background:var(--bp-line); border-radius:9px; overflow:hidden; vertical-align:middle; }
+  .imp-progress .fill { position:absolute; left:0; top:0; bottom:0; background:var(--cyan); transition:width .15s linear; }
+  .imp-progress .txt { position:relative; font-size:10.5px; line-height:18px; padding:0 9px; color:var(--bp-ink); white-space:nowrap; font-weight:600; mix-blend-mode:normal; }
   /* ── 1.64 Retouch modal ── */
-  .imp-rt-back { position:fixed; inset:0; background:rgba(0,0,0,.78); z-index:9000; display:flex; align-items:stretch; justify-content:center; padding:14px; }
-  .imp-rt { display:flex; flex-direction:column; flex:1; max-width:1700px; background:#1a1d23; border:1px solid rgba(255,255,255,.12); border-radius:12px; overflow:hidden; }
-  .imp-rt-bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:8px 12px; border-bottom:1px solid rgba(255,255,255,.08); font-size:12px; }
+  .imp-rt-back { position:fixed; inset:0; background:var(--bp-scrim); z-index:9000; display:flex; align-items:stretch; justify-content:center; padding:14px; }
+  .imp-rt { display:flex; flex-direction:column; flex:1; max-width:1700px; background:var(--bp-surface); border:1px solid var(--bp-line); border-radius:16px; overflow:hidden; box-shadow:0 24px 64px rgba(16,24,40,.28); }
+  .imp-rt-bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:8px 12px; border-bottom:1px solid var(--bp-line); font-size:12px; color:var(--bp-dim); }
   .imp-rt-bar .imp-btn { padding:5px 10px; font-size:12px; }
   .imp-rt-bar input[type=number] { width:64px; padding:4px 6px; font-size:12px; }
   .imp-rt-bar input[type=range] { width:140px; }
-  .imp-rt-wrap { flex:1; overflow:auto; background:#0f1115; position:relative; cursor:none; }
-  .imp-rt-stage { position:relative; display:inline-block; margin:20px; box-shadow:0 0 0 1px rgba(255,255,255,.12), 0 10px 40px rgba(0,0,0,.6); background:#fff; }
+  .imp-rt-wrap { flex:1; overflow:auto; background:var(--stage); position:relative; cursor:none; }
+  .imp-rt-stage { position:relative; display:inline-block; margin:20px; box-shadow:var(--shadow-sheet); background:#fff; }
   .imp-rt-stage canvas { display:block; position:absolute; left:0; top:0; image-rendering:auto; }
   .imp-rt-stage canvas.work { position:relative; }
-  .imp-rt-cursor { position:absolute; border:1.5px solid #e91e8c; border-radius:50%; pointer-events:none; box-shadow:0 0 0 1px rgba(255,255,255,.7), inset 0 0 0 1px rgba(255,255,255,.7); transform:translate(-50%,-50%); }
-  .imp-rt-foot { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:8px 12px; border-top:1px solid rgba(255,255,255,.08); font-size:12px; color:rgba(255,255,255,.65); }
+  .imp-rt-cursor { position:absolute; border:1.5px solid var(--magenta); border-radius:50%; pointer-events:none; box-shadow:0 0 0 1px rgba(255,255,255,.7), inset 0 0 0 1px rgba(255,255,255,.7); transform:translate(-50%,-50%); }
+  .imp-rt-foot { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:8px 12px; border-top:1px solid var(--bp-line); font-size:12px; color:var(--bp-dim); }
   .imp-rt-foot .imp-btn { padding:6px 11px; font-size:12px; }
-  .imp-setups { display:flex; gap:6px; align-items:center; padding:0 6px 6px; }
-  .imp-setups select { flex:1; min-width:0; font-size:12px; }
-  .imp-setups .imp-btn { padding:5px 9px; font-size:11.5px; white-space:nowrap; }
-  .imp-setups-note { font-size:11px; color:rgba(255,255,255,.45); padding:0 6px 8px; }
-  .imp-acc { border:1px solid rgba(255,255,255,.08); border-radius:10px; margin-bottom:8px; background:#1e2128; }
-  .imp-acc-h { width:100%; display:flex; align-items:center; gap:8px; background:none; border:0; color:#e8eaf0;
-               font-weight:700; font-size:12px; text-transform:uppercase; letter-spacing:.5px; padding:11px 12px; cursor:pointer; text-align:left; }
-  .imp-acc-h:hover { background:rgba(255,255,255,.03); }
-  .imp-acc.open .imp-acc-h { border-bottom:1px solid rgba(255,255,255,.08); }
-  .imp-acc-h .chev { margin-left:auto; color:rgba(255,255,255,.4); font-size:11px; }
-  .imp-acc-b { padding:12px 12px 4px; }
+  .imp-setups { display:flex; gap:6px; align-items:center; padding:0 2px 6px; }
+  .imp-setups select { flex:1; min-width:0; font-size:12px; padding:6px 9px; }
+  .imp-setups .imp-btn { padding:6px 9px; font-size:11.5px; white-space:nowrap; }
+  .imp-setups-note { font-size:11px; color:var(--bp-faint); padding:0 2px 8px; line-height:1.45; }
+  /* the step rail: the proofer's accordion — a hairline under each step, the
+     display face on the title, a numbered disc, and the step's settings in one
+     line while it is closed so the whole setup reads without opening anything */
+  .imp-acc { border-bottom:1px solid var(--bp-line); }
+  .imp-acc:last-child { border-bottom:0; }
+  .imp-acc-h { width:100%; display:flex; align-items:center; gap:9px; background:none; border:0; color:var(--bp-ink);
+               font-family:var(--pps-display); font-weight:600; font-size:14px; letter-spacing:-.005em; padding:12px 2px; cursor:pointer; text-align:left; transition:color .2s; }
+  .imp-acc-h:hover { color:var(--cyan); }
+  .imp-acc-h .stepn { flex-shrink:0; width:20px; height:20px; border-radius:50%; border:1.5px solid var(--bp-line); color:var(--bp-faint);
+                      font-family:var(--pps-sans); font-size:10.5px; font-weight:700; display:inline-flex; align-items:center; justify-content:center; transition:all .2s; }
+  .imp-acc.open .imp-acc-h .stepn { background:var(--cyan); border-color:var(--cyan); color:#fff; }
+  .imp-acc-h .ttl { min-width:0; }
+  .imp-acc-h .chev { margin-left:auto; color:var(--bp-dim); font-size:11px; transition:transform .18s; flex-shrink:0; }
+  .imp-acc.open .imp-acc-h .chev { transform:rotate(180deg); }
+  .imp-acc-sum { font-family:var(--pps-sans); font-size:11.5px; font-weight:400; color:var(--bp-faint); margin:-8px 0 11px 31px; line-height:1.4; overflow-wrap:anywhere; }
+  .imp-acc-b { padding:2px 2px 14px 2px; }
   .imp-acc-b .lbl { margin-top:2px; }
-  /* Segmented control (1.60): two to six short choices, every option visible — no dropdown to open. */
-  .imp-seg { display:inline-flex; flex-wrap:wrap; border:1px solid rgba(255,255,255,.14); border-radius:8px; overflow:hidden; background:#2a2e36; max-width:100%; }
-  .imp-seg-b { background:none; border:0; border-right:1px solid rgba(255,255,255,.1); color:#cfd3dc; font-size:12px; padding:6px 10px; cursor:pointer; line-height:1.25; white-space:nowrap; }
-  .imp-seg-b:last-child { border-right:0; }
-  .imp-seg-b:hover { background:rgba(255,255,255,.06); }
-  .imp-seg-b.on { background:rgba(78,161,255,.18); color:#4ea1ff; font-weight:700; }
+  /* Segmented control (1.60): two to six short choices, every option visible — an inset track with a cyan thumb, as the proofer's view switch. */
+  .imp-seg { display:inline-flex; flex-wrap:wrap; gap:3px; padding:3px; border:1px solid var(--bp-line); border-radius:10px; background:var(--bp-btn); box-shadow:inset 0 1px 2px rgba(16,24,40,.04); max-width:100%; }
+  .imp-seg-b { background:transparent; border:0; border-radius:7px; color:var(--bp-dim); font-size:11.5px; font-weight:500; padding:6px 11px; cursor:pointer; line-height:1.25; white-space:nowrap; transition:all .18s cubic-bezier(.4,0,.2,1); }
+  .imp-seg-b:hover:not(.on):not(:disabled) { color:var(--cyan); }
+  .imp-seg-b.on { background:var(--cyan); color:#fff; font-weight:600; box-shadow:0 1px 2px rgba(0,126,255,.35); }
   .imp-seg-b:disabled { opacity:.4; cursor:not-allowed; }
   .imp-seg.block { display:flex; } .imp-seg.block .imp-seg-b { flex:1; text-align:center; }
-  .imp-hint { font-size:11px; color:rgba(255,255,255,.4); margin-top:4px; line-height:1.45; }
+  .imp-hint { font-size:11px; color:var(--bp-faint); margin-top:4px; line-height:1.45; }
   .imp-row { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
-  .imp-check { font-size:13px; display:flex; gap:8px; align-items:flex-start; cursor:pointer; margin-bottom:8px; }
-  .imp-check input { width:auto; margin-top:3px; }
-  .imp-check .d { color:rgba(255,255,255,.4); }
-  .imp-sub { font-size:11px; font-weight:700; color:rgba(255,255,255,.35); text-transform:uppercase; letter-spacing:.5px; margin:10px 0 6px; padding-top:10px; border-top:1px dashed rgba(255,255,255,.1); }
-  .imp-main { flex:1; min-width:0; }
-  .imp-toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; background:#1a1d23; border:1px solid rgba(255,255,255,.08);
-                 border-radius:12px; padding:8px 12px; margin:12px 0; }
-  .imp-toolbar .grp { display:flex; gap:4px; align-items:center; padding-right:10px; margin-right:2px; border-right:1px solid rgba(255,255,255,.1); }
+  .imp-check { font-size:12.5px; display:flex; gap:8px; align-items:flex-start; cursor:pointer; margin-bottom:8px; color:var(--bp-ink); line-height:1.4; }
+  .imp-check input { width:16px; height:16px; margin:1px 0 0; flex-shrink:0; }
+  .imp-check .d { color:var(--bp-faint); }
+  .imp-sub { font-size:11.5px; font-weight:700; color:var(--bp-dim); margin:12px 0 8px; padding-top:10px; border-top:1px solid var(--bp-line); line-height:1.35; }
+  .imp-main { min-width:0; }
+  .imp-toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; background:var(--bp-surface); border:1px solid var(--bp-line);
+                 border-radius:12px; padding:8px 12px; margin:12px 0; box-shadow:var(--shadow-card); }
+  .imp-toolbar .grp { display:flex; gap:4px; align-items:center; padding-right:10px; margin-right:2px; border-right:1px solid var(--bp-line); flex-wrap:wrap; }
   .imp-toolbar .grp:last-child { border-right:0; }
-  .imp-toolbar .tb { padding:5px 10px; font-size:12px; }
-  .imp-toolbar .tb.on { border-color:#4ea1ff; color:#4ea1ff; }
-  .imp-view { background:#0f1216; border:1px solid rgba(255,255,255,.08); border-radius:12px; overflow:hidden; }
-  .imp-strip { overflow-x:auto; overflow-y:hidden; padding:14px 18px 14px; display:flex; gap:34px; align-items:flex-start; min-height:280px; }
+  .imp-toolbar .tb { padding:5px 10px; font-size:11.5px; }
+  .imp-toolbar .grp .sum { font-size:12px; color:var(--bp-dim); }
+  .imp-view { background:var(--stage); border:1px solid var(--bp-line); border-radius:12px; overflow:hidden; }
+  .imp-strip { overflow-x:auto; overflow-y:hidden; padding:16px 18px 14px; display:flex; gap:34px; align-items:flex-start; min-height:280px; }
   .imp-sheet { flex:0 0 auto; display:grid; grid-template-columns:auto auto; grid-template-rows:auto auto; }
   .imp-sheet .corner { width:22px; height:18px; }
   .imp-sheet .ruler-t, .imp-sheet .ruler-l { display:block; }
-  .imp-sheet canvas { display:block; background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.55); }
-  .imp-sheet .ph { background:#fff; opacity:.9; }
-  .imp-sheet .cap { grid-column:2; font-size:11px; color:rgba(255,255,255,.55); font-weight:700; letter-spacing:.5px; margin:7px 0 0; white-space:nowrap; }
+  .imp-sheet canvas { display:block; background:#fff; box-shadow:var(--shadow-sheet); }
+  .imp-sheet .ph { background:#fff; opacity:.9; box-shadow:var(--shadow-sheet); }
+  .imp-sheet .cap { grid-column:2; font-family:var(--pps-display); font-size:10px; color:var(--bp-faint); font-weight:700; letter-spacing:.08em; text-transform:uppercase; margin:9px 0 0; white-space:nowrap; }
   .imp-report { margin-top:12px; }
-  .imp-report summary { cursor:pointer; font-size:12px; font-weight:700; color:rgba(255,255,255,.55); text-transform:uppercase; letter-spacing:.5px; }
-  @media(max-width:980px){ .imp-shell{flex-direction:column} .imp-side{position:static;max-height:none;flex:auto;width:100%} }
+  .imp-report summary { cursor:pointer; font-family:var(--pps-display); font-size:10px; font-weight:700; color:var(--bp-faint); text-transform:uppercase; letter-spacing:.08em; padding:4px 2px; }
+  .imp-report summary:hover { color:var(--cyan); }
+  .imp-theme { width:32px; height:32px; min-width:32px; border-radius:50%; border:1px solid var(--bp-line); background:var(--bp-btn); color:var(--bp-dim); font-size:14px; line-height:1; cursor:pointer;
+               display:inline-flex; align-items:center; justify-content:center; transition:all .2s; padding:0; }
+  .imp-theme:hover { background:rgba(0,126,255,.12); border-color:var(--cyan); color:var(--cyan); }
+  .imp-build { position:fixed; bottom:6px; right:8px; font:11px/1.2 var(--mono); color:#fff; background:var(--magenta); padding:4px 8px; border-radius:6px; pointer-events:none; z-index:9999; font-weight:700; box-shadow:0 2px 6px rgba(0,0,0,.25); }
+  @media(max-width:1500px){ .imp-shell{grid-template-columns:380px minmax(0,1fr)} .imp-insp{grid-column:2;position:static;max-height:none} }
+  @media(max-width:980px){ .imp-shell{grid-template-columns:1fr} .imp-side{position:static;max-height:none} .imp-insp{grid-column:1} }
   /* Metadata reference — a lookup sheet folded into the tool, so the operator
      never has to leave the queue to find out what a field means. */
-  .imp-ref { font-size:12.5px; line-height:1.55; color:rgba(255,255,255,.78); }
-  .imp-ref h4 { font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:#7ab8ff;
+  .imp-ref { font-size:12.5px; line-height:1.55; color:var(--bp-dim); }
+  .imp-ref h4 { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--bp-info);
                 margin:18px 0 7px; font-weight:700; display:flex; gap:8px; align-items:baseline; }
   .imp-ref h4:first-child { margin-top:0; }
-  .imp-ref h4 .n { font:11px/1 ui-monospace,Menlo,Consolas,monospace; color:rgba(255,255,255,.3); }
+  .imp-ref h4 .n { font:11px/1 var(--mono); color:var(--bp-faint); }
   .imp-ref p { margin:0 0 9px; }
-  .imp-ref code { font:12px/1.5 ui-monospace,Menlo,Consolas,monospace; background:rgba(255,255,255,.06);
-                  border:1px solid rgba(255,255,255,.08); border-radius:3px; padding:1px 4px; color:#9fd0ff; }
-  .imp-ref pre { margin:0 0 10px; padding:11px 13px; background:#0f1216; border:1px solid rgba(255,255,255,.08);
-                 border-radius:8px; overflow-x:auto; font:11.5px/1.6 ui-monospace,Menlo,Consolas,monospace;
-                 color:rgba(255,255,255,.8); white-space:pre; }
+  .imp-ref pre { margin:0 0 10px; padding:11px 13px; background:var(--bp-surface-2); border:1px solid var(--bp-line);
+                 border-radius:8px; overflow-x:auto; font:11.5px/1.6 var(--mono); color:var(--bp-ink); white-space:pre; }
   .imp-ref table { width:100%; border-collapse:collapse; font-size:12px; margin:0 0 10px; }
-  .imp-ref th { text-align:left; padding:6px 9px; color:rgba(255,255,255,.4); font-size:10.5px;
-                text-transform:uppercase; letter-spacing:.5px; border-bottom:1px solid rgba(255,255,255,.1); white-space:nowrap; }
-  .imp-ref td { padding:6px 9px; border-bottom:1px solid rgba(255,255,255,.05); vertical-align:top; }
+  .imp-ref th { text-align:left; padding:6px 9px; color:var(--bp-faint); font-size:10px; font-family:var(--pps-display);
+                text-transform:uppercase; letter-spacing:.08em; border-bottom:1px solid var(--bp-line); white-space:nowrap; }
+  .imp-ref td { padding:6px 9px; border-bottom:1px solid var(--bp-line); vertical-align:top; }
   .imp-ref td code { background:none; border:0; padding:0; }
   .imp-ref .tw { overflow-x:auto; }
-  .imp-ref .trap { border-left:3px solid #e91e8c; background:rgba(233,30,140,.07); border-radius:0 6px 6px 0;
+  .imp-ref .trap { border-left:3px solid var(--magenta); background:var(--magenta-tint); border-radius:0 6px 6px 0;
                    padding:9px 12px; margin:0 0 10px; }
-  .imp-ref .tip  { border-left:3px solid #7ab8ff; background:rgba(122,184,255,.07); border-radius:0 6px 6px 0;
+  .imp-ref .tip  { border-left:3px solid var(--bp-info); background:var(--cyan-tint); border-radius:0 6px 6px 0;
                    padding:9px 12px; margin:0 0 10px; }
-  .imp-ref .trap b { color:#f9a8d4; } .imp-ref .tip b { color:#9fd0ff; }
+  .imp-ref .trap b { color:var(--magenta); } .imp-ref .tip b { color:var(--bp-info); }
   .imp-ref ol { margin:0; padding-left:19px; } .imp-ref li { margin-bottom:6px; }
-  .imp-ref .yes { color:#4ade80; font-weight:700; } .imp-ref .no { color:#f9a8d4; font-weight:700; }
+  .imp-ref .yes { color:var(--green); font-weight:700; } .imp-ref .no { color:var(--magenta); font-weight:700; }
 </style>
 </head>
 <body>
-<div style="position:fixed;bottom:6px;right:8px;font:11px/1.2 monospace;color:#fff;background:#d40;padding:4px 8px;border-radius:4px;pointer-events:none;z-index:9999;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.3)">BUILD 2026-11-24 00:00 UTC · IMPOSE-V1.67</div>
+<div class="imp-build">BUILD 2026-11-27 06:00 UTC · IMPOSE-V1.68</div>
 <div id="pps-impose-root"></div>
 <script type="text/babel">
 // PRIORITY PRINT SERVICE — Auto-Imposition Tool v1
@@ -226,7 +384,8 @@ function sheetOverrideOf(spec) {
   const m = marginOf(spec);
   if (k !== "custom") return SHEETS[k] ? withMargin(SHEETS[k], m) : null;
   const L = +spec.sheetLong, S = +spec.sheetShort;
-  if (!(L >= 3 && S >= 3)) throw new Error("Custom parent sheet needs both dimensions (minimum 3″).");
+  // Minimum 1″ (was 3″): the operator may dictate any sheet — "15-up on a 2×2 sheet … preposterousness be damned" (owner, 2026-11-27).
+  if (!(L >= 1 && S >= 1)) throw new Error("Custom parent sheet needs both dimensions (minimum 1″).");
   if (L > SHEET_MAX || S > SHEET_MAX) throw new Error(`Custom parent sheet is capped at ${SHEET_MAX}″.`);
   const mm = m == null ? SHEET_MARGIN : m;
   if (2 * mm >= Math.min(L, S)) throw new Error(`A ${mm}″ imageable margin leaves no printable area on a ${L}×${S}″ sheet.`);
@@ -4858,6 +5017,11 @@ function parseManifest(text) {
 // trims are usually halves; quarter-inch values score lower). /Rotate is
 // honoured so the detected size matches the displayed orientation.
 const r16 = v => Math.round(v * 16) / 16;
+// A measured size snaps to the 1/16″ grid only when it is ON that grid (within
+// 0.006″ ≈ 0.4 pt). A 320 × 233 mm export (12.6 × 9.18″) used to come back as
+// 12.625 × 9.1875″ — a trim LARGER than its own page — and that 0.025″ pushed
+// a comfortable 2-up into the pricing formula's 1-up (owner, 2026-11-27).
+const snapT = v => { const r = Math.round(v * 16) / 16; return Math.abs(r - v) <= 0.006 ? r : Math.round(v * 1000) / 1000; };
 // Sizes a print shop actually trims to, beyond the saddle presets. Used only
 // to decide whether a box that is exactly one bleed bigger than one of these
 // is really the bleed size wearing the trim's name.
@@ -4884,16 +5048,16 @@ function detectTrim(doc, bleed) {
     // flagged MISMATCH. 5.75×8.75 is nobody's booklet; 5.5×8.5 + 0.125″ is.
     const ins = { w: d.w - 2 * b, h: d.h - 2 * b };
     if (b > 0 && !knownTrim(r16(d.w), r16(d.h)) && knownTrim(r16(ins.w), r16(ins.h)) && nice(ins.w) + nice(ins.h) > nice(d.w) + nice(d.h)) {
-      return { w: r16(ins.w), h: r16(ins.h), method: `embedded TrimBox ${r16(d.w)}×${r16(d.h)}″ is a ${r16(ins.w)}×${r16(ins.h)}″ trim + ${2 * b}″ bleed — using ${r16(ins.w)}×${r16(ins.h)}″ (type the size if the piece really trims at ${r16(d.w)}×${r16(d.h)}″)`, bleedSized: true };
+      return { w: snapT(ins.w), h: snapT(ins.h), method: `embedded TrimBox ${r16(d.w)}×${r16(d.h)}″ is a ${r16(ins.w)}×${r16(ins.h)}″ trim + ${2 * b}″ bleed — using ${r16(ins.w)}×${r16(ins.h)}″ (type the size if the piece really trims at ${r16(d.w)}×${r16(d.h)}″)`, bleedSized: true };
     }
-    return { w: r16(d.w), h: r16(d.h), method: "embedded TrimBox" };
+    return { w: snapT(d.w), h: snapT(d.h), method: "embedded TrimBox" };
   }
   const media = dims(mb.w, mb.h);
   const inset = { w: media.w - 2 * b, h: media.h - 2 * b };
   if (b > 0 && inset.w >= 1 && inset.h >= 1 && nice(inset.w) + nice(inset.h) > nice(media.w) + nice(media.h)) {
-    return { w: r16(inset.w), h: r16(inset.h), method: `media size − ${2 * b}″ bleed` };
+    return { w: snapT(inset.w), h: snapT(inset.h), method: `media size − ${2 * b}″ bleed` };
   }
-  return { w: r16(media.w), h: r16(media.h), method: "exact media size (no bleed detected)" };
+  return { w: snapT(media.w), h: snapT(media.h), method: "exact media size (no bleed detected)" };
 }
 
 function sanitizeName(s) { return String(s || "").replace(/[^\w.\-]+/g, "_").replace(/_+/g, "_").slice(0, 60); }
@@ -5107,17 +5271,17 @@ function useDebounced(value, ms) {
 function SeqNote({ txt, total, noun, what }) {
   if (!String(txt || "").trim()) return null;
   const r = parseSeq(txt, total, noun);
-  if (r.errors.length) return <div style={{ fontSize: 11.5, color: "#f87171", marginTop: 3 }}>✕ {r.errors.join("; ")}{total == null ? ` — ${noun === "sheet" ? "impose a file" : "drop the artwork"} to check against the ${noun} count` : ""}</div>;
-  return <div style={{ fontSize: 11.5, color: "#4ade80", marginTop: 3 }}>→ {r.items.length} {what}{total != null ? ` (from ${total})` : ""}: {r.text}</div>;
+  if (r.errors.length) return <div style={{ fontSize: 11.5, color: "var(--bp-red)", marginTop: 3 }}>✕ {r.errors.join("; ")}{total == null ? ` — ${noun === "sheet" ? "impose a file" : "drop the artwork"} to check against the ${noun} count` : ""}</div>;
+  return <div style={{ fontSize: 11.5, color: "var(--green)", marginTop: 3 }}>→ {r.items.length} {what}{total != null ? ` (from ${total})` : ""}: {r.text}</div>;
 }
 
 // Live readout for an insertion rule (blank pages / slipsheets).
 function RuleNote({ rule, total, noun, what }) {
   if (!rule || !rule.mode || rule.mode === "off") return null;
   const r = blankRuleItems(rule, total, noun);
-  if (r.errors.length) return <div style={{ fontSize: 11.5, color: "#f87171", marginTop: 3 }} data-rule-note="err">✕ {r.errors.join("; ")}{!total ? ` — ${noun === "sheet" ? "impose a file" : "drop the artwork"} to check against the ${noun} count` : ""}</div>;
-  if (!r.added) return <div style={{ fontSize: 11.5, color: "#fbbf24", marginTop: 3 }} data-rule-note="none">→ nothing to add on {total} {noun}s</div>;
-  return <div style={{ fontSize: 11.5, color: "#4ade80", marginTop: 3 }} data-rule-note="ok">→ {r.added} {what}{r.added === 1 ? "" : "s"} added, {total} → {r.items.length} {noun}s: {r.text}</div>;
+  if (r.errors.length) return <div style={{ fontSize: 11.5, color: "var(--bp-red)", marginTop: 3 }} data-rule-note="err">✕ {r.errors.join("; ")}{!total ? ` — ${noun === "sheet" ? "impose a file" : "drop the artwork"} to check against the ${noun} count` : ""}</div>;
+  if (!r.added) return <div style={{ fontSize: 11.5, color: "var(--bp-warn)", marginTop: 3 }} data-rule-note="none">→ nothing to add on {total} {noun}s</div>;
+  return <div style={{ fontSize: 11.5, color: "var(--green)", marginTop: 3 }} data-rule-note="ok">→ {r.added} {what}{r.added === 1 ? "" : "s"} added, {total} → {r.items.length} {noun}s: {r.text}</div>;
 }
 
 function Field({ label, children, style }) {
@@ -5162,10 +5326,10 @@ function DropZone({ label, sub, accept, onFiles, fileName }) {
       onDrop={e => { e.preventDefault(); setOver(false); handle(e.dataTransfer.files); }}>
       <input ref={inputRef} type="file" accept={accept} multiple style={{ display: "none" }}
         onChange={e => { handle(e.target.files); e.target.value = ""; }} />
-      <div style={{ fontSize: 14, fontWeight: 700, color: fileName ? "#4ade80" : "#e8eaf0" }}>
+      <div style={{ fontSize: 14, fontWeight: 700, color: fileName ? "var(--green)" : "#e8eaf0" }}>
         {fileName || label}
       </div>
-      <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.4)", marginTop: 4 }}>{sub}</div>
+      <div style={{ fontSize: 11.5, color: "var(--bp-faint)", marginTop: 4 }}>{sub}</div>
     </div>
   );
 }
@@ -5177,30 +5341,30 @@ function LayoutSchematic({ layout, pxPerIn }) {
   const W = s.long * scale, H = s.short * scale;
   return (
     <svg width={W} height={H} style={{ display: "block", background: "#fff", borderRadius: 4 }}>
-      <rect x={0} y={0} width={W} height={H} fill="#fff" stroke="#999" />
+      <rect x={0} y={0} width={W} height={H} fill="#fff" stroke="var(--bp-faint)" />
       <rect x={(s.long - s.usableLong) / 2 * scale} y={(s.short - s.usableShort) / 2 * scale}
-        width={s.usableLong * scale} height={s.usableShort * scale} fill="none" stroke="#ddd" strokeDasharray="4 3" />
+        width={s.usableLong * scale} height={s.usableShort * scale} fill="none" stroke="var(--bp-line)" strokeDasharray="4 3" />
       {layout.cells.map((c, i) => (
         <g key={i}>
           <rect x={c.clip.x * scale} y={(s.short - c.clip.y - c.clip.h) * scale}
-            width={c.clip.w * scale} height={c.clip.h * scale} fill="rgba(233,30,140,.07)" />
+            width={c.clip.w * scale} height={c.clip.h * scale} fill="rgba(209,36,106,.07)" />
           <rect x={c.trim.x * scale} y={(s.short - c.trim.y - c.trim.h) * scale}
-            width={c.trim.w * scale} height={c.trim.h * scale} fill="rgba(233,30,140,.16)" stroke="#e91e8c" strokeWidth="1" />
+            width={c.trim.w * scale} height={c.trim.h * scale} fill="rgba(209,36,106,.16)" stroke="var(--magenta)" strokeWidth="1" />
           {!layout.booklet && (() => {
             const cx = (c.trim.x + c.trim.w / 2) * scale;
             const cy = (s.short - c.trim.y - c.trim.h / 2) * scale;
             const r = Math.min(5, c.trim.w * scale / 4);
             const up = !c.patRot;
             return <path d={up ? `M ${cx} ${cy - r} L ${cx - r} ${cy + r} L ${cx + r} ${cy + r} Z`
-                               : `M ${cx} ${cy + r} L ${cx - r} ${cy - r} L ${cx + r} ${cy - r} Z`} fill="rgba(233,30,140,.6)" />;
+                               : `M ${cx} ${cy + r} L ${cx - r} ${cy - r} L ${cx + r} ${cy - r} Z`} fill="rgba(209,36,106,.6)" />;
           })()}
           {layout.booklet && (layout.booklet.spreadAlongX
             ? <line x1={(c.trim.x + c.trim.w / 2) * scale} y1={(s.short - c.trim.y - c.trim.h) * scale}
                 x2={(c.trim.x + c.trim.w / 2) * scale} y2={(s.short - c.trim.y) * scale}
-                stroke="#e91e8c" strokeWidth="1" strokeDasharray="4 3" />
+                stroke="var(--magenta)" strokeWidth="1" strokeDasharray="4 3" />
             : <line x1={c.trim.x * scale} y1={(s.short - c.trim.y - c.trim.h / 2) * scale}
                 x2={(c.trim.x + c.trim.w) * scale} y2={(s.short - c.trim.y - c.trim.h / 2) * scale}
-                stroke="#e91e8c" strokeWidth="1" strokeDasharray="4 3" />)}
+                stroke="var(--magenta)" strokeWidth="1" strokeDasharray="4 3" />)}
         </g>
       ))}
     </svg>
@@ -5210,13 +5374,15 @@ function LayoutSchematic({ layout, pxPerIn }) {
 
 // Collapsible section for the controls column. Children unmount when closed;
 // every setting lives in App state, so nothing is lost by collapsing.
-function Acc({ id, title, open, onToggle, badge, children }) {
+function Acc({ id, title, open, onToggle, badge, step, summary, children }) {
   return (
     <section className={"imp-acc" + (open ? " open" : "")} data-sec={id}>
       <button type="button" className="imp-acc-h" onClick={onToggle} aria-expanded={open}>
-        <span>{title}</span>{badge}
-        <span className="chev">{open ? "▼" : "▶"}</span>
+        {step != null && <span className="stepn">{step}</span>}
+        <span className="ttl">{title}</span>{badge}
+        <span className="chev">▼</span>
       </button>
+      {!open && summary ? <div className="imp-acc-sum" data-sec-summary={id}>{summary}</div> : null}
       {open && <div className="imp-acc-b">{children}</div>}
     </section>
   );
@@ -5228,19 +5394,19 @@ function RulerT({ inches, px }) {
   const W = inches * px, ticks = [];
   for (let q = 0; q <= inches * 4 + 1e-6; q++) {
     const x = q / 4 * px, whole = q % 4 === 0, half = q % 2 === 0;
-    ticks.push(<line key={q} x1={x} y1={18} x2={x} y2={whole ? 6 : half ? 10 : 13} stroke="rgba(255,255,255,.55)" strokeWidth="1" />);
-    if (whole && q > 0 && px >= 18) ticks.push(<text key={"t" + q} x={x + 2} y={9} fontSize="8" fill="rgba(255,255,255,.55)">{q / 4}</text>);
+    ticks.push(<line key={q} x1={x} y1={18} x2={x} y2={whole ? 6 : half ? 10 : 13} stroke="var(--bp-dim)" strokeWidth="1" />);
+    if (whole && q > 0 && px >= 18) ticks.push(<text key={"t" + q} x={x + 2} y={9} fontSize="8" fill="var(--bp-dim)">{q / 4}</text>);
   }
-  return <svg className="ruler-t" width={W} height={18} style={{ background: "#181b21" }}>{ticks}</svg>;
+  return <svg className="ruler-t" width={W} height={18} style={{ background: "var(--ruler)" }}>{ticks}</svg>;
 }
 function RulerL({ inches, px }) {
   const H = inches * px, ticks = [];
   for (let q = 0; q <= inches * 4 + 1e-6; q++) {
     const y = q / 4 * px, whole = q % 4 === 0, half = q % 2 === 0;
-    ticks.push(<line key={q} x1={22} y1={y} x2={whole ? 10 : half ? 14 : 17} y2={y} stroke="rgba(255,255,255,.55)" strokeWidth="1" />);
-    if (whole && q > 0 && px >= 18) ticks.push(<text key={"t" + q} x={2} y={y - 2} fontSize="8" fill="rgba(255,255,255,.55)">{q / 4}</text>);
+    ticks.push(<line key={q} x1={22} y1={y} x2={whole ? 10 : half ? 14 : 17} y2={y} stroke="var(--bp-dim)" strokeWidth="1" />);
+    if (whole && q > 0 && px >= 18) ticks.push(<text key={"t" + q} x={2} y={y - 2} fontSize="8" fill="var(--bp-dim)">{q / 4}</text>);
   }
-  return <svg className="ruler-l" width={22} height={H} style={{ background: "#181b21" }}>{ticks}</svg>;
+  return <svg className="ruler-l" width={22} height={H} style={{ background: "var(--ruler)" }}>{ticks}</svg>;
 }
 
 // One sheet side in the viewport: rendered by pdf.js when it scrolls into
@@ -5330,7 +5496,7 @@ function SheetViewport({ res, layout, zoom, setZoom, rulers, fit }) {
             <div className="cap">LAYOUT PREVIEW — {layout.sheet.label} · drop artwork to impose</div>
           </div>
         ) : (
-          <div style={{ color: "rgba(255,255,255,.4)", fontSize: 13, padding: 30 }}>No layout yet — enter a finished size, or load an order.</div>
+          <div style={{ color: "var(--bp-faint)", fontSize: 13, padding: 30 }}>No layout yet — enter a finished size, or load an order.</div>
         )}
       </div>
     </div>
@@ -5525,8 +5691,8 @@ function Retouch({ slot, art, strokesBySlot, onChange, onClose, order, cfg, onNo
               {cur && <div className="imp-rt-cursor" style={{ left: cur.x, top: cur.y, width: brushCss, height: brushCss }} />}
             </div>
           )}
-          {!b && <div style={{ padding: 40, color: "rgba(255,255,255,.5)" }}>{busy || "…"}</div>}
-          {busy && b && <div style={{ position: "sticky", left: 12, bottom: 12, display: "inline-block", background: "rgba(0,0,0,.7)", padding: "6px 10px", borderRadius: 8, fontSize: 12 }}>{busy}</div>}
+          {!b && <div style={{ padding: 40, color: "var(--bp-dim)" }}>{busy || "…"}</div>}
+          {busy && b && <div style={{ position: "sticky", left: 12, bottom: 12, display: "inline-block", background: "var(--bp-scrim)", color: "#fff", padding: "6px 10px", borderRadius: 8, fontSize: 12 }}>{busy}</div>}
         </div>
         <div className="imp-rt-foot">
           <span data-rt-status>
@@ -5541,7 +5707,7 @@ function Retouch({ slot, art, strokesBySlot, onChange, onClose, order, cfg, onNo
           {cfg && order && <button type="button" className="imp-btn sec" data-rt-drive disabled={!totalSpots || !!busy} onClick={toDrive}>☁ File RETOUCHED source to Drive</button>}
           <button type="button" className="imp-btn" data-rt-done onClick={onClose}>Done</button>
         </div>
-        <div style={{ padding: "4px 12px 8px", fontSize: 11, color: "rgba(255,255,255,.4)" }}>
+        <div style={{ padding: "4px 12px 8px", fontSize: 11, color: "var(--bp-faint)" }}>
           Paint over dust, hairs, scratches and stray marks; each stroke is filled from its surroundings on release. Every retouched page is <b>rasterised at {HEAL_DPI} DPI</b> when imposed (no longer vector, RGB) and the output is flagged <b>_RETOUCHED</b> — this is not the file the customer approved. Keys: [ ] brush · + − zoom · Esc close.
         </div>
       </div>
@@ -5620,9 +5786,9 @@ function rowPick(r, picks) {
 function OrderQueue({ rows, err, onLoad, busyId, onStatus, onHide, rowBusy }) {
   const STATUSES = (CFG && CFG.orderStatuses) || {};
   const [picks, setPicks] = useState({});
-  if (err) return <div style={{ color: "#f87171", fontSize: 13 }}>Order list failed: {err}</div>;
-  if (!rows) return <div style={{ color: "rgba(255,255,255,.4)", fontSize: 13 }}>Loading orders…</div>;
-  if (!rows.length) return <div style={{ color: "rgba(255,255,255,.4)", fontSize: 13 }}>No recent orders with Drive artwork found.</div>;
+  if (err) return <div style={{ color: "var(--bp-red)", fontSize: 13 }}>Order list failed: {err}</div>;
+  if (!rows) return <div style={{ color: "var(--bp-faint)", fontSize: 13 }}>Loading orders…</div>;
+  if (!rows.length) return <div style={{ color: "var(--bp-faint)", fontSize: 13 }}>No recent orders with Drive artwork found.</div>;
   return (
     <table className="imp-q">
       <thead><tr><th>Order</th><th>Job</th><th>Spec</th><th>Artwork</th><th>Imposition</th><th>Order status</th><th></th></tr></thead>
@@ -5638,7 +5804,7 @@ function OrderQueue({ rows, err, onLoad, busyId, onStatus, onHide, rowBusy }) {
           const orderBusy = rowBusy === String(r.order_id);
           return (
             <tr key={key}>
-              <td><a href={r.folder_url} target="_blank" rel="noreferrer" style={{ color: "#7ab8ff" }}>#{r.order_id}</a></td>
+              <td><a href={r.folder_url} target="_blank" rel="noreferrer" style={{ color: "var(--bp-info)" }}>#{r.order_id}</a></td>
               <td style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.job_name || r.product || "—"}</td>
               <td style={{ fontSize: 12 }}>{r.calc || "?"} · {r.long_edge}×{r.short_edge}″ · {isBookCalc(r.calc) ? "booklet" : r.sides === 2 ? "2-sided" : "1-sided"} · qty {r.qty}</td>
               <td style={{ fontSize: 12, maxWidth: 260 }}>
@@ -5649,9 +5815,9 @@ function OrderQueue({ rows, err, onLoad, busyId, onStatus, onHide, rowBusy }) {
                     {!files.some(f => f.id === r.art_file_id) && r.art_file_id && <option value={r.art_file_id}>{r.art_file_name} · matched</option>}
                     {files.map(f => <option key={f.id} value={f.id}>{f.name}{f.id === r.art_file_id ? " · matched" : ROLE_TAG[f.role] ? ` · ${ROLE_TAG[f.role]}` : ""}</option>)}
                   </select>
-                ) : artOk ? pick.name : <span style={{ color: "#f87171" }}>{driveErr ? "Drive list failed" : "none found"}</span>}
-                {pick && r.art_file_id && pick.id !== r.art_file_id && <div style={{ color: "#fbbf24", fontSize: 11, marginTop: 2 }}>not the matched artwork ({r.art_file_name})</div>}
-                {pick && !r.art_file_id && <div style={{ color: "#fbbf24", fontSize: 11, marginTop: 2 }}>no file matched this item — pick checked by hand</div>}
+                ) : artOk ? pick.name : <span style={{ color: "var(--bp-red)" }}>{driveErr ? "Drive list failed" : "none found"}</span>}
+                {pick && r.art_file_id && pick.id !== r.art_file_id && <div style={{ color: "var(--bp-warn)", fontSize: 11, marginTop: 2 }}>not the matched artwork ({r.art_file_name})</div>}
+                {pick && !r.art_file_id && <div style={{ color: "var(--bp-warn)", fontSize: 11, marginTop: 2 }}>no file matched this item — pick checked by hand</div>}
               </td>
               <td>{driveErr ? <span className="imp-badge err">DRIVE ERROR</span>
                 : r.imposed ? <span className="imp-badge ok">IMPOSED</span>
@@ -5659,7 +5825,7 @@ function OrderQueue({ rows, err, onLoad, busyId, onStatus, onHide, rowBusy }) {
                 : !specOk ? <span className="imp-badge warn">NO SPEC</span>
                 : !artOk ? <span className="imp-badge err">NO ART</span>
                 : <span className="imp-badge warn">PENDING</span>}
-                {r.hidden && <span className="imp-badge" style={{ marginLeft: 5, background: "#3a3f4a" }}>HIDDEN</span>}</td>
+                {r.hidden && <span className="imp-badge" style={{ marginLeft: 5, background: "var(--bp-btn)" }}>HIDDEN</span>}</td>
               {/* Order status is a property of the ORDER, so the control repeats
                   on every line item of a multi-item order and changing it from
                   any of them updates them all. */}
@@ -5792,7 +5958,7 @@ function MetaRef({ onClose }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
         <div>
           <span className="lbl" style={{ marginBottom: 2 }}>Order metadata reference</span>
-          <span style={{ fontSize: 11.5, color: "rgba(255,255,255,.4)" }}>
+          <span style={{ fontSize: 11.5, color: "var(--bp-faint)" }}>
             line item meta <code style={{ fontSize: 11 }}>_pps_metadata</code> — a JSON string, written by each calculator, parsed into every queue row
           </span>
         </div>
@@ -5800,11 +5966,11 @@ function MetaRef({ onClose }) {
       </div>
 
       <h4><span className="n">01</span> Fields imposition actually uses</h4>
-      <p style={{ color: "rgba(255,255,255,.5)" }}>Everything else in the blob is pricing, shipping and proofing history.</p>
+      <p style={{ color: "var(--bp-dim)" }}>Everything else in the blob is pricing, shipping and proofing history.</p>
       <div className="tw"><table>
         <thead><tr><th>Key</th><th>Used for</th><th>Notes</th></tr></thead>
         <tbody>{REF_FIELDS.map(([k, u, n]) => (
-          <tr key={k}><td><code>{k}</code></td><td>{u}</td><td style={{ color: "rgba(255,255,255,.55)" }}>{n}</td></tr>
+          <tr key={k}><td><code>{k}</code></td><td>{u}</td><td style={{ color: "var(--bp-dim)" }}>{n}</td></tr>
         ))}</tbody>
       </table></div>
 
@@ -5832,7 +5998,7 @@ function MetaRef({ onClose }) {
         <thead><tr><th>Calculator</th><th>calcType</th><th>Resolved how</th></tr></thead>
         <tbody>{REF_CALCS.map(([c, has, how]) => (
           <tr key={c}><td>{c}</td><td className={has ? "yes" : "no"}>{has ? "yes" : "no"}</td>
-            <td style={{ color: "rgba(255,255,255,.55)" }}>{how}</td></tr>
+            <td style={{ color: "var(--bp-dim)" }}>{how}</td></tr>
         ))}</tbody>
       </table></div>
       <div className="tip">
@@ -5844,7 +6010,7 @@ function MetaRef({ onClose }) {
       <pre>{`$qty = totalQty ?? qty ?? 0;
 if (!$qty && is_array(sets))  $qty = array_sum(column(sets, 'qty'));
 if (!$qty)                    $qty = $item->get_quantity();`}</pre>
-      <p style={{ color: "rgba(255,255,255,.55)" }}>Booklets carry quantity <b>per set</b>, so a three-set order
+      <p style={{ color: "var(--bp-dim)" }}>Booklets carry quantity <b>per set</b>, so a three-set order
         shows the sum. This only drives the run figure printed in the slug.</p>
 
       <h4><span className="n">05</span> Sample blob — saddle stitch booklet</h4>
@@ -5874,6 +6040,311 @@ if (!$qty)                    $qty = $item->get_quantity();`}</pre>
         <li><code>artDims</code> records the artwork's own measured page size at order time. It settles an
           orientation dispute against what was actually uploaded.</li>
       </ol>
+    </div>
+  );
+}
+
+// ── Imposition box (1.68) ──────────────────────────────────────────────────
+// Owner, 2026-11-27, after a 2-up flat came off the drop 1-up with no way to
+// say otherwise: "THERE SHOULD ALWAYS BE AN IMPOSITION PATTERN OPTION ON THE
+// BOX … look at the Fiery imposition program — all the options available
+// there should be in your design … I should be able to manually set the
+// pattern irregardless of any other option. If I want 15-up on a 2×2 sheet I
+// should be able to do that. Will it work in practice? No. But I can dictate
+// it." So this card is pinned to the top of the controls, never collapses,
+// and lays out Fiery Impose's panel in Fiery's words: layout style (Repeat /
+// Unique / Unique-Collate Cut), rows × columns typed outright, every
+// arrangement that fits as a clickable tile, rotation, piece pattern, duplex
+// (simplex / short-edge / long-edge flip), gutter, position, scale, bleed.
+// Nothing here is hidden by product — a control that cannot apply is greyed
+// with the reason. A typed grid is laid out exactly as typed, overflow and
+// all (footprintCheck flags it); the priced count is a FACT printed beside it,
+// never a gate.
+function fitArrangements(pieceLong, pieceShort, uW, uH, g) {
+  const out = [];
+  for (const rot of [false, true]) {
+    const w = rot ? pieceShort : pieceLong, h = rot ? pieceLong : pieceShort;
+    if (!(w > 0 && h > 0)) continue;
+    const aMax = Math.min(12, Math.floor((uW + g + EPS) / (w + g))), dMax = Math.min(12, Math.floor((uH + g + EPS) / (h + g)));
+    for (let a = 1; a <= aMax; a++) for (let d = 1; d <= dMax; d++) out.push({ a, d, rot, n: a * d, g });
+  }
+  return out;
+}
+function ArrTile({ t, lyW, lyH, pL, pS, on, onClick, title, dataTile }) {
+  const W = 52, H = 36, k = Math.min(W / Math.max(lyW, 1), H / Math.max(lyH, 1));
+  const sw = lyW * k, sh = lyH * k, ox = (W - sw) / 2, oy = (H - sh) / 2;
+  const cw = (t.rot ? pS : pL) * k, ch = (t.rot ? pL : pS) * k, g = (t.g || 0) * k;
+  const bw = t.a * cw + (t.a - 1) * g, bh = t.d * ch + (t.d - 1) * g;
+  const bx = ox + (sw - bw) / 2, by = oy + (sh - bh) / 2;
+  const cells = [];
+  for (let r = 0; r < t.d; r++) for (let c = 0; c < t.a; c++)
+    cells.push(<rect key={r + ":" + c} x={bx + c * (cw + g)} y={by + r * (ch + g)} width={Math.max(cw, 1)} height={Math.max(ch, 1)} />);
+  return (
+    <button type="button" className={"imp-tile" + (on ? " on" : "") + (t.tight ? " tight" : "") + (t.over ? " over" : "")} onClick={onClick} title={title} data-tile={dataTile}>
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="imp-tile-svg">
+        <rect x={ox} y={oy} width={sw} height={sh} className="sheet" />
+        <g className="cells">{cells}</g>
+      </svg>
+      <span className="imp-tile-n">{t.n}{t.unit ? ` ${t.unit}` : "-up"}</span>
+      <span className="imp-tile-l">{t.a} × {t.d}{t.rot ? " ⟳" : ""}{t.tight ? " · butt" : ""}{t.over ? " · over" : ""}</span>
+    </button>
+  );
+}
+function ImposeBox(P) {
+  const { isSaddle, isPB, isBook, lay, panelLay, part, G, setG, C, spec, pricedImp, pattern, setPattern, manualPattern, setManualPattern,
+          gutterMode, setGutterMode, offsetMode, setOffsetMode, offsetRight, setOffsetRight, offsetBottom, setOffsetBottom } = P;
+  const L = panelLay;
+  const uW = Math.max(0, C.lyW - 2 * C.m), uH = Math.max(0, C.lyH - 2 * C.m);
+  const tl = +P.trimLong || 0, ts = +P.trimShort || 0;
+  // The piece: the finished size for flats, the open spread for saddle, the half's piece for perfect bound.
+  const pL = L ? L.pieceLong : isSaddle ? Math.max(2 * tl, ts) : Math.max(tl, ts);
+  const pS = L ? L.pieceShort : isSaddle ? Math.min(2 * tl, ts) : Math.min(tl, ts);
+  const g = L ? (L.gutter || 0) : (gutterMode === "auto" ? 0.25 : +gutterMode || 0);
+  const unit = isSaddle ? "spreads/side" : null;
+  const fits = fitArrangements(pL, pS, uW, uH, g);
+  const tight = g > 0 ? fitArrangements(pL, pS, uW, uH, 0).filter(t => !fits.some(f => f.a === t.a && f.d === t.d && f.rot === t.rot)).map(t => ({ ...t, tight: true })) : [];
+  const cur = L ? { a: L.across, d: L.down, rot: !!L.rotated } : null;
+  const isCur = t => !!cur && t.a === cur.a && t.d === cur.d && t.rot === cur.rot;
+  let tiles = [...fits, ...tight].sort((x, y) => y.n - x.n || (x.rot === y.rot ? 0 : x.rot ? 1 : -1));
+  tiles = tiles.filter((t, i) => i < 10 || t.n === pricedImp || isCur(t));
+  if (cur && !tiles.some(isCur)) tiles.unshift({ ...cur, n: cur.a * cur.d, g, over: true });
+  tiles = tiles.map(t => ({ ...t, unit }));
+  const manual = !!(G && G.on);
+  const valA = manual ? G.across : (L ? L.across : ""), valD = manual ? G.down : (L ? L.down : "");
+  const seed = L && !manual ? { across: L.across, down: L.down } : {};
+  const setA = v => { setG({ on: true, ...seed, across: v, cols: null }); if (!isPB) P.setRepOn(false); };
+  const setD = v => { setG({ on: true, ...seed, down: v, rows: null }); if (!isPB) P.setRepOn(false); };
+  const applyRot = rot => {
+    if (isPB) setG({ rot: rot ? "yes" : "no" });
+    else if (isSaddle) P.setForceRotated(rot ? "yes" : "no");
+    else { const hd = P.artRotate === "180" || P.artRotate === "270"; P.setArtRotate(rot ? (hd ? "270" : "90") : (hd ? "180" : "0")); }
+  };
+  const pick = t => { setG({ on: true, across: t.a, down: t.d, cols: null, rows: null }); if (!isPB) P.setRepOn(false); applyRot(t.rot); };
+  const auto = () => {
+    setG({ on: false, cols: null, rows: null, fill: null, sheet: "auto", ...(isPB ? { rot: "default" } : {}) });
+    if (!isPB) P.setRepOn(false);
+    if (isSaddle) P.setForceRotated("auto"); else if (!isPB) P.setArtRotate("auto");
+  };
+  const n = (Math.floor(+valA) || 0) * (Math.floor(+valD) || 0);
+  const autoOn = !manual && (isBook ? (isPB ? !(G && G.rot && G.rot !== "default") && P.forceRotated === "auto" : P.forceRotated === "auto") : P.artRotate === "auto");
+  const dup = isBook || +spec.sides === 2 ? (P.sheetFlip === "long" ? "lef" : "sef") : "simplex";
+  const setDup = v => { if (v === "simplex") { if (!isBook) P.setSides(1); } else { if (!isBook) P.setSides(2); P.setSheetFlip(v === "lef" ? "long" : "short"); } };
+  const MM = [
+    { v: "repeat", l: "Repeat", d: `step and repeat — one design${+spec.sides === 2 ? " (page 1 front, page 2 back)" : " (page 1)"} in every cell; other pages are ignored.` },
+    { v: "gang", l: "Unique", d: "gang in order — different pieces per sheet; pages fill the cells sheet by sheet in reading order." },
+    { v: "stack", l: "Unique-Collate Cut", d: "cut & stack — pages dealt pile by pile so the cut piles, stacked, come out collated." },
+    { v: "each", l: "Each page its own sheet", d: "every page gets a full step-and-repeat sheet — for per-design run quantities." },
+  ];
+  const PT = [
+  { v: "straight", l: "Straight", d: "every piece the same way up." },
+  { v: "h2h", l: "Head-to-head", d: "row pairs meet head to head at their shared cut." },
+  { v: "f2f", l: "Foot-to-foot", d: "row pairs meet foot to foot — the phase-shifted complement." },
+  { v: "reversal", l: "Reversal", d: "alternate columns turned 180°." },
+  { v: "revalt", l: "Checkerboard", d: "reversal alternating by row as well — every neighbour turned." },
+  { v: "manual", l: "Manual…", d: "tap cells below to turn them 180° one by one." },
+                  ];
+  const RT = [
+    { v: "auto", l: "Auto", title: "whichever way fits more" },
+    { v: "0", l: "0°", title: `long edge along the sheet — ${C.pL} wide × ${C.pS} tall` },
+    { v: "90", l: "90°", title: `across the sheet — ${C.pS} wide × ${C.pL} tall` },
+    { v: "180", l: "180°", title: "along, head-down" },
+    { v: "270", l: "270°", title: "across, head-down" },
+  ];
+  const pricedWord = pricedImp ? `${pricedImp}${isSaddle ? " pages/side" : "-up"}` : null;
+  return (
+    <section className="imp-box" data-sec="impose">
+      <div className="imp-box-h">
+        <span className="ttl">Imposition</span>
+        <span className="imp-box-sum" data-box-sum>
+          {L ? `${pL}×${pS}″ ${isSaddle ? "spread" : isPB ? part : "piece"} on ${L.sheet.label}: ${L.across} × ${L.down}${L.rotated ? " turned 90°" : ""} = ${isSaddle && L.booklet ? `${L.booklet.spreadsPerSide} spreads/side` : `${L.imp}-up`}${pricedWord ? ` · priced ${pricedWord}` : ""}`
+             : (P.layoutError || "enter a finished size in Job")}
+        </span>
+        {P.parityBadge}
+      </div>
+
+      <Field label="Layout style">
+        {isBook
+          ? <Seg value={isPB ? "perfect" : "saddle"} onChange={() => {}} dataAttr="data-multi-mode"
+                 options={[{ v: "saddle", l: "Saddle stitch", disabled: !isSaddle }, { v: "perfect", l: "Perfect bound", disabled: !isPB }]} />
+          : <Seg value={P.multiMode} onChange={P.setMultiMode} dataAttr="data-multi-mode" options={MM} />}
+        <div className="imp-hint">{isBook ? (isPB ? "Cover and book block are two press jobs; the Perfect bound section below sets the spine and how the leaves go down." : "Pages paginate into printer-spread signatures; the Saddle stitch section below sets how signatures go onto the sheet.")
+                                        : (MM.find(o => o.v === P.multiMode) || MM[0]).d + (P.art && P.art.pageCount > 1 ? ` This file has ${P.art.pageCount} pages.` : "")}</div>
+      </Field>
+
+      <div className="imp-row" style={{ alignItems: "flex-end" }}>
+        <Field label={isSaddle ? "Spreads across" : "Columns"} style={{ flex: "0 0 84px" }}>
+          <input type="number" min="1" step="1" value={valA} data-grid-across onChange={e => setA(e.target.value)} />
+        </Field>
+        <span className="imp-x">×</span>
+        <Field label={isSaddle ? "Spreads down" : "Rows"} style={{ flex: "0 0 84px" }}>
+          <input type="number" min="1" step="1" value={valD} data-grid-down onChange={e => setD(e.target.value)} />
+        </Field>
+        <div className="imp-upline" data-grid-mode={manual ? "manual" : "auto"}>
+          <span>= <b>{n || "—"}</b>{isSaddle ? " spreads/side" : "-up"}{pricedWord ? <span className={n === pricedImp ? "ok" : "warn"}> · priced {pricedWord}</span> : null}</span>
+          {manual
+            ? <button type="button" className="imp-btn sec" data-grid-auto onClick={auto}>Back to auto</button>
+            : <span className="imp-hint" style={{ margin: 0 }}>auto — type a number or pick a tile to dictate the grid</span>}
+        </div>
+      </div>
+      <div className="imp-hint" style={{ marginTop: -6, marginBottom: 10 }}>
+        A dictated grid is laid out exactly as typed. A block larger than the sheet is centred and flagged OVERFLOW on the badge, slug and filename — never refused.{pricedWord ? ` Priced ${pricedWord} is a pricing fact, not a limit.` : ""}
+      </div>
+
+      <Field label={`Arrangements that fit the ${uW.toFixed(2)} × ${uH.toFixed(2)}″ printable area${g ? ` at a ${g}″ gutter` : ""}`}>
+        <div className="imp-tiles" data-tiles>
+          <button type="button" className={"imp-tile auto" + (autoOn ? " on" : "")} data-tile="auto" onClick={auto} title="Automatic — the priced count, laid out as the pricing assumed">
+            <span className="imp-tile-n">Auto</span><span className="imp-tile-l">{pricedWord ? `priced ${pricedWord}` : isPB ? "best fit" : "best fit"}</span>
+          </button>
+          {tiles.map(t => (
+            <ArrTile key={`${t.a}x${t.d}${t.rot ? "r" : ""}`} t={t} lyW={C.lyW} lyH={C.lyH} pL={pL} pS={pS} on={manual && isCur(t)} onClick={() => pick(t)}
+                     dataTile={`${t.a}x${t.d}${t.rot ? "r" : ""}`}
+                     title={`${t.a} across × ${t.d} down${t.rot ? ", turned 90°" : ""} = ${t.n}${t.tight ? " — fits only butt-cut (0″ gutter)" : ""}${t.over ? " — the current grid; it does not fit this sheet" : ""}`} />
+          ))}
+          {!tiles.length && <span className="imp-hint" style={{ margin: 0 }}>Nothing this size fits the sheet — type a grid anyway and it is laid out centred, flagged OVERFLOW.</span>}
+        </div>
+      </Field>
+
+      <div className="imp-row">
+        <Field label={isSaddle ? "Spread orientation" : isPB ? `Orientation (${part || "half"})` : "Rotation"} style={{ flex: "1 1 100%", minWidth: 0 }}>
+          {isSaddle
+            ? <Seg value={P.forceRotated} onChange={P.setForceRotated} dataAttr="data-spread-orient"
+                   options={[{ v: "auto", l: "Auto" }, { v: "no", l: "Along" }, { v: "yes", l: "Across 90°" }]} />
+            : isPB
+            ? <Seg value={(G && G.rot) || "default"} onChange={v => setG({ rot: v, cols: null, rows: null })} dataAttr="data-grid-orient"
+                   options={[{ v: "default", l: "Job default" }, { v: "auto", l: "Auto" }, { v: "no", l: "Along" }, { v: "yes", l: "Across 90°" }]} />
+            : <Seg value={P.artRotate} onChange={P.setArtRotate} dataAttr="data-art-rotate" options={RT} />}
+          {L && <div className="imp-hint">Piece as placed: <b style={{ color: "var(--bp-ink)" }}>{L.cellW} wide × {L.cellH} tall</b>{L.rotated ? " (turned 90°)" : ""}{!isBook && (P.artRotate === "180" || P.artRotate === "270") ? ", head-down" : ""}.</div>}
+        </Field>
+        <Field label="Piece pattern" style={{ flex: "1 1 100%", minWidth: 0 }}>
+          <Seg value={isSaddle ? "straight" : pattern} onChange={setPattern} dataAttr="data-pattern" options={PT.map(o => isSaddle ? { ...o, disabled: true } : o)} />
+          <div className="imp-hint">{isSaddle ? "Signatures paginate; there is no per-piece turn on a saddle sheet." : (PT.find(o => o.v === pattern) || PT[0]).d + " Backs inherit each cell's turn, so the pattern registers through the duplex flip."}</div>
+        </Field>
+      </div>
+            {!isSaddle && pattern === "manual" && lay && (
+        <div style={{ marginBottom: 12 }}>
+          <span className="lbl">Manual pattern — tap a cell to flip it 180° (top row shown first)</span>
+          {Array.from({ length: lay.down }).map((_, rr) => {
+            const row = lay.down - 1 - rr; // grid rows are bottom-up
+            return (
+              <div key={rr} style={{ display: "flex", gap: 4, marginBottom: 4 }}>
+                {Array.from({ length: lay.across }).map((_, col) => {
+                  const idx = row * lay.across + col;
+                  const flipped = +manualPattern[idx] === 180;
+                  return (
+                    <button key={col} type="button" className="imp-btn sec"
+                      style={{ width: 34, height: 30, padding: 0, fontSize: 14, background: flipped ? "rgba(233,30,140,.25)" : undefined }}
+                      onClick={() => setManualPattern(p => { const n = [...p]; n[idx] = flipped ? 0 : 180; return n; })}>
+                      {flipped ? "\u2193" : "\u2191"}
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="imp-row">
+        <Field label="Duplex" style={{ flex: "1 1 100%", minWidth: 0 }}>
+          <div data-sides={isBook ? 2 : +spec.sides} data-sheet-flip={P.sheetFlip}>
+            <Seg value={dup} onChange={setDup} dataAttr="data-duplex"
+                 options={[{ v: "simplex", l: "Simplex", disabled: isBook, title: isBook ? "a book is always two-sided" : "one side" }, { v: "sef", l: "Duplex · SEF", title: "two-sided, short-edge flip — Fiery SEF, the default on 13″ sheets" }, { v: "lef", l: "Duplex · LEF", title: "two-sided, long-edge flip" }]} />
+          </div>
+          <div className="imp-hint">{dup === "simplex" ? "One side; nothing is mirrored." : `Two-sided, ${dup === "lef" ? "long" : "short"}-edge flip (${dup.toUpperCase()}): the back of every sheet is mirrored through that edge so the pieces register front to back; the slug names the edge so the Fiery job can match it.`}</div>
+        </Field>
+        {!isSaddle && dup !== "simplex" && (
+          <Field label="Back rotation" style={{ flex: "1 1 100%", minWidth: 0 }}>
+            <Seg value={P.backRotate} onChange={P.setBackRotate} dataAttr="data-back-rotate"
+                 options={[{ v: "auto", l: "Auto", title: "register with the front" }, { v: "0", l: "None" }, { v: "180", l: "180° (tumble)" }]} />
+          </Field>
+        )}
+      </div>
+              <div className="imp-row">
+        {C.fillOn ? (
+          <Field label="Position" style={{ flex: 1 }}>
+            <div style={{ fontSize: 12.5, padding: "7px 0", color: "var(--bp-dim)" }}>
+              Centred inside the margin <span style={{ color: "var(--bp-faint)" }}>— fill mode centres the block, so no jog applies{isPB ? " to this half" : ""}.</span>
+            </div>
+          </Field>
+        ) : (
+          <Field label="Position" style={{ flex: "0 0 auto" }}>
+            <Seg value={offsetMode} onChange={setOffsetMode} dataAttr="data-offset-mode"
+                 options={[{ v: "jog", l: "Jog to corner", title: "lower-right 0.5″ (back: lower-left) — one registration corner for the cutter" }, { v: "center", l: "Centred" }, { v: "custom", l: "Custom…" }]} />
+          </Field>
+        )}
+        {C.customGaps ? (
+          <Field label="Gutter" style={{ flex: "0 0 auto" }}>
+            <div style={{ fontSize: 12.5, padding: "6px 0", display: "flex", gap: 8, alignItems: "center" }}>
+              <span>custom per gap</span>
+              <button type="button" className="imp-btn sec" style={{ padding: "2px 8px", fontSize: 11 }} onClick={C.clearGaps}>uniform</button>
+            </div>
+          </Field>
+        ) : (
+          <Field label="Gutter" style={{ flex: "0 0 auto" }}>
+            <Seg value={gutterMode} onChange={v => { setGutterMode(v); C.clearGaps(); }} dataAttr="data-gutter"
+                 options={[{ v: "auto", l: isSaddle ? "Butt" : "Auto" }, { v: "0", l: "0" }, { v: "0.125", l: "⅛″" }, { v: "0.25", l: "¼″" }, { v: "0.375", l: "⅜″" }, { v: "0.5", l: "½″" }]} />
+          </Field>
+        )}
+      </div>
+      {offsetMode === "custom" && !C.fillOn && (
+        <div className="imp-row">
+          <Field label="From right edge (in)" style={{ flex: 1 }}>
+            <input type="number" step="0.125" min="0" value={offsetRight} onChange={e => setOffsetRight(e.target.value)} />
+          </Field>
+          <Field label="From bottom edge (in)" style={{ flex: 1 }}>
+            <input type="number" step="0.125" min="0" value={offsetBottom} onChange={e => setOffsetBottom(e.target.value)} />
+          </Field>
+        </div>
+      )}
+
+      <div className="imp-row">
+        <Field label="Scale (%)" style={{ flex: "0 0 96px" }}>
+          <input type="number" min="25" max="400" step="1" value={P.artScale} data-art-scale onChange={e => P.setArtScale(e.target.value)} />
+        </Field>
+        <Field label="Bleed (in)" style={{ flex: "0 0 96px" }}>
+          <input type="number" min="0" max="0.5" step="0.0625" value={P.bleedIn} data-bleed onChange={e => P.setBleedIn(e.target.value)} />
+        </Field>
+        <div className="imp-hint" style={{ flex: 1, paddingBottom: 14 }}>Scale is applied to the placed art, never to the finished size. Bleed is per side; the Bleed section below synthesizes it for files that lack it.</div>
+      </div>
+      <div className="imp-hint" style={{ margin: "-4px 0 8px" }}>Per-gap gutters, full-sheet fill and the press sheet per perfect-bound half are in <button type="button" className="imp-link" onClick={P.openLayout}>Layout details</button>.</div>
+    </section>
+  );
+}
+
+// ── Findings (1.68): the proofer's condensed check list — a state dot and a
+// name per finding, the explanation folded until clicked. Not passed first,
+// then notes, then passed. Facts only; the controls that change them are in
+// the rail.
+function Findings({ items }) {
+  const groups = [["fail", "Not passed", "notpassed"], ["warn", "Notes", "notes"], ["pass", "Passed", "passed"]];
+  const [open, setOpen] = useState({ fail: true, warn: true, pass: false });
+  const [rows, setRows] = useState({});
+  if (!items.length) return <div className="imp-empty">Nothing to report yet — drop artwork or load an order.</div>;
+  return (
+    <div className="checklist" data-findings>
+      {groups.map(([st, name, cls]) => {
+        const list = items.filter(i => i.state === st);
+        if (!list.length) return null;
+        const isOpen = !!open[st];
+        return (
+          <div key={st} className={`chk-group ${cls}${isOpen ? " open" : ""}`} data-findings-group={st}>
+            <button type="button" className="chk-grouphead" onClick={() => setOpen(o => ({ ...o, [st]: !o[st] }))} aria-expanded={isOpen}>
+              {name} · {list.length}<span className="caret">▼</span>
+            </button>
+            {list.map((it, i) => {
+              const k = st + ":" + i, ro = !!rows[k], hasText = !!it.text;
+              return (
+                <div key={k} className={`chk-row ${st}${ro ? " open" : ""}`}>
+                  <button type="button" className={"chk-sum" + (hasText ? "" : " static")} onClick={() => hasText && setRows(r => ({ ...r, [k]: !r[k] }))}>
+                    <span className="chk-state" /><span className="chk-label">{it.label}</span>{hasText && <span className="caret">▼</span>}
+                  </button>
+                  {ro && hasText && <div className="chk-text">{it.text}</div>}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -5977,12 +6448,16 @@ function App() {
   // through it wiped the queue the operator was working from.
   const [actionErr, setActionErr] = useState("");
   const [refOpen, setRefOpen] = useState(false);           // metadata reference panel
+  // The skin (1.68): the calculator's light palette by default (wp-admin is
+  // light), the calculator's dark palette on request, remembered per browser.
+  const [theme, setTheme] = useState(() => { try { return localStorage.getItem("pps_impose_theme") === "dark" ? "dark" : "light"; } catch (e) { return "light"; } });
+  useEffect(() => { document.documentElement.setAttribute("data-pps-theme", theme); try { localStorage.setItem("pps_impose_theme", theme); } catch (e) {} }, [theme]);
   // 1.33 layout: which accordion sections are open, the sheet viewport, and
   // the two specialty features.
   // 1.60: the column reads top-down in the order a job is set up — what it is,
   // how the art meets the size, which sheet, how it lies, duplex, the book,
   // bleed, press prep, marks.
-  const SECS = ["job", "artwork", "sheet", "layout", "duplex", "book", "bleed", "press", "marks"];
+  const SECS = ["job", "artwork", "sheet", "layout", "book", "bleed", "press", "marks"];
   const [secOpen, setSecOpen] = useState({ job: true, artwork: true, sheet: true, layout: true, duplex: false, book: true, bleed: false, press: false, marks: false });
   const toggleSec = k => setSecOpen(o => ({ ...o, [k]: !o[k] }));
   const [queueOpen, setQueueOpen] = useState(true);
@@ -6734,18 +7209,135 @@ function App() {
                      fill: "scaled up or down until the art covers the finished size; the excess on the long axis is cropped evenly.",
                      fit: "scaled to sit inside the finished size — paper white on one axis. What every build before 1.56 did." };
 
+  // Grid accessor (1.68): the one G / setG pair over the two storage shapes
+  // (flats/saddle in App state, perfect bound per half), shared by the
+  // Imposition box and the Layout-details panel so they can never disagree.
+  const GA = (() => {
+  const pbParts = isPB && layoutInfo.pbLayouts
+    ? ["cover", "guts"].filter(p => layoutInfo.pbLayouts[p]) : [];
+  const part = isPB ? (pbParts.includes(pbGridPart) ? pbGridPart : pbParts[0]) : null;
+  const half = part ? layoutInfo.pbLayouts[part] : null;
+  // The layout this panel describes: the PB half, or the single job.
+  const panelLay = isPB ? (half && half.layout) : lay;
+  const show = isPB ? !!part
+    : (lay ? (isSaddle ? !!lay.booklet : true)
+           : (isSaddle || FLAT_CALCS.includes(calc) || calc === "sticker"));
+  // One accessor pair over two storage shapes, so the panel below is
+  // written once. Everything else in it reads G / setG / panelLay.
+  const G = isPB ? pbGrids[part]
+    : { on: gridOn, across: gridAcross, down: gridDown, sheet: gridSheet,
+        cols: gapCols, rows: gapRows, fill: gapFill };
+  const setG = isPB
+    ? (patch => setPbGrids(p => ({ ...p, [part]: { ...p[part], ...patch } })))
+    : (patch => {
+        if ("on" in patch) setGridOn(patch.on);
+        if ("across" in patch) setGridAcross(patch.across);
+        if ("down" in patch) setGridDown(patch.down);
+        if ("sheet" in patch) setGridSheet(patch.sheet);
+        if ("cols" in patch) setGapCols(patch.cols);
+        if ("rows" in patch) setGapRows(patch.rows);
+        if ("fill" in patch) setGapFill(patch.fill);
+      });
+    return { pbParts, part, half, panelLay, show, G, setG };
+  })();
+
+  // Step numbers and the one-line summary each rail section shows while it is
+  // closed (1.68), so the whole setup reads without opening anything.
+  const stepKeys = ["job", "artwork", "sheet", "layout", ...((isSaddle || isPB) ? ["book"] : []), "bleed", "press", "marks"];
+  const stepOf = Object.fromEntries(stepKeys.map((k, i) => [k, i + 1]));
+  const calcLabel = (CALC_TYPES.find(c => c.val === calc) || { label: calc }).label.replace(/\s*\(.*$/, "");
+  const SUM = {
+    job: `${calcLabel} · ${trimLong}×${trimShort}″ · qty ${qty}${jobName ? ` · ${jobName}` : ""}${orderRef ? ` · #${orderRef}` : ""}`,
+    artwork: art ? `${art.name} · ${art.pageCount} p${backArt ? ` + back ${backArt.name}` : ""}${gangFiles.length >= 2 ? ` · gang ×${gangFiles.length}` : ""} · ${artFit}${healSummary ? " · retouched" : ""}` : "no file yet — drop one in the job strip",
+    sheet: `${sheetSel === "auto" ? "auto (13×19, then 13×27.5)" : sheetSel === "custom" ? `${sheetLong}×${sheetShort}″ custom` : sheetSel}${sheetPortrait ? " · portrait" : ""} · margin ${sheetMargin === "" ? SHEET_MARGIN : sheetMargin}″`,
+    layout: `${(gapCols || gapRows) ? "per-gap gutters" : "uniform gutters"}${gapFill ? " · fill full sheet" : ""}${efficient ? " · efficient 13×27.5" : ""}${isPB ? ` · per half (${pbGridPart})` : ""}`,
+    book: isPB ? `${pbPart === "both" ? "cover + guts" : pbPart} · spine ${spine}″ · leaves ${pbGutsOrder}` : `signatures ${sigOrder === "repeat" ? "step and repeat" : sigOrder === "gang" ? "ganged" : "cut & stack"}${repOn ? ` ×${repN}` : ""}${+creep ? ` · creep ${creep}″` : ""}`,
+    bleed: `${bleedIn}″ · add bleed ${addBleed}${addBleed !== "off" && addBleedSmart ? " (smart)" : ""}${+artInset ? ` · pulled ${artInset}″` : ""}${+artScale !== 100 ? ` · scale ${artScale}%` : ""}`,
+    press: [stripOverprint && "overprint", fixHairlines && "hairlines", flattenAnnots && "annotations"].filter(Boolean).join(", ") + (greyPagesTxt.trim() ? ` · grey ${greyPagesTxt}` : "") + (rasterPagesTxt.trim() ? ` · raster ${rasterPagesTxt}` : "") + (pageSeqTxt.trim() ? " · page sequence" : "") + (sheetSeqTxt.trim() ? " · sheet sequence" : "") + (blankMode !== "off" ? " · blank pages" : "") + (slipOn ? " · slipsheets" : "") + (splitSpreads ? " · split spreads" : ""),
+    marks: [marks && "crop", foldMarks && isSaddle && "fold", slugOn && "slug"].filter(Boolean).join(" · ") || "no marks",
+  };
+
+  // The truth bar (1.68): one pill per fact about the job as it stands — what
+  // the file is, whether it is the approved bytes, whether this run changes
+  // its colour, whether placed = priced, and every flag the filename carries.
+  const appr = art && art.approval ? art.approval.state : null;
+  const truthPills = [];
+  const pill = (key, cls, label, k, extra) => truthPills.push(<span key={key} className={"imp-pill " + cls} {...(extra || {})}><span className="dot" />{k ? <span className="k">{k}</span> : null}<span>{label}</span></span>);
+  if (!art) pill("file", "unknown", "no artwork yet", "File");
+  else pill("file", "ok", `${art.name} · ${art.pageCount} page${art.pageCount === 1 ? "" : "s"}${backArt ? " + back" : ""}`, "File");
+  if (art) {
+    if (appr === "verified") pill("appr", "ok", "approved bytes verified", "Approval");
+    else if (appr === "raw") pill("appr", "warn", "raw upload — the proof's transforms are not in it", "Approval", { "data-truth-approval": "raw" });
+    else if (appr === "mismatch") pill("appr", "err", "NOT the approved file", "Approval");
+    else if (appr === "unverifiable") pill("appr", "unknown", "hash cannot be checked (no HTTPS)", "Approval");
+    else pill("appr", "unknown", activeOrder ? "order predates approval hashes" : "no order to check against", "Approval");
+    const src = viewRes && viewRes.rgbCensus ? viewRes.rgbCensus.source : null;
+    if (art.flatProof) pill("col", "err", "flattened proof — RGB pixels", "Colour");
+    else if (viewRes && viewRes.rgbLeak) pill("col", "err", `RGB added by this run (${viewRes.rgbLeak.images} image${viewRes.rgbLeak.images === 1 ? "" : "s"}, ${viewRes.rgbLeak.ops} operator${viewRes.rgbLeak.ops === 1 ? "" : "s"})`, "Colour");
+    else if (src) pill("col", src.images + src.ops ? "warn" : "ok", src.images + src.ops ? `source carries RGB (${src.images} image${src.images === 1 ? "" : "s"}, ${src.ops} operator${src.ops === 1 ? "" : "s"})` : "no RGB in or out", "Colour");
+    else pill("col", "unknown", "checked when imposed", "Colour");
+  }
+  if (lay) {
+    const placed = lay.booklet ? `${lay.booklet.spreadsPerSide} spread${lay.booklet.spreadsPerSide === 1 ? "" : "s"}/side` : `${lay.imp}-up`;
+    const priced = lay.pricedImp ? ` · priced ${lay.pricedImp}${lay.booklet ? " pages/side" : "-up"}` : "";
+    pill("par", lay.manualGrid ? "warn" : lay.efficient || lay.fillSheet ? "warn" : parityOk ? "ok" : "err",
+         `${placed} on ${lay.sheet.label}${priced}`, lay.manualGrid ? "Dictated grid" : lay.efficient ? "Efficient" : lay.fillSheet ? "Fill" : parityOk ? "Placed = priced" : "Mismatch");
+  } else if (layoutInfo.error) pill("par", "err", layoutInfo.error, "Layout");
+  else if (layoutInfo.pb) pill("par", "unknown", "two press jobs — cover and guts, unpriced", "Perfect bound");
+  if (viewLay && viewLay.overflow) pill("over", "err", "block overflows the sheet", "Overflow");
+  if (viewRes && viewRes.preview) pill("prev", "warn", `first ${viewRes.preview.shown} of ${viewRes.preview.total} sheets`, "Preview");
+  if (viewRes && viewRes.fontsMissing && viewRes.fontsMissing.length) pill("fonts", "err", "font override in force", "Fonts");
+  if (viewRes && viewRes.retouched) pill("rt", "warn", "retouched pages rasterised", "Retouch");
+  if (art && art.threats && art.threats.length) pill("thr", "err", `active content ×${art.threats.length}`, "Security");
+
+  // Findings for the inspector: the same facts as a condensed check list.
+  const findings = [];
+  const F = (state, label, text) => findings.push({ state, label, text: text || "" });
+  const clip = w => (w.length > 96 ? w.slice(0, 93).replace(/\s+\S*$/, "") + "…" : w);
+  if (error) F("fail", "Run refused", error + (errStage ? ` — stopped while: ${errStage}` : ""));
+  if (layoutInfo.error && !lay) F("fail", "No layout", layoutInfo.error);
+  if (art && appr === "mismatch") F("fail", "Not the approved file", `This file hashes ${art.approval.got.slice(0, 12)}… but the customer approved ${art.approval.want.slice(0, 12)}…. It can still be imposed; the output carries _UNAPPROVED.`);
+  if (art && art.flatProof) F("fail", "Flattened proof", `A rasterised copy, not the customer's artwork: ${art.flatProof.byProducer ? "producer " + art.flatProof.producer : art.flatProof.flat + " of " + art.flatProof.total + " pages are a single image"}. Live type, CMYK builds and spot colours are gone. Use the raw upload from the job strip.`);
+  if (viewRes && viewRes.rgbLeak) F("fail", "RGB added by this run", `The output carries RGB the source did not: ${viewRes.rgbLeak.images} image(s), ${viewRes.rgbLeak.ops} operator(s). Retouch, Rasterise and greyscale render RGB until the CMYK render exists.`);
+  if (viewRes && viewRes.fontsMissing && viewRes.fontsMissing.length) F("fail", "Fonts not embedded — override in force", viewRes.fontsMissing.join(", ") + ". Fiery substitutes a face and text can re-wrap; the file is flagged _FONTS.");
+  if (viewLay && viewLay.overflow) F("fail", "Block overflows the sheet", `${viewLay.overflow.w.toFixed(2)} × ${viewLay.overflow.h.toFixed(2)}″ against ${viewLay.overflow.boundW} × ${viewLay.overflow.boundH}″ printable — laid out centred, the outer pieces print cut short. Flagged OVERFLOW.`);
+  if (art && art.threats && art.threats.length) F("fail", "Active content in the file", art.threats.join(" · ") + " — stripped from the output; open only the CLEAN copy.");
+  if (backArt && backArt.threats && backArt.threats.length) F("fail", "Active content in the back file", backArt.threats.join(" · "));
+  if (lay && !parityOk && !lay.manualGrid && !lay.efficient && !lay.fillSheet) F("fail", "Placed ≠ priced", `${lay.imp} placed against ${lay.pricedImp} priced — sheet count and cost per piece differ; the slug and filename say MISMATCH.`);
+  if (art && appr === "raw") F("warn", "Raw upload, not the approved print file", "Any crop, fit, rotation or scale the customer applied in the proof is not in it; check the manifest. The output carries _RAW.");
+  if (art && appr === "unverifiable") F("warn", "Approval hash cannot be checked", "No crypto.subtle — is wp-admin on HTTPS?");
+  if (lay && lay.manualGrid) F("warn", "Dictated grid", `${lay.across} × ${lay.down} set by hand${lay.pricedImp ? ` — pricing assumed ${lay.pricedImp}` : ""}; excluded from the parity check.`);
+  if (lay && lay.efficient) F("warn", "Efficient mode", "Re-laid on 13×27.5 — more per sheet than priced; sheet count differs.");
+  if (lay && lay.fillSheet) F("warn", "Full-sheet fill", "Block centred inside the imageable margin instead of jogged to the corner.");
+  if (viewRes && viewRes.retouched) F("warn", "Retouched pages rasterised", viewRes.retouched + " — not the file the customer approved; the filename carries _RETOUCHED.");
+  if (viewRes && viewRes.preview) F("warn", "Preview only", `The first ${viewRes.preview.shown} of ${viewRes.preview.total} sheets are shown. Impose all before filing — a preview is never filed.`);
+  const warnList = viewRes && viewRes.warnings ? viewRes.warnings
+    : lay ? lay.warnings
+    : layoutInfo.pbLayouts ? ["cover", "guts"].flatMap(p => (layoutInfo.pbLayouts[p] && layoutInfo.pbLayouts[p].layout) ? layoutInfo.pbLayouts[p].layout.warnings.map(w => `${p}: ${w}`) : (layoutInfo.pbLayouts[p] && layoutInfo.pbLayouts[p].error ? [`${p}: ${layoutInfo.pbLayouts[p].error}`] : [])) : [];
+  warnList.forEach(w => { const t = String(w).replace(/^[⚠✕→]\s*/, ""); F("warn", clip(t), t.length > 96 ? t : ""); });
+  if (art && appr === "verified") F("pass", "Approved bytes verified", "SHA-256 of this file matches the customer's approval.");
+  if (lay && parityOk) F("pass", "Placed = priced", `${lay.booklet ? `${lay.booklet.spreadsPerSide} spreads/side` : `${lay.imp}-up`} on ${lay.sheet.label}, as the calculator priced it.`);
+  if (art && !(art.threats && art.threats.length)) F("pass", "No active content", "No JavaScript, launch actions, attachments or form fields in the file.");
+  if (viewRes && !(viewRes.fontsMissing && viewRes.fontsMissing.length)) F("pass", "Fonts embedded", "Every font the output uses is embedded, or is one of the standard 14.");
+  if (viewRes && viewRes.rgbCensus && !viewRes.rgbLeak && viewRes.rgbCensus.source.images + viewRes.rgbCensus.source.ops === 0) F("pass", "No RGB in or out", "Neither the source nor the output carries an RGB image or colour operator.");
+  const outFlags = viewRes ? (viewRes.filename.match(/_(FLATPROOF|RGB|RAW|OVERFLOW|RETOUCHED|FONTS|UNAPPROVED)(?=[_.])/g) || []).map(x => x.slice(1)) : [];
+  const apprWords = { verified: "verified — the approved bytes", raw: "raw upload (not the approved print file)", mismatch: "NOT the approved file", unverifiable: "cannot be checked (no HTTPS)", unbound: "order predates approval hashes" };
+  const GAC = sheetCtx();
+
   return (
     <div className="imp-app">
-      <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
-        <h1 style={{ fontSize: 18, margin: 0 }}>🖨️ PPS Imposition Tool</h1>
-        <span style={{ fontSize: 12, color: "rgba(255,255,255,.4)" }}>
-          vector-preserving sheetwise step-and-repeat · {CFG ? "connected to WooCommerce + Google Drive" : "standalone mode (drag & drop)"}
-        </span>
-        <button className="imp-btn sec" style={{ padding: "4px 11px", fontSize: 12, marginLeft: "auto" }}
-                onClick={() => setRefOpen(v => !v)} aria-expanded={refOpen}>
-          {refOpen ? "− " : "+ "}Order metadata reference
-        </button>
-      </div>
+      <header className="imp-head">
+        <div className="imp-head-row">
+          <h1>PPS Imposition Tool</h1>
+          <span className="sub">vector-preserving sheetwise step-and-repeat · {CFG ? "connected to WooCommerce + Google Drive" : "standalone mode (drag & drop)"}</span>
+          <div className="imp-head-actions">
+            <button className="imp-btn sec" onClick={() => setRefOpen(v => !v)} aria-expanded={refOpen}>{refOpen ? "− " : "+ "}Order metadata reference</button>
+            <button type="button" className="imp-theme" data-theme-toggle title={theme === "dark" ? "Switch to the light skin" : "Switch to the dark skin"}
+                    onClick={() => setTheme(t => (t === "dark" ? "light" : "dark"))}>{theme === "dark" ? "☀" : "☾"}</button>
+          </div>
+        </div>
+        <div className="imp-truth" data-truth>{truthPills}</div>
+      </header>
       {refOpen && <MetaRef onClose={() => setRefOpen(false)} />}
       {retouchOpen && (retouchOpen === "B" ? backArt : art) && (
         <Retouch slot={retouchOpen} art={retouchOpen === "B" ? backArt : art} strokesBySlot={heal[retouchOpen] || {}}
@@ -6757,8 +7349,8 @@ function App() {
         {/* ══ LEFT — imposition controls (accordion) ══ */}
         <aside className="imp-side">
           <div className="imp-side-h">
-            <span>Imposition controls</span>
-            <span style={{ fontSize: 11, color: "rgba(255,255,255,.4)", fontWeight: 400 }}>
+            <h2>Imposition controls</h2>
+            <span style={{ display: "flex", gap: 4 }}>
               <button type="button" className="imp-btn sec" style={{ padding: "2px 8px", fontSize: 11 }}
                       onClick={() => setSecOpen(Object.fromEntries(SECS.map(k => [k, true])))}>all</button>{" "}
               <button type="button" className="imp-btn sec" style={{ padding: "2px 8px", fontSize: 11 }}
@@ -6782,7 +7374,20 @@ function App() {
             </div>
           )}
 
-          <Acc id="job" title="Job" open={secOpen.job} onToggle={() => toggleSec("job")}>
+          <ImposeBox isSaddle={isSaddle} isPB={isPB} isBook={isBook} calc={calc} lay={lay} panelLay={GA.panelLay} part={GA.part} G={GA.G} setG={GA.setG} C={GAC}
+                     art={art} spec={spec} parityBadge={parityBadge} layoutError={layoutInfo.error}
+                     pricedImp={GA.panelLay && GA.panelLay.pricedImp ? Math.round(GA.panelLay.pricedImp) : 0}
+                     trimLong={trimLong} trimShort={trimShort}
+                     multiMode={multiMode} setMultiMode={setMultiMode} artRotate={artRotate} setArtRotate={setArtRotate}
+                     forceRotated={forceRotated} setForceRotated={setForceRotated} repOn={repOn} setRepOn={setRepOn}
+                     pattern={pattern} setPattern={setPattern} manualPattern={manualPattern} setManualPattern={setManualPattern}
+                     sheetFlip={sheetFlip} setSheetFlip={setSheetFlip} setSides={setSides} backRotate={backRotate} setBackRotate={setBackRotate}
+                     gutterMode={gutterMode} setGutterMode={setGutterMode} offsetMode={offsetMode} setOffsetMode={setOffsetMode}
+                     offsetRight={offsetRight} setOffsetRight={setOffsetRight} offsetBottom={offsetBottom} setOffsetBottom={setOffsetBottom}
+                     artScale={artScale} setArtScale={setArtScale} bleedIn={bleedIn} setBleedIn={setBleedIn}
+                     openLayout={() => setSecOpen(o => ({ ...o, layout: true }))} />
+
+          <Acc id="job" step={stepOf.job} summary={SUM.job} title="Job" open={secOpen.job} onToggle={() => toggleSec("job")}>
             <Field label="Product">
               <select value={calc} onChange={e => setCalc(e.target.value)}>
                 {CALC_TYPES.map(c => <option key={c.val} value={c.val}>{c.label}</option>)}
@@ -6796,29 +7401,7 @@ function App() {
                 <input type="number" step="0.125" min="2" value={trimShort} onChange={e => setTrimShort(e.target.value)} />
               </Field>
             </div>
-            {!isSaddle && !isPB && (() => { const C = sheetCtx(); return (
-              <Field label="Orientation on the sheet">
-                <select value={artRotate} onChange={e => setArtRotate(e.target.value)} data-art-rotate
-                        title="How the piece lies on the press sheet as the sheet lies. The sheet's own dimensions never change — only the piece turns.">
-                  <option value="auto">Auto — whichever way fits more</option>
-                  <option value="0">{`Landscape on sheet — ${C.pL} wide × ${C.pS} tall`}</option>
-                  <option value="90">{`Portrait on sheet — ${C.pS} wide × ${C.pL} tall`}</option>
-                  <option value="180">{`Landscape on sheet, head-down — ${C.pL} wide × ${C.pS} tall`}</option>
-                  <option value="270">{`Portrait on sheet, head-down — ${C.pS} wide × ${C.pL} tall`}</option>
-                </select>
-                {C.tLay && (
-                  <div className="imp-hint">
-                    Piece as placed: <b style={{ color: "rgba(255,255,255,.8)" }}>{C.tLay.cellW} wide × {C.tLay.cellH} tall</b>{C.tLay.rotated ? " (turned 90°)" : ""}{artRotate === "180" || artRotate === "270" ? ", head-down" : ""} · {C.tLay.across} × {C.tLay.down} = {C.tLay.across * C.tLay.down}-up on the {C.tLay.sheet.long} wide × {C.tLay.sheet.short} tall sheet{C.tLay.mismatch ? <span style={{ color: "#fbbf24" }}> · priced {C.tLay.pricedImp}-up — MISMATCH flagged</span> : ""}
-                  </div>
-                )}
-              </Field>
-            ); })()}
             <div className="imp-row">
-              <Field label="Sides" style={{ flex: "0 0 auto" }}>
-                {isBook
-                  ? <div style={{ fontSize: 13, padding: "7px 0", color: "rgba(255,255,255,.55)" }}>2-sided (book)</div>
-                  : <Seg value={sides === 2 ? 2 : 1} onChange={v => setSides(v)} dataAttr="data-sides" options={[{ v: 1, l: "1-sided" }, { v: 2, l: "2-sided" }]} />}
-              </Field>
               <Field label={isBook ? "Quantity (books)" : gangFiles.length >= 2 ? "Quantity (press sheets)" : multiMode === "each" ? "Quantity (per piece)" : multiMode !== "repeat" ? "Quantity (per collated set)" : "Quantity"} style={{ flex: 1 }}>
                 <input type="number" min="0" value={qty} onChange={e => setQty(e.target.value)} />
               </Field>
@@ -6833,7 +7416,7 @@ function App() {
             </div>
           </Acc>
 
-          <Acc id="artwork" title="Artwork" open={secOpen.artwork} onToggle={() => toggleSec("artwork")}
+          <Acc id="artwork" step={stepOf.artwork} summary={SUM.artwork} title="Artwork" open={secOpen.artwork} onToggle={() => toggleSec("artwork")}
                badge={healSummary ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>RETOUCHED</span> : gangFiles.length >= 2 ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>GANG</span> : (art && art.pageCount > 1 && !isBook && multiMode !== "repeat") ? <span className="imp-badge ok" style={{ marginLeft: 8 }}>{art.pageCount} PAGES</span> : null}>
             {(() => { const C = sheetCtx(); return (<>
             <Field label="When the artwork is not the finished size">
@@ -6862,22 +7445,8 @@ function App() {
             {showProduct && (<div>
             {!isBook && art && art.pageCount > (spec.sides === 2 && !backArt ? 2 : 1) && (
               <div style={{ marginTop: 10 }}>
-                <Field label={`Multi-page file — ${art.pageCount} pages, one design or many?`}>
-                  {(() => {
-                    const MM = [
-                      { v: "repeat", l: "One design", d: `page 1${spec.sides === 2 ? " + page 2 as its back" : ""} only, stepped across the sheet; the other pages are ignored.` },
-                      { v: "gang", l: "Gang in order", d: "different pieces per sheet — pages fill the cells sheet by sheet in reading order." },
-                      { v: "stack", l: "Cut & stack", d: "pages dealt pile by pile so the cut piles, stacked, come out collated." },
-                      { v: "each", l: "Each page its own sheet", d: "every page gets a full step-and-repeat sheet — for per-design run quantities." },
-                    ];
-                    return (<>
-                      <Seg value={multiMode} onChange={setMultiMode} dataAttr="data-multi-mode" options={MM} />
-                      <div className="imp-hint">{(MM.find(o => o.v === multiMode) || MM[0]).d}</div>
-                    </>);
-                  })()}
-                </Field>
                 {spec.sides === 2 && multiMode !== "repeat" && !backArt && (
-                  <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.45)", marginTop: -6, marginBottom: 8 }}>
+                  <div style={{ fontSize: 11.5, color: "var(--bp-faint)", marginTop: -6, marginBottom: 8 }}>
                     2-sided collated: pages read front/back interleaved (p1=front of piece 1, p2=its back, …) — or drop a separate back file below.
                   </div>
                 )}
@@ -6890,9 +7459,9 @@ function App() {
               </div>
             )}
             {!isBook && (
-              <div style={{ marginTop: 12, borderTop: "1px solid rgba(255,255,255,.1)", paddingTop: 10 }}>
+              <div style={{ marginTop: 12, borderTop: "1px solid var(--bp-line)", paddingTop: 10 }}>
                 <span className="lbl">Gang combo — multiple designs on one sheet</span>
-                <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.45)", marginBottom: 6 }}>
+                <div style={{ fontSize: 11.5, color: "var(--bp-faint)", marginBottom: 6 }}>
                   Add 2+ same-trim PDFs and each takes a share of the {lay ? `${lay.cells.length} cells` : "cells"} — blank slots = split evenly,
                   or set counts per file. Each design uses its page 1{spec.sides === 2 ? " + page 2 (back)" : ""}.
                   Qty = press sheets. Pieces fill contiguous blocks in reading order for clean cutting.
@@ -6910,9 +7479,9 @@ function App() {
                                 onClick={() => setGangFiles(prev => prev.filter((_, j) => j !== i))}>✕</button>
                       </div>
                     ))}
-                    {gangFiles.length === 1 && <div style={{ fontSize: 11, color: "#e91e63" }}>Add at least one more file to gang — with one file use the normal drop zone.</div>}
+                    {gangFiles.length === 1 && <div style={{ fontSize: 11, color: "var(--magenta)" }}>Add at least one more file to gang — with one file use the normal drop zone.</div>}
                     {gangFiles.length >= 2 && (
-                      <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)" }}>
+                      <div style={{ fontSize: 11, color: "var(--bp-faint)" }}>
                         Gang combo active — the main drop zone, multi-page mode, and separate back file are ignored.
                         <button type="button" className="imp-btn sec" style={{ marginLeft: 8, padding: "2px 8px" }} onClick={() => setGangFiles([])}>clear gang</button>
                       </div>
@@ -6925,7 +7494,7 @@ function App() {
             </div>)}
           </Acc>
 
-          <Acc id="sheet" title="Press sheet" open={secOpen.sheet} onToggle={() => toggleSec("sheet")}
+          <Acc id="sheet" step={stepOf.sheet} summary={SUM.sheet} title="Press sheet" open={secOpen.sheet} onToggle={() => toggleSec("sheet")}
                badge={sheetSel !== "auto" ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>{sheetSel === "custom" ? "CUSTOM" : sheetSel.toUpperCase()}</span> : null}>
             {(() => { const C = sheetCtx(); return (<>
               <div className="imp-row">
@@ -6944,7 +7513,7 @@ function App() {
                     <div className="imp-hint" style={{ marginTop: 0, marginBottom: 3 }}>Sheet long (in)</div>
                     <input type="number" step="0.25" min="3" max="60" value={sheetLong} style={{ width: 84 }} onChange={e => setSheetLong(e.target.value)} />
                   </div>
-                  <span style={{ paddingBottom: 6, color: "rgba(255,255,255,.4)" }}>×</span>
+                  <span style={{ paddingBottom: 6, color: "var(--bp-faint)" }}>×</span>
                   <div>
                     <div className="imp-hint" style={{ marginTop: 0, marginBottom: 3 }}>Sheet short (in)</div>
                     <input type="number" step="0.25" min="3" max="60" value={sheetShort} style={{ width: 84 }} onChange={e => setSheetShort(e.target.value)} />
@@ -6956,9 +7525,9 @@ function App() {
                      options={[{ v: "landscape", l: `${C.dims[0]} wide × ${C.dims[1]} tall` }, { v: "portrait", l: `↕ ${C.dims[1]} wide × ${C.dims[0]} tall` }]} />
               </Field>
               <div className="imp-sheetline imp-hint" style={{ marginTop: -4, marginBottom: 10 }}>
-                Sheet <b style={{ color: "rgba(255,255,255,.8)" }}>{C.shL ? stockOf(C.shL) : `${C.dims[1]}×${C.dims[0]}`}</b> lying <b style={{ color: "rgba(255,255,255,.8)" }}>{C.lyW} wide × {C.lyH} tall</b>
-                {" · "}prints <b style={{ color: "rgba(255,255,255,.8)" }}>{C.printable}″</b> inside a {C.m}″ margin
-                {C.fillOn ? <span style={{ color: "#fbbf24" }}> · fill mode — block centred inside that margin; set it to 0 for the whole sheet</span> : null}
+                Sheet <b style={{ color: "var(--bp-ink)" }}>{C.shL ? stockOf(C.shL) : `${C.dims[1]}×${C.dims[0]}`}</b> lying <b style={{ color: "var(--bp-ink)" }}>{C.lyW} wide × {C.lyH} tall</b>
+                {" · "}prints <b style={{ color: "var(--bp-ink)" }}>{C.printable}″</b> inside a {C.m}″ margin
+                {C.fillOn ? <span style={{ color: "var(--bp-warn)" }}> · fill mode — block centred inside that margin; set it to 0 for the whole sheet</span> : null}
                 {sheetSel !== "auto" && <span> · physical sheet only; the priced imp stays what the calculator quoted</span>}
               </div>
             </>); })()}
@@ -6968,137 +7537,15 @@ function App() {
             )}
           </Acc>
 
-          <Acc id="layout" title="Layout on the sheet" open={secOpen.layout} onToggle={() => toggleSec("layout")}
+          <Acc id="layout" step={stepOf.layout} summary={SUM.layout} title="Layout details" open={secOpen.layout} onToggle={() => toggleSec("layout")}
                badge={lay && lay.manualGrid ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>MANUAL</span> : lay && lay.overflow ? <span className="imp-badge err" style={{ marginLeft: 8 }}>OVERFLOW</span> : null}>
-            {(() => { const C = sheetCtx(); return (<>
-              <div className="imp-row">
-                {C.fillOn ? (
-                  <Field label="Position" style={{ flex: 1 }}>
-                    <div style={{ fontSize: 12.5, padding: "7px 0", color: "rgba(255,255,255,.55)" }}>
-                      Centred inside the margin <span style={{ color: "rgba(255,255,255,.4)" }}>— fill mode centres the block, so no jog applies{isPB ? " to this half" : ""}.</span>
-                    </div>
-                  </Field>
-                ) : (
-                  <Field label="Position" style={{ flex: "0 0 auto" }}>
-                    <Seg value={offsetMode} onChange={setOffsetMode} dataAttr="data-offset-mode"
-                         options={[{ v: "jog", l: "Jog to corner", title: "lower-right 0.5″ (back: lower-left) — one registration corner for the cutter" }, { v: "center", l: "Centred" }, { v: "custom", l: "Custom…" }]} />
-                  </Field>
-                )}
-                {C.customGaps ? (
-                  <Field label="Gutter" style={{ flex: "0 0 auto" }}>
-                    <div style={{ fontSize: 12.5, padding: "6px 0", display: "flex", gap: 8, alignItems: "center" }}>
-                      <span>custom per gap</span>
-                      <button type="button" className="imp-btn sec" style={{ padding: "2px 8px", fontSize: 11 }} onClick={C.clearGaps}>uniform</button>
-                    </div>
-                  </Field>
-                ) : (
-                  <Field label="Gutter" style={{ flex: "0 0 auto" }}>
-                    <Seg value={gutterMode} onChange={v => { setGutterMode(v); C.clearGaps(); }} dataAttr="data-gutter"
-                         options={[{ v: "auto", l: isSaddle ? "Butt" : "Auto" }, { v: "0", l: "0" }, { v: "0.125", l: "⅛″" }, { v: "0.25", l: "¼″" }, { v: "0.375", l: "⅜″" }, { v: "0.5", l: "½″" }]} />
-                  </Field>
-                )}
-              </div>
-              {offsetMode === "custom" && !C.fillOn && (
-                <div className="imp-row">
-                  <Field label="From right edge (in)" style={{ flex: 1 }}>
-                    <input type="number" step="0.125" min="0" value={offsetRight} onChange={e => setOffsetRight(e.target.value)} />
-                  </Field>
-                  <Field label="From bottom edge (in)" style={{ flex: 1 }}>
-                    <input type="number" step="0.125" min="0" value={offsetBottom} onChange={e => setOffsetBottom(e.target.value)} />
-                  </Field>
-                </div>
-              )}
-            </>); })()}
-            {!isSaddle && (
-              <Field label="Piece pattern">
-                {(() => {
-                  const PT = [
-                    { v: "straight", l: "Straight", d: "every piece the same way up." },
-                    { v: "h2h", l: "Head-to-head", d: "row pairs meet head to head at their shared cut." },
-                    { v: "f2f", l: "Foot-to-foot", d: "row pairs meet foot to foot — the phase-shifted complement." },
-                    { v: "reversal", l: "Reversal", d: "alternate columns turned 180°." },
-                    { v: "revalt", l: "Checkerboard", d: "reversal alternating by row as well — every neighbour turned." },
-                    { v: "manual", l: "Manual…", d: "tap cells below to turn them 180° one by one." },
-                  ];
-                  return (<>
-                    <Seg value={pattern} onChange={setPattern} dataAttr="data-pattern" options={PT} />
-                    <div className="imp-hint">{(PT.find(o => o.v === pattern) || PT[0]).d} Backs inherit each cell's turn, so the pattern registers through the duplex flip.</div>
-                  </>);
-                })()}
-              </Field>
-            )}
-            {isPB && (
-              <Field label="Grid orientation (job default — each half can override in the panel below)">
-                <Seg value={forceRotated} onChange={setForceRotated} dataAttr="data-grid-orient"
-                     options={[{ v: "auto", l: "Auto" }, { v: "no", l: "Unrotated" }, { v: "yes", l: "Rotated 90°" }]} />
-              </Field>
-            )}
-            {isSaddle && (
-              <Field label="Spread orientation on the sheet">
-                <Seg value={forceRotated} onChange={setForceRotated} dataAttr="data-spread-orient"
-                     options={[{ v: "auto", l: "Auto" }, { v: "no", l: "Along the long edge" }, { v: "yes", l: "Across (90°)" }]} />
-                <div className="imp-hint">
-                  {forceRotated === "auto" ? "Whichever fits the priced count, fewest cuts first." : forceRotated === "no" ? "The spread's long edge along the sheet's long edge." : "The spread's long edge across the sheet, rotated 90°."}
-                  {" "}Pagination, tumbling and the fold line follow the spread; only its direction on the press sheet changes.
-                  {lay && lay.booklet ? ` Now: ${lay.across} × ${lay.down}, spreads ${lay.booklet.spreadAlongX ? "along" : "across"} the sheet.` : ""}
-                </div>
-              </Field>
-            )}
-            {!isSaddle && pattern === "manual" && lay && (
-              <div style={{ marginBottom: 12 }}>
-                <span className="lbl">Manual pattern — tap a cell to flip it 180° (top row shown first)</span>
-                {Array.from({ length: lay.down }).map((_, rr) => {
-                  const row = lay.down - 1 - rr; // grid rows are bottom-up
-                  return (
-                    <div key={rr} style={{ display: "flex", gap: 4, marginBottom: 4 }}>
-                      {Array.from({ length: lay.across }).map((_, col) => {
-                        const idx = row * lay.across + col;
-                        const flipped = +manualPattern[idx] === 180;
-                        return (
-                          <button key={col} type="button" className="imp-btn sec"
-                            style={{ width: 34, height: 30, padding: 0, fontSize: 14, background: flipped ? "rgba(233,30,140,.25)" : undefined }}
-                            onClick={() => setManualPattern(p => { const n = [...p]; n[idx] = flipped ? 0 : 180; return n; })}>
-                            {flipped ? "\u2193" : "\u2191"}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
             {(() => {
               // Perfect bound edits ONE HALF at a time. The cover and the book
               // block are different pieces on different stock, so they each
               // carry their own grid, gutters and sheet; `part` is only which
               // of the two this panel is currently pointed at.
-              const pbParts = isPB && layoutInfo.pbLayouts
-                ? ["cover", "guts"].filter(p => layoutInfo.pbLayouts[p]) : [];
-              const part = isPB ? (pbParts.includes(pbGridPart) ? pbGridPart : pbParts[0]) : null;
-              const half = part ? layoutInfo.pbLayouts[part] : null;
-              // The layout this panel describes: the PB half, or the single job.
-              const panelLay = isPB ? (half && half.layout) : lay;
-              const show = isPB ? !!part
-                : (lay ? (isSaddle ? !!lay.booklet : true)
-                       : (isSaddle || FLAT_CALCS.includes(calc) || calc === "sticker"));
+              const { pbParts, part, half, panelLay, show, G, setG } = GA;
               if (!show) return null;
-              // One accessor pair over two storage shapes, so the panel below is
-              // written once. Everything else in it reads G / setG / panelLay.
-              const G = isPB ? pbGrids[part]
-                : { on: gridOn, across: gridAcross, down: gridDown, sheet: gridSheet,
-                    cols: gapCols, rows: gapRows, fill: gapFill };
-              const setG = isPB
-                ? (patch => setPbGrids(p => ({ ...p, [part]: { ...p[part], ...patch } })))
-                : (patch => {
-                    if ("on" in patch) setGridOn(patch.on);
-                    if ("across" in patch) setGridAcross(patch.across);
-                    if ("down" in patch) setGridDown(patch.down);
-                    if ("sheet" in patch) setGridSheet(patch.sheet);
-                    if ("cols" in patch) setGapCols(patch.cols);
-                    if ("rows" in patch) setGapRows(patch.rows);
-                    if ("fill" in patch) setGapFill(patch.fill);
-                  });
               const ok = !!panelLay;
               const nc = ok ? Math.max(0, panelLay.across - 1) : 0;
               const nr = ok ? Math.max(0, panelLay.down - 1) : 0;
@@ -7118,10 +7565,10 @@ function App() {
               const setDown = v => setG({ down: v, rows: null });
               const manualCount = (Math.floor(+G.across) || 0) * (Math.floor(+G.down) || 0);
               return (
-                <div style={{ border: "1px solid rgba(255,255,255,.12)", borderRadius: 8, padding: "10px 12px", marginBottom: 8, background: "rgba(255,255,255,.02)" }}>
+                <div style={{ border: "1px solid var(--bp-line)", borderRadius: 8, padding: "10px 12px", marginBottom: 8, background: "var(--bp-surface-2)" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                     <span className="lbl" style={{ margin: 0 }}>{isSaddle ? "Signatures per sheet, creep & gutters" : "Manual grid & gutters"}</span>
-                    <span style={{ fontSize: 11, color: over ? "#f87171" : "rgba(255,255,255,.4)" }}>
+                    <span style={{ fontSize: 11, color: over ? "var(--bp-red)" : "var(--bp-faint)" }}>
                       {ok ? `block ${tw.toFixed(2)}×${th.toFixed(2)}″ / sheet ${panelLay.sheet.long}×${panelLay.sheet.short}″${!isSaddle ? ` · piece ${panelLay.cellW}×${panelLay.cellH}″ as placed${panelLay.rotated ? " (rotated 90°)" : ""}` : ""}${over ? " — OVERFLOW (laid out anyway, centred)" : ""}`
                           : "layout refused — adjust or reset below"}
                     </span>
@@ -7138,21 +7585,21 @@ function App() {
                                     style={{ padding: "4px 12px", fontSize: 12, borderColor: on ? "#4ea1ff" : undefined, color: on ? "#4ea1ff" : undefined, fontWeight: on ? 700 : 400 }}
                                     onClick={() => { setPbGridPart(p); setViewPart(p === "guts" && pbParts.length > 1 ? 1 : 0); }}>
                               {p === "cover" ? "Cover" : "Guts"}
-                              <span style={{ color: "rgba(255,255,255,.4)", fontWeight: 400 }}>
+                              <span style={{ color: "var(--bp-faint)", fontWeight: 400 }}>
                                 {" "}{pl ? `${pl.across}×${pl.down}` : "—"}{g.on ? " manual" : ""}
                               </span>
                             </button>
                           );
                         })}
                       </div>
-                      <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.4)", marginTop: 5 }}>
+                      <div style={{ fontSize: 11.5, color: "var(--bp-faint)", marginTop: 5 }}>
                         {part === "cover"
                           ? `Editing the COVER — one flat ${panelLay ? `${panelLay.pieceLong.toFixed(3)}×${panelLay.pieceShort}″` : "back|spine|front"} piece on cover stock.`
                           : `Editing the GUTS — the book block${panelLay ? `, ${panelLay.pieceLong}×${panelLay.pieceShort}″ pages` : ""} on text stock.`}
                         {" "}Each half keeps its own grid, gutters and press sheet; neither inherits the other's.
                       </div>
                       <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 7 }}>
-                        <span style={{ fontSize: 11, color: "rgba(255,255,255,.45)" }}>Press sheet for the {part}</span>
+                        <span style={{ fontSize: 11, color: "var(--bp-faint)" }}>Press sheet for the {part}</span>
                         <select value={G.sheet || "auto"} style={{ width: 150, fontSize: 12 }}
                                 onChange={e => setG({ sheet: e.target.value, cols: null, rows: null })}>
                           <option value="auto">{sheetSel === "auto" ? "Auto (13×19, then 13×27.5)" : "Job default (above)"}</option>
@@ -7162,7 +7609,7 @@ function App() {
                         </select>
                       </div>
                       <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6, flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 11, color: "rgba(255,255,255,.45)" }}>Orientation for the {part}</span>
+                        <span style={{ fontSize: 11, color: "var(--bp-faint)" }}>Orientation for the {part}</span>
                         <select value={G.rot || "default"} style={{ width: 230, fontSize: 12 }}
                                 onChange={e => setG({ rot: e.target.value, cols: null, rows: null })}>
                           <option value="default">Job default (Grid orientation above)</option>
@@ -7170,12 +7617,12 @@ function App() {
                           <option value="no">{part === "cover" ? "Cover" : "Pages"} long edge along the sheet's long edge</option>
                           <option value="yes">{part === "cover" ? "Cover" : "Pages"} across the sheet (rotated 90°)</option>
                         </select>
-                        <span style={{ fontSize: 11.5, color: "rgba(255,255,255,.55)" }}>
+                        <span style={{ fontSize: 11.5, color: "var(--bp-dim)" }}>
                           {panelLay ? `now ${panelLay.across} × ${panelLay.down}${panelLay.rotated ? ", rotated 90°" : ""}` : ""}
                         </span>
                       </div>
                       {half && half.error && (
-                        <div style={{ fontSize: 12, color: "#f87171", marginTop: 5 }}>{half.error}</div>
+                        <div style={{ fontSize: 12, color: "var(--bp-red)", marginTop: 5 }}>{half.error}</div>
                       )}
                     </div>
                   )}
@@ -7191,29 +7638,29 @@ function App() {
                                  if (on && !isPB) setRepOn(false);   // the two are alternative ways to say the same thing
                                  setG({ on, cols: null, rows: null, ...seed });
                                }} />
-                        <span>{isSaddle ? "Set cells per sheet manually" : "Set columns × rows manually"} <span style={{ color: "rgba(255,255,255,.4)" }}>— {isSaddle ? "how many signature slots the sheet carries (consecutive signatures fill them, unless step and repeat is on in the Book section)" : "places exactly this many"}; {isPB ? "perfect bound is unpriced, so this grid is the layout" : "the count is flagged against the priced imp"}</span></span>
+                        <span>{isSaddle ? "Set cells per sheet manually" : "Set columns × rows manually"} <span style={{ color: "var(--bp-faint)" }}>— {isSaddle ? "how many signature slots the sheet carries (consecutive signatures fill them, unless step and repeat is on in the Book section)" : "places exactly this many"}; {isPB ? "perfect bound is unpriced, so this grid is the layout" : "the count is flagged against the priced imp"}</span></span>
                       </label>
                       {G.on && (
                         <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginTop: 7 }}>
                           <div>
-                            <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>{isSaddle ? "Copies across" : "Columns (across)"}</div>
+                            <div style={{ fontSize: 11, color: "var(--bp-faint)", marginBottom: 3 }}>{isSaddle ? "Copies across" : "Columns (across)"}</div>
                             <input type="number" min="1" step="1" value={G.across} style={{ width: 74, fontSize: 12 }}
                                    onChange={e => setAcross(e.target.value)} />
                           </div>
-                          <span style={{ fontSize: 13, paddingBottom: 6, color: "rgba(255,255,255,.4)" }}>×</span>
+                          <span style={{ fontSize: 13, paddingBottom: 6, color: "var(--bp-faint)" }}>×</span>
                           <div>
-                            <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>{isSaddle ? "Copies down" : "Rows (down)"}</div>
+                            <div style={{ fontSize: 11, color: "var(--bp-faint)", marginBottom: 3 }}>{isSaddle ? "Copies down" : "Rows (down)"}</div>
                             <input type="number" min="1" step="1" value={G.down} style={{ width: 74, fontSize: 12 }}
                                    onChange={e => setDown(e.target.value)} />
                           </div>
-                          <div style={{ fontSize: 12, paddingBottom: 6, color: "rgba(255,255,255,.55)" }}>
-                            {ok ? <>on <b>{panelLay.sheet.label}</b> · </> : null}= <b>{manualCount}</b>{isSaddle ? " copies/side" : "-up"}{ok && panelLay.pricedImp ? <span style={{ color: (isSaddle ? manualCount * 2 : manualCount) === Math.round(panelLay.pricedImp) ? "rgba(255,255,255,.4)" : "#fbbf24" }}> (priced {Math.round(panelLay.pricedImp)}{isSaddle ? " pages/side" : "-up"})</span> : null}
+                          <div style={{ fontSize: 12, paddingBottom: 6, color: "var(--bp-dim)" }}>
+                            {ok ? <>on <b>{panelLay.sheet.label}</b> · </> : null}= <b>{manualCount}</b>{isSaddle ? " copies/side" : "-up"}{ok && panelLay.pricedImp ? <span style={{ color: (isSaddle ? manualCount * 2 : manualCount) === Math.round(panelLay.pricedImp) ? "var(--bp-faint)" : "var(--bp-warn)" }}> (priced {Math.round(panelLay.pricedImp)}{isSaddle ? " pages/side" : "-up"})</span> : null}
                           </div>
                         </div>
                       )}
                     </div>
                   )}
-                  <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.4)", marginBottom: 7 }}>
+                  <div style={{ fontSize: 11.5, color: "var(--bp-faint)", marginBottom: 7 }}>
                     {isSaddle
                       ? "Set the gutter between each signature column/row independently. “Fill full sheet” centres the block inside the imageable margin instead of jogging it to a corner — set the margin to 0 to use the whole sheet (guillotine cutting)."
                       : "Set the gutter between each column/row independently. “Fill full sheet” centres the block inside the imageable margin instead of jogging it to a corner — set the margin to 0 to use the whole sheet (guillotine cutting)."}
@@ -7222,7 +7669,7 @@ function App() {
                     <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
                       {nc > 0 && (
                         <div>
-                          <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Column gaps (between {isSaddle ? "spreads" : "columns"}, in)</div>
+                          <div style={{ fontSize: 11, color: "var(--bp-faint)", marginBottom: 3 }}>Column gaps (between {isSaddle ? "spreads" : "columns"}, in)</div>
                           <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
                             {effCol.map((g, i) => (
                               <input key={i} type="number" step="0.0625" min="0" value={g} style={{ width: 62, fontSize: 12 }}
@@ -7233,7 +7680,7 @@ function App() {
                       )}
                       {nr > 0 && (
                         <div>
-                          <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Row gaps (between rows, in)</div>
+                          <div style={{ fontSize: 11, color: "var(--bp-faint)", marginBottom: 3 }}>Row gaps (between rows, in)</div>
                           <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
                             {effRow.map((g, i) => (
                               <input key={i} type="number" step="0.0625" min="0" value={g} style={{ width: 62, fontSize: 12 }}
@@ -7244,7 +7691,7 @@ function App() {
                       )}
                     </div>
                   ) : (
-                    <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.4)" }}>
+                    <div style={{ fontSize: 11.5, color: "var(--bp-faint)" }}>
                       {isSaddle
                         ? "Single spread per side — no inter-signature gutters to set. Raise copies (efficient mode) to gang more."
                         : "Single piece per sheet — no gutters to set. Raise columns/rows above to gang more."}
@@ -7254,7 +7701,7 @@ function App() {
                     <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
                       <input type="checkbox" checked={G.fill == null ? !!(ok && panelLay.fillSheet) : G.fill}
                              onChange={e => setG({ fill: e.target.checked })} style={{ width: "auto" }} />
-                      Fill full sheet <span style={{ color: "rgba(255,255,255,.4)" }}>(centre the block; keeps the imageable margin clear — 0″ = whole sheet)</span>
+                      Fill full sheet <span style={{ color: "var(--bp-faint)" }}>(centre the block; keeps the imageable margin clear — 0″ = whole sheet)</span>
                     </label>
                     {custom && (
                       <button type="button" className="imp-btn sec" style={{ padding: "3px 10px", fontSize: 12 }}
@@ -7262,7 +7709,7 @@ function App() {
                     )}
                     {(!ok || G.on || (!isPB && repOn)) && (
                       <button type="button" className="imp-btn sec"
-                              style={{ padding: "3px 10px", fontSize: 12, borderColor: ok ? undefined : "#f87171", color: ok ? undefined : "#f87171" }}
+                              style={{ padding: "3px 10px", fontSize: 12, borderColor: ok ? undefined : "var(--bp-red)", color: ok ? undefined : "var(--bp-red)" }}
                               onClick={() => { if (!isPB) setRepOn(false); setG({ on: false, sheet: "auto", cols: null, rows: null, fill: null, rot: "default" }); }}>
                         Back to automatic{isPB ? ` (${part})` : ""}
                       </button>
@@ -7274,27 +7721,8 @@ function App() {
 
           </Acc>
 
-          {(spec.sides === 2 || isBook) && (
-            <Acc id="duplex" title="Duplex" open={secOpen.duplex} onToggle={() => toggleSec("duplex")}
-                 badge={<span className="imp-badge ok" style={{ marginLeft: 8 }}>{sheetFlip === "long" ? "LONG-EDGE FLIP" : "SHORT-EDGE FLIP"}</span>}>
-              <div className="imp-row">
-                <Field label="Press flips the sheet on" style={{ flex: "0 0 auto" }}>
-                  <Seg value={sheetFlip} onChange={setSheetFlip} dataAttr="data-sheet-flip"
-                       options={[{ v: "short", l: "Short edge", title: "Fiery SEF — the default" }, { v: "long", l: "Long edge" }]} />
-                </Field>
-                {!isSaddle && (
-                  <Field label="Back rotation" style={{ flex: "0 0 auto" }}>
-                    <Seg value={backRotate} onChange={setBackRotate} dataAttr="data-back-rotate"
-                         options={[{ v: "auto", l: "Auto", title: "register with the front" }, { v: "0", l: "None" }, { v: "180", l: "180° (tumble)" }]} />
-                  </Field>
-                )}
-              </div>
-              <div className="imp-hint" style={{ marginTop: -4, marginBottom: 8 }}>The back of every sheet is mirrored through this flip so the pieces register front to back; the slug names the edge so the Fiery job can match it.</div>
-            </Acc>
-          )}
-
           {(isSaddle || isPB) && (
-            <Acc id="book" title={isPB ? "Perfect bound — two press jobs" : "Saddle stitch — signatures"} open={secOpen.book} onToggle={() => toggleSec("book")}
+            <Acc id="book" step={stepOf.book} summary={SUM.book} title={isPB ? "Perfect bound — two press jobs" : "Saddle stitch — signatures"} open={secOpen.book} onToggle={() => toggleSec("book")}
                  badge={isPB ? <span className="imp-badge ok" style={{ marginLeft: 8 }}>{pbPart === "both" ? "COVER + GUTS" : pbPart.toUpperCase()}</span> : sigOrder !== "repeat" ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>{sigOrder === "gang" ? "GANG" : "CUT & STACK"}</span> : null}>
               {isSaddle && (() => {
                 const panelLay = lay && lay.booklet ? lay : null;
@@ -7324,11 +7752,11 @@ function App() {
                                 Set copies per sheet
                               </label>
                               {repOn && <div>
-                                <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginBottom: 3 }}>Copies of each signature</div>
+                                <div style={{ fontSize: 11, color: "var(--bp-faint)", marginBottom: 3 }}>Copies of each signature</div>
                                 <input type="number" min="1" step="1" value={repN} style={{ width: 74, fontSize: 12 }}
                                        onChange={e => { setRepN(e.target.value); setGapCols(null); setGapRows(null); }} />
                               </div>}
-                              <div style={{ fontSize: 12, paddingBottom: 6, color: "rgba(255,255,255,.55)" }}>
+                              <div style={{ fontSize: 12, paddingBottom: 6, color: "var(--bp-dim)" }}>
                                 {ok ? <>{panelLay.across} × {panelLay.down} on <b>{panelLay.sheet.label}</b></> : null}
                               </div>
                             </div>
@@ -7343,7 +7771,7 @@ function App() {
                              onChange={e => setCreep(e.target.value)} />
                       <span>″ at the innermost signature</span>
                       {+creep > 0 && (
-                        <span style={{ color: "rgba(255,255,255,.5)" }}>
+                        <span style={{ color: "var(--bp-dim)" }}>
                           — cover 0″, stepping spine-ward to {(+creep).toFixed(4)}″; cut lines unchanged
                         </span>
                       )}
@@ -7353,7 +7781,7 @@ function App() {
               })()}
             {isPB && (
               <div style={{ marginTop: 4 }}>
-                <div style={{ fontSize: 12, color: "rgba(255,255,255,.5)", marginBottom: 9 }}>
+                <div style={{ fontSize: 12, color: "var(--bp-dim)", marginBottom: 9 }}>
                   A perfect-bound book images as two press jobs on different stock. Emit both, or just the half you need —
                   a guts reprint needs no spine and no cover file. With a single reading-order PDF the cover is built from
                   pages 1, 2 and the last two; or drop the guts here and the template cover file below.
@@ -7363,7 +7791,7 @@ function App() {
                        options={[{ v: "both", l: "Cover + guts" }, { v: "guts", l: "Guts only" }, { v: "cover", l: "Cover only" }]} />
                 </div>
                 {pbPart !== "cover" && (
-                  <div style={{ marginBottom: 10, paddingBottom: 9, borderBottom: "1px dashed rgba(255,255,255,.12)" }}>
+                  <div style={{ marginBottom: 10, paddingBottom: 9, borderBottom: "1px dashed var(--bp-line)" }}>
                     <span className="lbl">Leaves onto the sheet (guts)</span>
                     {(() => {
                       const GO = [
@@ -7379,7 +7807,7 @@ function App() {
                   </div>
                 )}
                 {pbPart === "guts" ? (
-                  <div style={{ fontSize: 12, color: "rgba(255,255,255,.55)" }}>
+                  <div style={{ fontSize: 12, color: "var(--bp-dim)" }}>
                     Book block only, <b>{(+trimLong || 0).toFixed(3)} × {(+trimShort || 0).toFixed(3)}″</b> — the file is taken as the
                     block as-is. No spine needed. Columns, rows and gutters for the block are in <b>Manual grid &amp; gutters</b> below, on the Guts tab.
                   </div>
@@ -7388,9 +7816,9 @@ function App() {
                     <Field label="Spine width (in)" style={{ flex: "0 0 130px" }}>
                       <input type="number" step="0.0625" min="0" max="3" value={spine} onChange={e => setSpine(e.target.value)} />
                     </Field>
-                    <div style={{ fontSize: 12, color: "rgba(255,255,255,.55)", paddingBottom: 8 }}>
+                    <div style={{ fontSize: 12, color: "var(--bp-dim)", paddingBottom: 8 }}>
                       flat cover = <b>{(2 * (+trimLong || 0) + (+spine || 0)).toFixed(3)}</b> × {(+trimShort || 0).toFixed(3)}″
-                      <span style={{ color: "rgba(255,255,255,.38)" }}> — measure the glued block; the quote assumes nominal caliper</span>
+                      <span style={{ color: "var(--bp-faint)" }}> — measure the glued block; the quote assumes nominal caliper</span>
                     </div>
                   </div>
                 )}
@@ -7403,7 +7831,7 @@ function App() {
             </Acc>
           )}
 
-          <Acc id="bleed" title="Bleed" open={secOpen.bleed} onToggle={() => toggleSec("bleed")}
+          <Acc id="bleed" step={stepOf.bleed} summary={SUM.bleed} title="Bleed" open={secOpen.bleed} onToggle={() => toggleSec("bleed")}
                badge={addBleed !== "off" ? <span className="imp-badge ok" style={{ marginLeft: 8 }}>ADD {addBleed.toUpperCase()}</span> : null}>
             <Field label="Bleed (in)" style={{ maxWidth: 140 }}>
               <input type="number" step="0.0625" min="0" max="0.5" value={bleedIn} onChange={e => setBleedIn(e.target.value)} />
@@ -7411,7 +7839,7 @@ function App() {
             <Field label="Add bleed to files that have none">
               <Seg value={addBleed} onChange={setAddBleed} dataAttr="data-add-bleed" block
                    style={addBleed === "off" && !Object.keys(addBleedPages).length && result && (result.warnings || []).some(w => /no bleed/i.test(w))
-                          ? { outline: "2px solid #e91e63" } : undefined}
+                          ? { outline: "2px solid var(--magenta)" } : undefined}
                    options={[{ v: "off", l: "Off" }, { v: "auto", l: "Auto" }, { v: "mirror", l: "Mirror" }, { v: "scale", l: "Scale" }, { v: "streak", l: "Streak" }]} />
               <div className="imp-hint">
                 {{ off: "Use the file as it is — a file without bleed prints paper white at the cut.",
@@ -7422,7 +7850,7 @@ function App() {
                 {" "}The fill starts at the art's own edge on each side — a design that is smaller than the finished size gets bleed from where its ink stops, not from the finished size — and an edge that already carries the full bleed is left alone.
               </div>
               {addBleed === "off" && !Object.keys(addBleedPages).length && result && (result.warnings || []).some(w => /no bleed/i.test(w)) && (
-                <div style={{ fontSize: 11, color: "#e91e63", marginTop: 3 }}>
+                <div style={{ fontSize: 11, color: "var(--magenta)", marginTop: 3 }}>
                   This file has no bleed — cut lines may show paper white. Auto is the safe default fix: it mirrors
                   clean edges and streaks edges with nearby text. Scale suits photo collages and faces
                   (a mirror would visibly reflect people at the edges).
@@ -7435,7 +7863,7 @@ function App() {
                        onChange={e => setArtScale(e.target.value)} />
                 <span>% of placed size</span>
                 {+artScale !== 100 && (
-                  <span style={{ color: "rgba(255,255,255,.5)" }}>
+                  <span style={{ color: "var(--bp-dim)" }}>
                     — {+artScale > 100 ? "grows past the trim (clipped to the cell)" : "pulls in from the trim; needs a bleed fill to cover the gap"}
                   </span>
                 )}
@@ -7451,26 +7879,26 @@ function App() {
                   if (!(H > 0)) return null;
                   const f = 1 - 2 * (+artInset) / H;
                   return (
-                    <span style={{ color: f > 0.5 ? "rgba(255,255,255,.5)" : "#f87171" }}>
+                    <span style={{ color: f > 0.5 ? "var(--bp-dim)" : "var(--bp-red)" }}>
                       — art ×{f.toFixed(4)} ({(100 - f * 100).toFixed(2)}% smaller): pulls in {(W * (1 - f) / 2).toFixed(3)}″ across, {(H * (1 - f) / 2).toFixed(3)}″ down;
                       fill band becomes {((W * (1 - f) / 2) + (+bleedIn || 0)).toFixed(3)}″
                     </span>
                   );
                 })()}
               </div>
-              <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 2 }}>
+              <div style={{ fontSize: 11, color: "var(--bp-faint)", marginTop: 2 }}>
                 For art whose text crowds the cut. Shrinks the art so content backs away from the trim, then the
                 bleed fill above covers the gap it opens — out from the art's new edge to past the cut. Scale is
                 uniform (art is never distorted), so the value is a guaranteed <i>minimum</i>: the long edge pulls
                 in proportionally further. Needs a fill mode — Auto, Mirror or Streak, not Scale.
               </div>
               {+artInset > 0 && addBleed === "scale" && (
-                <div style={{ fontSize: 11, color: "#e91e63", marginTop: 2 }}>
+                <div style={{ fontSize: 11, color: "var(--magenta)", marginTop: 2 }}>
                   “Scale art up to bleed” re-expands the art to the bleed box, undoing the pull-off. Use Auto, Mirror or Streak.
                 </div>
               )}
               {+artInset > 0 && addBleed === "off" && (
-                <div style={{ fontSize: 11, color: "#e91e63", marginTop: 2 }}>
+                <div style={{ fontSize: 11, color: "var(--magenta)", marginTop: 2 }}>
                   With Add bleed off, the gap the pull-off opens would print as paper white inside the trim. Set a fill mode.
                 </div>
               )}
@@ -7487,13 +7915,13 @@ function App() {
               {art && art.pageCount > 1 && gangFiles.length < 2 && (addBleed !== "off" || Object.keys(addBleedPages).length > 0
                 || (result && (result.warnings || []).some(w => /no bleed/i.test(w)))) && (
                 <div style={{ marginTop: 6 }}>
-                  <div style={{ fontSize: 11, color: "#777", marginBottom: 3 }}>
+                  <div style={{ fontSize: 11, color: "var(--bp-faint)", marginBottom: 3 }}>
                     Per-page override (blank = job setting "{addBleed}"):
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 4, maxHeight: 120, overflowY: "auto" }}>
                     {Array.from({ length: Math.min(art.pageCount, 64) }, (_, i) => (
                       <label key={i} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11,
-                                              border: "1px solid #ddd", borderRadius: 4, padding: "1px 4px" }}>
+                                              border: "1px solid var(--bp-line)", borderRadius: 4, padding: "1px 4px" }}>
                         p{i + 1}
                         <select value={addBleedPages[i + 1] || ""} style={{ fontSize: 11, padding: "1px 2px" }}
                                 onChange={e => setAddBleedPages(prev => {
@@ -7511,17 +7939,17 @@ function App() {
                       </label>
                     ))}
                   </div>
-                  {art.pageCount > 64 && <div style={{ fontSize: 11, color: "#777" }}>overrides limited to the first 64 pages</div>}
+                  {art.pageCount > 64 && <div style={{ fontSize: 11, color: "var(--bp-faint)" }}>overrides limited to the first 64 pages</div>}
                 </div>
               )}
             </Field>
 
           </Acc>
 
-          <Acc id="press" title="Press prep" open={secOpen.press} onToggle={() => toggleSec("press")}
+          <Acc id="press" step={stepOf.press} summary={SUM.press} title="Press prep" open={secOpen.press} onToggle={() => toggleSec("press")}
                badge={(greyPagesTxt.trim() || slipOn || blankMode !== "off" || pageSeqTxt.trim() || sheetSeqTxt.trim() || rasterPagesTxt.trim()) ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>ON</span> : null}>
-            <div style={{ border: "1px solid rgba(255,255,255,.12)", borderRadius: 8, padding: "10px 12px", marginBottom: 10, background: "rgba(255,255,255,.02)" }}>
-              <span className="lbl" style={{ margin: "0 0 6px", display: "block" }}>Press safety <span style={{ color: "rgba(255,255,255,.4)", fontWeight: 400 }}>— fixes for things that look right on screen and print wrong on the RIP; each is reported in the Job report</span></span>
+            <div style={{ border: "1px solid var(--bp-line)", borderRadius: 8, padding: "10px 12px", marginBottom: 10, background: "var(--bp-surface-2)" }}>
+              <span className="lbl" style={{ margin: "0 0 6px", display: "block" }}>Press safety <span style={{ color: "var(--bp-faint)", fontWeight: 400 }}>— fixes for things that look right on screen and print wrong on the RIP; each is reported in the Job report</span></span>
               {[["stripOverprint", stripOverprint, setStripOverprint, "Remove overprint", "white or light objects set to overprint vanish on the press"],
                 ["fixHairlines", fixHairlines, setFixHairlines, "Thicken zero-width hairlines to 0.25 pt", "\"0 w\" is one device pixel — invisible on paper"],
                 ["flattenAnnots", flattenAnnots, setFlattenAnnots, "Flatten annotations into the page", "stamps, comment boxes and filled form fields print as they display"]].map(([k, v, set, t, d]) => (
@@ -7529,12 +7957,12 @@ function App() {
               ))}
               <Field label="Rasterise pages (last resort)" style={{ marginTop: 8, marginBottom: 0 }}>
                 <input type="text" value={rasterPagesTxt} onChange={e => setRasterPagesTxt(e.target.value)} placeholder="e.g. 2, 5-6  (source page numbers)" />
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>Turns those source pages into a 300 DPI RGB image — nothing left for a RIP to misread (JPEG 2000, 16-bit images, soft masks the tool could not simplify). Vector sharpness and CMYK fidelity are lost on those pages; use it when a page will not print right any other way.</div>
+                <div style={{ fontSize: 11, color: "var(--bp-faint)", marginTop: 3 }}>Turns those source pages into a 300 DPI RGB image — nothing left for a RIP to misread (JPEG 2000, 16-bit images, soft masks the tool could not simplify). Vector sharpness and CMYK fidelity are lost on those pages; use it when a page will not print right any other way.</div>
               </Field>
             </div>
             <Field label="Force greyscale print on pages">
               <input type="text" value={greyPagesTxt} onChange={e => setGreyPagesTxt(e.target.value)} placeholder="e.g. 3, 5-8  (source page numbers)" />
-              <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>
+              <div style={{ fontSize: 11, color: "var(--bp-faint)", marginTop: 3 }}>
                 Listed pages of the artwork are rasterised at 300 DPI and re-embedded as DeviceGray, so they separate to the K plate only.
                 Those pages are no longer vector. {art ? `File has ${art.pageCount} page${art.pageCount === 1 ? "" : "s"}.` : ""}
               </div>
@@ -7542,12 +7970,12 @@ function App() {
             <Field label="Page sequence — source pages (duplicate, repeat, reorder, blanks)">
               <input type="text" value={pageSeqTxt} onChange={e => setPageSeqTxt(e.target.value)} placeholder="e.g. 1-8, 9x2, blank, 10-last   (empty = pages as they are)" />
               <SeqNote txt={pageSeqTxt} total={art ? art.pageCount : null} noun="page" what="pages" />
-              <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>
+              <div style={{ fontSize: 11, color: "var(--bp-faint)", marginTop: 3 }}>
                 The run of pages the imposition paginates. <b>5</b> one page · <b>3-8</b> a run · <b>5x2</b> that page twice · <b>3-8x2</b> the run twice · <b>blank</b> an empty page · <b>all</b> · <b>last</b>.
                 A page number past the end refuses rather than skipping. Greyscale page numbers above refer to the file as dropped; the notes and slugs refer to this run. Artwork file only — a separate back file and gang files are untouched.
               </div>
             </Field>
-            <div style={{ borderTop: "1px solid rgba(255,255,255,.08)", paddingTop: 10, marginTop: 4 }}>
+            <div style={{ borderTop: "1px solid var(--bp-line)", paddingTop: 10, marginTop: 4 }}>
               <Field label="Insert blank pages — into the source run">
                 <Seg value={blankMode} onChange={setBlankMode} dataAttr="data-blank-mode" block
                      options={[{ v: "off", l: "Off" }, { v: "after", l: "After…" }, { v: "before", l: "Before…" }, { v: "every", l: "Every N" }, { v: "start", l: "Start" }, { v: "end", l: "End" }, { v: "pad", l: "Pad to…" }]} />
@@ -7585,17 +8013,17 @@ function App() {
                 </div>
               </Field>
             </div>
-            <div style={{ borderTop: "1px solid rgba(255,255,255,.08)", paddingTop: 10, marginTop: 4 }}>
+            <div style={{ borderTop: "1px solid var(--bp-line)", paddingTop: 10, marginTop: 4 }}>
               <Field label="Sheet sequence — imposed sheets (repeat or reorder physical sheets)">
                 <input type="text" value={sheetSeqTxt} onChange={e => setSheetSeqTxt(e.target.value)} placeholder="e.g. 1x3, 2-4, blank   (empty = sheets as imposed)" />
                 <SeqNote txt={sheetSeqTxt} total={viewRes && viewRes.sheetsImposed != null ? viewRes.sheetsImposed : null} noun="sheet" what="sheets" />
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>
+                <div style={{ fontSize: 11, color: "var(--bp-faint)", marginTop: 3 }}>
                   Same grammar over the <b>physical sheets of the imposed output</b> (sheet 1 = the first front/back pair on a duplex job). Repeats share the original's slug, so the press sees the same sheet number more than once.
                   Slipsheets are inserted after this, so their sheet numbers refer to the result. On perfect bound it applies to the cover and the guts alike.
                 </div>
               </Field>
             </div>
-            <div style={{ borderTop: "1px solid rgba(255,255,255,.08)", paddingTop: 10, marginTop: 4 }}>
+            <div style={{ borderTop: "1px solid var(--bp-line)", paddingTop: 10, marginTop: 4 }}>
               <Check checked={slipOn} onChange={setSlipOn} label={<b>Insert blank sheets / slipsheets</b>} hint="a blank, coloured or custom physical sheet into the output — after chosen sheets, every N, at the start or the end" dataAttr="data-slip-on" />
               {slipOn && (
                 <div>
@@ -7629,11 +8057,11 @@ function App() {
                         <input type="file" accept=".pdf,.jpg,.jpeg,.png"
                                onChange={async e => { const f = e.target.files && e.target.files[0]; e.target.value = ""; if (!f) return;
                                                       setSlipCustom({ bytes: new Uint8Array(await f.arrayBuffer()), name: f.name }); }} />
-                        {slipCustom && <div style={{ fontSize: 11.5, color: "#4ade80", marginTop: 3 }}>{slipCustom.name} — page 1 on the front, page 2 (if any) on the back, fitted to the sheet</div>}
+                        {slipCustom && <div style={{ fontSize: 11.5, color: "var(--green)", marginTop: 3 }}>{slipCustom.name} — page 1 on the front, page 2 (if any) on the back, fitted to the sheet</div>}
                       </div>
                     )}
                   </Field>
-                  <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>
+                  <div style={{ fontSize: 11, color: "var(--bp-faint)" }}>
                     Sheet numbers are the <b>physical sheets of the imposed output</b> (sheet 1 = the first front/back pair on a duplex job).
                     Each inserted sheet is one physical sheet — both faces blank or carrying the design on a duplex job — and is not counted in the run figures. Inserted after the sheet sequence above, so its numbers refer to that result.
                   </div>
@@ -7641,7 +8069,7 @@ function App() {
               )}
             </div>
             {art && (
-              <div style={{ borderTop: "1px solid rgba(255,255,255,.08)", paddingTop: 10, marginTop: 10, marginBottom: 8 }}>
+              <div style={{ borderTop: "1px solid var(--bp-line)", paddingTop: 10, marginTop: 10, marginBottom: 8 }}>
                 <span className="lbl">Sanitized copy</span>
                 <button type="button" className="imp-btn sec" disabled={cleanBusy} onClick={makeCleanCopy}>
                   {cleanBusy ? "Sanitizing…" : "⬇ CLEAN 1:1 copy (sanitized)"}
@@ -7651,14 +8079,14 @@ function App() {
                     🧼 File CLEAN copy to order's Drive folder
                   </button>
                 )}
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>
+                <div style={{ fontSize: 11, color: "var(--bp-faint)", marginTop: 3 }}>
                   Keeps every page 1:1 but strips scripts, auto-run actions, attachments and form fields (their visible appearance too).
                 </div>
               </div>
             )}
           </Acc>
 
-          <Acc id="marks" title="Marks" open={secOpen.marks} onToggle={() => toggleSec("marks")}
+          <Acc id="marks" step={stepOf.marks} summary={SUM.marks} title="Marks" open={secOpen.marks} onToggle={() => toggleSec("marks")}
                badge={!marks ? <span className="imp-badge warn" style={{ marginLeft: 8 }}>NO MARKS</span> : null}>
             <div className="imp-row" style={{ gap: 16, marginBottom: 4 }}>
               <Check checked={marks} onChange={setMarks} label="Crop / trim marks" style={{ marginBottom: 4 }} />
@@ -7672,8 +8100,8 @@ function App() {
         {/* ══ RIGHT — job source, viewport tools, sheets ══ */}
         <div className="imp-main">
           {CFG && CFG.gdrive === false && (
-            <div className="imp-card" style={{ marginBottom: 12, borderColor: "rgba(239,68,68,.4)" }}>
-              <div style={{ fontSize: 13, color: "#f87171" }}>
+            <div className="imp-card" style={{ marginBottom: 12, borderColor: "var(--bp-red)" }}>
+              <div style={{ fontSize: 13, color: "var(--bp-red)" }}>
                 Google Drive is not connected — connect it under <b>PPS Calculators → Google Drive</b>. The order queue, artwork downloads, and uploads will fail until then.
               </div>
             </div>
@@ -7686,7 +8114,7 @@ function App() {
                     {queueOpen ? "▼" : "▶"} {showHidden ? "All recent orders with artwork on Drive" : "Orders still to impose"}{rows ? ` (${rows.length})` : ""}
                   </button>
                   <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", cursor: "pointer", color: "rgba(255,255,255,.6)" }}
+                    <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", cursor: "pointer", color: "var(--bp-dim)" }}
                            title="Completed orders and orders you have hidden drop off the work list. Tick this to see them and put them back.">
                       <input type="checkbox" checked={showHidden} style={{ width: "auto" }}
                              onChange={e => setShowHidden(e.target.checked)} />
@@ -7704,7 +8132,7 @@ function App() {
                   </span>
                 </div>
                 {actionErr && (
-                  <div style={{ color: "#f87171", fontSize: 12.5, marginBottom: 7, display: "flex", gap: 10, alignItems: "center" }}>
+                  <div style={{ color: "var(--bp-red)", fontSize: 12.5, marginBottom: 7, display: "flex", gap: 10, alignItems: "center" }}>
                     <span>{actionErr}</span>
                     <button className="imp-btn sec" style={{ padding: "2px 8px", fontSize: 11 }} onClick={() => setActionErr("")}>dismiss</button>
                   </div>
@@ -7716,7 +8144,7 @@ function App() {
                   </div>
                 )}
                 {activeOrder && (
-                  <div style={{ fontSize: 12, color: "#7ab8ff", marginTop: 6 }}>
+                  <div style={{ fontSize: 12, color: "var(--bp-info)", marginTop: 6 }}>
                     Loaded order #{activeOrder.order_id} · {activeOrder.job_name || activeOrder.product} · {activeOrder.art_file_name}
                   </div>
                 )}
@@ -7739,54 +8167,54 @@ function App() {
               )}
             </div>
             {art && art.approval && art.approval.state === "mismatch" && (
-              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 6, background: "rgba(233,30,60,.12)", border: "1px solid rgba(233,30,60,.5)", fontSize: 12 }}>
-                <b style={{ color: "#ff5f7a" }}>⚠ NOT THE APPROVED FILE</b>
-                <div style={{ color: "rgba(255,255,255,.55)", marginTop: 3 }}>
+              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 6, background: "var(--magenta-tint)", border: "1px solid var(--magenta)", fontSize: 12 }}>
+                <b style={{ color: "var(--magenta)" }}>⚠ NOT THE APPROVED FILE</b>
+                <div style={{ color: "var(--bp-dim)", marginTop: 3 }}>
                   This file hashes <code>{art.approval.got.slice(0, 12)}…</code> but the customer approved <code>{art.approval.want.slice(0, 12)}…</code>.
                   It can still be imposed — the output filename will carry <b>UNAPPROVED</b> so the flag reaches Drive and the press.
                 </div>
               </div>
             )}
             {art && art.approval && art.approval.state === "raw" && (
-              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 6, background: "rgba(245,158,11,.12)", border: "1px solid rgba(245,158,11,.5)", fontSize: 12 }} data-raw-banner>
-                <b style={{ color: "#fbbf24" }}>RAW UPLOAD</b>
-                <div style={{ color: "rgba(255,255,255,.55)", marginTop: 3 }}>
+              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 6, background: "var(--yellow-tint)", border: "1px solid var(--yellow-line)", fontSize: 12 }} data-raw-banner>
+                <b style={{ color: "var(--bp-warn)" }}>RAW UPLOAD</b>
+                <div style={{ color: "var(--bp-dim)", marginTop: 3 }}>
                   This is the customer's original file, byte for byte — not the print-ready file they approved. Any crop, fit, rotation or scale they applied in the proof is not in it; check the manifest's per-page detail. The output filename carries <b>RAW</b>.
                 </div>
               </div>
             )}
             {art && art.flatProof && (
-              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 6, background: "rgba(233,30,60,.12)", border: "1px solid rgba(233,30,60,.5)", fontSize: 12 }} data-flatproof-banner>
-                <b style={{ color: "#ff5f7a" }}>⚠ FLATTENED PROOF</b>
-                <div style={{ color: "rgba(255,255,255,.55)", marginTop: 3 }}>
+              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 6, background: "var(--magenta-tint)", border: "1px solid var(--magenta)", fontSize: 12 }} data-flatproof-banner>
+                <b style={{ color: "var(--magenta)" }}>⚠ FLATTENED PROOF</b>
+                <div style={{ color: "var(--bp-dim)", marginTop: 3 }}>
                   This file is a rasterised copy, not the customer's artwork: {art.flatProof.byProducer ? <>its producer is <code>{art.flatProof.producer}</code></> : <>{art.flatProof.flat} of {art.flatProof.total} pages are a single full-page image</>}. Live type, CMYK builds and spot colours are gone; the press would get RGB pixels. The output is flagged <b>FLATPROOF</b> while it is used.
                 </div>
                 {(() => { const rc = activeOrder ? rawCandidate(rowFiles(activeOrder), activeOrder.art_file_id) : null; return rc ? (
                   <button type="button" className="imp-btn" data-use-raw style={{ marginTop: 8, padding: "6px 11px", fontSize: 12 }} disabled={!!queueBusy}
                           onClick={() => loadOrder(activeOrder, rc)}>Use the raw upload instead: {rc.name}</button>
-                ) : <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.45)", marginTop: 6 }}>No raw upload is in the order folder — ask for the customer's original file.</div>; })()}
+                ) : <div style={{ fontSize: 11.5, color: "var(--bp-faint)", marginTop: 6 }}>No raw upload is in the order folder — ask for the customer's original file.</div>; })()}
               </div>
             )}
             {art && art.approval && art.approval.state === "unverifiable" && (
-              <div style={{ marginTop: 8, fontSize: 12, color: "#ffb454" }}>
+              <div style={{ marginTop: 8, fontSize: 12, color: "var(--bp-warn)" }}>
                 ⚠ This order carries an approval hash but the page can't verify it (no crypto.subtle — is wp-admin on HTTPS?).
               </div>
             )}
             {art && art.approval && art.approval.state === "verified" && (
-              <div style={{ marginTop: 8, fontSize: 12, color: "#5fd08a" }}>
+              <div style={{ marginTop: 8, fontSize: 12, color: "var(--green)" }}>
                 ✓ Approval hash verified — byte-for-byte the file the customer approved.
               </div>
             )}
             {art && art.threats && art.threats.length > 0 && (
-              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 6, background: "rgba(233,30,60,.12)", border: "1px solid rgba(233,30,60,.5)", fontSize: 12 }}>
-                <b style={{ color: "#ff5f7a" }}>⚠ ACTIVE CONTENT in this file:</b> {art.threats.join(" · ")}
-                <div style={{ color: "rgba(255,255,255,.55)", marginTop: 3 }}>
+              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 6, background: "var(--magenta-tint)", border: "1px solid var(--magenta)", fontSize: 12 }}>
+                <b style={{ color: "var(--magenta)" }}>⚠ ACTIVE CONTENT in this file:</b> {art.threats.join(" · ")}
+                <div style={{ color: "var(--bp-dim)", marginTop: 3 }}>
                   The imposed output strips all of it. Avoid opening the original in a PDF viewer — use the CLEAN copy.
                 </div>
               </div>
             )}
             {backArt && backArt.threats && backArt.threats.length > 0 && (
-              <div style={{ marginTop: 6, fontSize: 12, color: "#ff5f7a" }}>⚠ Back file active content: {backArt.threats.join(" · ")}</div>
+              <div style={{ marginTop: 6, fontSize: 12, color: "var(--magenta)" }}>⚠ Back file active content: {backArt.threats.join(" · ")}</div>
             )}
             {art && (
               <div style={{ marginTop: 8 }}>
@@ -7798,7 +8226,7 @@ function App() {
                     🧼 File CLEAN copy to order's Drive folder
                   </button>
                 )}
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)", marginTop: 3 }}>
+                <div style={{ fontSize: 11, color: "var(--bp-faint)", marginTop: 3 }}>
                   Keeps every page's artwork 1:1 (any size, any product — works even when imposition refuses) but strips
                   scripts, auto-run actions, attachments, and form fields. Note: form fields/annotations lose their visible
                   appearance too.
@@ -7826,7 +8254,7 @@ function App() {
                 ))}
               </div>
             )}
-            <div className="grp" style={{ fontSize: 12, color: "rgba(255,255,255,.55)", gap: 8 }}>
+            <div className="grp" style={{ fontSize: 12, color: "var(--bp-dim)", gap: 8 }}>
               {viewLay && viewLay.overflow && <span className="imp-badge err" data-overflow title="The block is larger than the printable area — laid out as asked and centred; the outer pieces print cut short.">OVERFLOW {viewLay.overflow.offLong > EPS ? `${viewLay.overflow.offLong.toFixed(2)}″ WIDE` : ""}{viewLay.overflow.offLong > EPS && viewLay.overflow.offShort > EPS ? " · " : ""}{viewLay.overflow.offShort > EPS ? `${viewLay.overflow.offShort.toFixed(2)}″ TALL` : ""}</span>}
               {viewRes && viewRes.flatProof && <span className="imp-badge err" data-flatproof title="The source is a rasterised proof (jsPDF / one image per page): the press gets RGB pixels. Impose the raw upload instead.">FLAT PROOF</span>}
               {viewRes && viewRes.rgbLeak && <span className="imp-badge err" data-rgbleak title={`The output carries RGB the source did not have: ${viewRes.rgbLeak.images} image(s), ${viewRes.rgbLeak.ops} operator(s).`}>RGB ADDED</span>}
@@ -7834,7 +8262,7 @@ function App() {
               {viewRes && viewRes.retouched && <span className="imp-badge warn" data-retouched title={viewRes.retouched + " — spot-healed pages are rasterised at 300 DPI; this is not the file the customer approved. The filename carries _RETOUCHED."}>RETOUCHED</span>}
               {parityBadge}
               <span>{sheetSummary}</span>
-              {layoutInfo.error && <span style={{ color: "#f87171" }}>{layoutInfo.error}</span>}
+              {layoutInfo.error && <span style={{ color: "var(--bp-red)" }}>{layoutInfo.error}</span>}
               {busy && (
                 <span className="imp-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={prog ? prog.pct : 0} title="Imposition progress">
                   <span className="fill" style={{ width: (prog ? prog.pct : 0) + "%" }} />
@@ -7846,7 +8274,7 @@ function App() {
               <div className="grp" style={{ marginLeft: "auto", borderRight: 0 }}>
                 {viewRes.preview && (
                   <>
-                    <span className="imp-badge" data-preview style={{ background: "rgba(251,191,36,.15)", color: "#fbbf24", borderColor: "rgba(251,191,36,.5)" }}>PREVIEW · first {viewRes.preview.shown} of {viewRes.preview.total} sheets</span>
+                    <span className="imp-badge" data-preview style={{ background: "var(--yellow-tint)", color: "var(--bp-warn)", borderColor: "var(--yellow-line)" }}>PREVIEW · first {viewRes.preview.shown} of {viewRes.preview.total} sheets</span>
                     <button className="imp-btn tb" data-impose-all disabled={busy} onClick={() => runImpose(true)}>⚡ Impose all {viewRes.preview.total} sheets</button>
                   </>
                 )}
@@ -7856,18 +8284,18 @@ function App() {
                     {uploadState[viewRes.filename] === "uploading" ? "Uploading…" : uploadState[viewRes.filename] === "done" ? "✓ Filed to Drive" : "📁 Send to order's Drive folder"}
                   </button>
                 )}
-                <span style={{ fontSize: 11, color: viewRes.fontsMissing && viewRes.fontsMissing.length ? "#f87171" : "rgba(255,255,255,.45)" }}>{viewRes.preview ? "preview" : `${(viewRes.bytes.length / 1048576).toFixed(2)} MB`} · {viewRes.fontsMissing && viewRes.fontsMissing.length ? "FONT OVERRIDE" : "preflight passed"}</span>
-                {String(uploadState[viewRes.filename] || "").startsWith("failed") && <span style={{ color: "#f87171", fontSize: 12 }}>{uploadState[viewRes.filename]}</span>}
+                <span style={{ fontSize: 11, color: viewRes.fontsMissing && viewRes.fontsMissing.length ? "var(--bp-red)" : "var(--bp-faint)" }}>{viewRes.preview ? "preview" : `${(viewRes.bytes.length / 1048576).toFixed(2)} MB`} · {viewRes.fontsMissing && viewRes.fontsMissing.length ? "FONT OVERRIDE" : "preflight passed"}</span>
+                {String(uploadState[viewRes.filename] || "").startsWith("failed") && <span style={{ color: "var(--bp-red)", fontSize: 12 }}>{uploadState[viewRes.filename]}</span>}
               </div>
             )}
           </div>
 
           {(notice || error) && (
-            <div className="imp-card" style={{ marginBottom: 12, padding: "10px 14px", borderColor: error ? "rgba(239,68,68,.4)" : "rgba(34,197,94,.3)" }}>
-              <div style={{ fontSize: 13, color: error ? "#f87171" : "#4ade80", lineHeight: 1.5, whiteSpace: "pre-line" }}>{error || notice}</div>
-              {error && errStage && <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.5)", marginTop: 4 }}>Stopped while: {errStage}</div>}
+            <div className="imp-card" style={{ marginBottom: 12, padding: "10px 14px", borderColor: error ? "var(--bp-red)" : "var(--green)" }}>
+              <div style={{ fontSize: 13, color: error ? "var(--bp-red)" : "var(--green)", lineHeight: 1.5, whiteSpace: "pre-line" }}>{error || notice}</div>
+              {error && errStage && <div style={{ fontSize: 11.5, color: "var(--bp-dim)", marginTop: 4 }}>Stopped while: {errStage}</div>}
               {error && /FONTS NOT EMBEDDED/.test(error) && !allowMissingFonts && (
-                <label data-font-override style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 8, fontSize: 12.5, color: "#fca5a5", cursor: "pointer" }}>
+                <label data-font-override style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 8, fontSize: 12.5, color: "var(--bp-red)", cursor: "pointer" }}>
                   <input type="checkbox" checked={allowMissingFonts} onChange={e => setAllowMissingFonts(e.target.checked)} style={{ width: "auto", marginTop: 3 }} />
                   <span><b>Impose with missing fonts</b> — I accept that the press will substitute {"them"}. The output filename gets <b>_FONTS</b>, the report and the viewport say so, and this tick is dropped when different artwork is loaded. Bulk impose never uses it.</span>
                 </label>
@@ -7875,8 +8303,8 @@ function App() {
             </div>
           )}
           {viewRes && viewRes.fontsMissing && viewRes.fontsMissing.length > 0 && (
-            <div className="imp-card" data-font-flag style={{ marginBottom: 12, padding: "10px 14px", borderColor: "rgba(239,68,68,.6)", background: "rgba(239,68,68,.08)" }}>
-              <div style={{ fontSize: 13, color: "#f87171", lineHeight: 1.5 }}>
+            <div className="imp-card" data-font-flag style={{ marginBottom: 12, padding: "10px 14px", borderColor: "var(--bp-red)", background: "var(--magenta-tint)" }}>
+              <div style={{ fontSize: 13, color: "var(--bp-red)", lineHeight: 1.5 }}>
                 <b>⚠ FONT OVERRIDE — fonts NOT EMBEDDED:</b> {viewRes.fontsMissing.join(", ")}. Imposed on your say-so; Fiery will substitute a different face and the text can re-wrap on press. The file is flagged <b>_FONTS</b>.
                 <button className="imp-btn sec" style={{ marginLeft: 10, padding: "2px 8px", fontSize: 11 }} onClick={() => setAllowMissingFonts(false)}>Revoke override</button>
               </div>
@@ -7885,8 +8313,8 @@ function App() {
 
           {/* ── Sheets viewport ── */}
           {viewRes && viewRes.label && (
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,.5)", margin: "0 0 6px 2px" }}>
-              <span className="lbl" style={{ display: "inline", color: "#7ab8ff", marginRight: 8 }}>{viewRes.part === "cover" ? "① Cover" : "② Guts"}</span>{viewRes.label}
+            <div style={{ fontSize: 12, color: "var(--bp-dim)", margin: "0 0 6px 2px" }}>
+              <span className="lbl" style={{ display: "inline", color: "var(--bp-info)", marginRight: 8 }}>{viewRes.part === "cover" ? "① Cover" : "② Guts"}</span>{viewRes.label}
             </div>
           )}
           <SheetViewport res={viewRes} layout={viewLay} zoom={zoom} setZoom={setZoom} rulers={rulers} fit={fitCount} />
@@ -7902,7 +8330,7 @@ function App() {
             <div className="imp-card" style={{ marginTop: 8 }}>
             
             {layoutInfo.pb && (
-              <div style={{ fontSize: 13, color: "rgba(255,255,255,.6)", lineHeight: 1.6 }}>
+              <div style={{ fontSize: 13, color: "var(--bp-dim)", lineHeight: 1.6 }}>
                 Perfect bound images as <b>two press jobs</b> on different stock — a flat cover
                 (<b>{(2 * (+trimLong || 0) + (+spine || 0)).toFixed(3)} × {(+trimShort || 0).toFixed(3)}″</b>,
                 back | {(+spine || 0).toFixed(3)}″ spine | front) and the book block
@@ -7912,10 +8340,10 @@ function App() {
                   const h = layoutInfo.pbLayouts[p], L = h.layout;
                   return (
                     <div key={p} style={{ marginTop: 6 }}>
-                      <span style={{ color: "#7ab8ff", fontWeight: 700 }}>{p === "cover" ? "① Cover" : "② Guts"}</span>
+                      <span style={{ color: "var(--bp-info)", fontWeight: 700 }}>{p === "cover" ? "① Cover" : "② Guts"}</span>
                       {L ? <> — <b>{L.sheet.label}</b>, {L.across} × {L.down}{L.rotated ? " (rotated 90°)" : ""} = {L.imp}-up, gutter {L.gutter}″{L.fillSheet ? ", full-sheet fill" : ""}</> : null}
-                      {h.error && <div style={{ color: "#f87171", fontSize: 12 }}>✕ {h.error}</div>}
-                      {L && L.warnings.map((w, i) => <div key={i} style={{ color: "#fbbf24", fontSize: 12, lineHeight: 1.6 }}>⚠ {w}</div>)}
+                      {h.error && <div style={{ color: "var(--bp-red)", fontSize: 12 }}>✕ {h.error}</div>}
+                      {L && L.warnings.map((w, i) => <div key={i} style={{ color: "var(--bp-warn)", fontSize: 12, lineHeight: 1.6 }}>⚠ {w}</div>)}
                     </div>
                   );
                 })}
@@ -7949,26 +8377,26 @@ function App() {
                     </div>
                   )}
                   <div>Gutter: <b>{lay.gutter}″</b>{lay.gutter === 0 ? " (butt-cut)" : ""}</div>
-                  {lay.booklet && <div style={{ fontSize: 12, color: "rgba(255,255,255,.55)" }}>Spread {lay.booklet.spreadW}×{lay.booklet.spreadH}″ · spine gets no bleed · signatures fold + nest, outermost = cover</div>}
+                  {lay.booklet && <div style={{ fontSize: 12, color: "var(--bp-dim)" }}>Spread {lay.booklet.spreadW}×{lay.booklet.spreadH}″ · spine gets no bleed · signatures fold + nest, outermost = cover</div>}
                   {spec.qty > 0 && !lay.booklet && <div>Sheets: <b>{Math.ceil(spec.qty / lay.imp)}</b> ({spec.qty} ÷ {lay.imp})</div>}
                   {spec.qty > 0 && lay.booklet && (lay.stepRepeat
                     ? <div>Step and repeat: every cell is one signature — <b>{Math.ceil(spec.qty / lay.booklet.spreadsPerSide)}</b> sheets per signature, one form per signature</div>
                     : <div>Ganged: <b>{lay.booklet.spreadsPerSide}</b> consecutive signature{lay.booklet.spreadsPerSide === 1 ? "" : "s"} per sheet — <b>{spec.qty}</b> sheets per form, forms = signatures ÷ {lay.booklet.spreadsPerSide} (rounded up). Exact counts appear in the report once artwork is loaded.</div>)}
-                  {lay.warnings.map((w, i) => <div key={i} style={{ color: "#fbbf24", fontSize: 12 }}>⚠ {w}</div>)}
+                  {lay.warnings.map((w, i) => <div key={i} style={{ color: "var(--bp-warn)", fontSize: 12 }}>⚠ {w}</div>)}
                 </div>
               </div>
             )}
 
               {partsOut.map((res, pi) => (
-                <div key={res.part || pi} style={{ marginTop: 10, borderTop: "1px solid rgba(255,255,255,.08)", paddingTop: 8 }}>
-                  {res.part && <div style={{ fontSize: 12, color: "#7ab8ff", fontWeight: 700, marginBottom: 4 }}>{res.part === "cover" ? "① Cover" : "② Guts"} — {res.label}</div>}
+                <div key={res.part || pi} style={{ marginTop: 10, borderTop: "1px solid var(--bp-line)", paddingTop: 8 }}>
+                  {res.part && <div style={{ fontSize: 12, color: "var(--bp-info)", fontWeight: 700, marginBottom: 4 }}>{res.part === "cover" ? "① Cover" : "② Guts"} — {res.label}</div>}
               {res.warnings.length > 0 && (
                 <div style={{ marginBottom: 10 }}>
-                  {res.warnings.map((w, i) => <div key={i} style={{ color: "#fbbf24", fontSize: 12, lineHeight: 1.6 }}>⚠ {w}</div>)}
+                  {res.warnings.map((w, i) => <div key={i} style={{ color: "var(--bp-warn)", fontSize: 12, lineHeight: 1.6 }}>⚠ {w}</div>)}
                 </div>
               )}
               {res.sideReports && (
-                <div style={{ marginBottom: 10, fontSize: 11.5, color: "rgba(255,255,255,.45)", lineHeight: 1.7 }}>
+                <div style={{ marginBottom: 10, fontSize: 11.5, color: "var(--bp-faint)", lineHeight: 1.7 }}>
                   {res.sideReports.map((s, i) => s.side === "BOOKLET"
                     ? <div key={i}>Booklet: {s.pages} pages{s.padded !== s.pages ? ` (padded to ${s.padded})` : ""} · {s.signatures} signatures on {s.forms} form{s.forms === 1 ? "" : "s"} ({s.sigMode === "repeat" ? "step and repeat" : "ganged"}: {s.formPlan.map(fm => fm.join("+")).join(", ")}) · {s.spreadsPerSide} spread{s.spreadsPerSide === 1 ? "" : "s"}/side · back {s.tumble ? "tumbled 180°" : "upright"}{s.srcRotPages ? ` · ${s.srcRotPages} source pages carried /Rotate (normalized)` : ""}</div>
                     : s.side === "COMBO"
@@ -7982,7 +8410,7 @@ function App() {
                 </div>
               ))}
               {!art && !busy && !result && (
-                <div style={{ color: "rgba(255,255,255,.45)", fontSize: 13, lineHeight: 1.7 }}>
+                <div style={{ color: "var(--bp-faint)", fontSize: 13, lineHeight: 1.7 }}>
                   Drop an artwork PDF (or load an order) to generate the imposed press sheets. The engine places source pages as vector
                   XObjects, locates art by TrimBox, fits to trim without cropping, hard-clips every cell, and step-and-repeats the exact
                   count the customer was priced on.
@@ -7991,6 +8419,39 @@ function App() {
             </div>
           </details>
         </div>
+
+        {/* ══ INSPECTOR — what is true about this file and this run ══ */}
+        <aside className="imp-insp" data-inspector>
+          <div className="imp-insp-sec">
+            <h3>This file</h3>
+            {art ? (
+              <div className="imp-kv">
+                <span className="k">Name</span><span className="v">{art.name}</span>
+                <span className="k">Pages</span><span className="v">{art.pageCount}{backArt ? ` · back file ${backArt.pageCount}` : ""}</span>
+                {activeOrder && <><span className="k">Order</span><span className="v">#{activeOrder.order_id}{activeOrder.job_name ? ` · ${activeOrder.job_name}` : ""}</span></>}
+                {detTrim && detTrim.w && <><span className="k">Detected</span><span className="v">{detTrim.w} × {detTrim.h}″</span></>}
+                <span className="k">Approval</span><span className="v">{apprWords[appr] || "nothing to check against"}</span>
+                {art.flatProof && art.flatProof.producer && <><span className="k">Producer</span><span className="v mono">{art.flatProof.producer}</span></>}
+                {art.approval && art.approval.got && <><span className="k">SHA-256</span><span className="v mono">{art.approval.got.slice(0, 16)}…</span></>}
+              </div>
+            ) : <div className="imp-empty">No artwork loaded. Drop a PDF in the job strip or pick an order from the queue.</div>}
+          </div>
+          <div className="imp-insp-sec">
+            <h3>Findings</h3>
+            <Findings items={findings} />
+          </div>
+          <div className="imp-insp-sec">
+            <h3>Before it leaves</h3>
+            {viewRes ? (
+              <div className="imp-kv">
+                <span className="k">File</span><span className="v mono">{viewRes.filename}</span>
+                <span className="k">Size</span><span className="v">{viewRes.preview ? "preview — impose all to file" : `${(viewRes.bytes.length / 1048576).toFixed(2)} MB`}</span>
+                <span className="k">Flags</span><span className="v">{outFlags.length ? outFlags.map(f => <span key={f} className="imp-badge err" style={{ marginRight: 4 }}>{f}</span>) : <span className="imp-badge ok">none</span>}</span>
+                {CFG && activeOrder && <><span className="k">Drive</span><span className="v">{uploadState[viewRes.filename] === "done" ? "filed to the order folder" : uploadState[viewRes.filename] === "uploading" ? "uploading…" : String(uploadState[viewRes.filename] || "").startsWith("failed") ? uploadState[viewRes.filename] : "not filed yet"}</span></>}
+              </div>
+            ) : <div className="imp-empty">The output filename, its size and every flag it carries appear here once a run finishes.</div>}
+          </div>
+        </aside>
       </div>
     </div>
   );
@@ -8003,8 +8464,8 @@ class ErrorBoundary extends React.Component {
     if (this.state.err) {
       return (
         <div style={{ maxWidth: 720, margin: "60px auto", padding: 20 }} className="imp-card">
-          <div style={{ fontSize: 15, fontWeight: 700, color: "#f87171", marginBottom: 8 }}>The tool hit a rendering error</div>
-          <div style={{ fontSize: 12.5, color: "rgba(255,255,255,.6)", whiteSpace: "pre-wrap", marginBottom: 12 }}>{String(this.state.err && this.state.err.message || this.state.err)}</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--bp-red)", marginBottom: 8 }}>The tool hit a rendering error</div>
+          <div style={{ fontSize: 12.5, color: "var(--bp-dim)", whiteSpace: "pre-wrap", marginBottom: 12 }}>{String(this.state.err && this.state.err.message || this.state.err)}</div>
           <button className="imp-btn" onClick={() => location.reload()}>Reload the tool</button>
         </div>
       );

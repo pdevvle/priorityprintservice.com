@@ -743,6 +743,86 @@ download the imposed PDF. Useful for testing and one-off jobs.
     prints 13×19″", viewport taller than wide. Harness: `cases_port.json`,
     `ui_port.mjs`.
 
+  ### The Imposition box — Fiery Impose's panel, always on the box (1.68)
+
+  Owner, 2026-11-27, after dropping a 4-page 320 × 233 mm file (12.6 × 9.18″) that
+  came out 1-up with no way to say otherwise: "THERE SHOULD ALWAYS — ALWAYS! — BE AN
+  IMPOSITION PATTERN OPTION ON THE BOX … look at the Fiery imposition program and all
+  the options available there should be in your design … I should be able to manually
+  set the pattern irregardless of any other option. If I want it to be 15-up on a 2×2
+  sheet of paper I should be able to do that, preposterousness be damned. Will it work
+  in practice? No. But I can dictate it."
+
+  Two faults were under it. (1) `detectTrim()` rounded every measured size to the
+  nearest 1/16″, so 12.6 × 9.18 became **12.625 × 9.1875 — a trim larger than its own
+  page** — and that 0.025″ pushed a comfortable 2-up into the calculators' pricing
+  formula's 1-up (18.5″ usable long, 12.5″ short). `snapT()` now snaps only when the
+  value is ON the 1/16″ grid (±0.006″) and otherwise keeps the measured size to
+  0.001″. (2) The manual grid existed, but behind a tick inside the Layout section's
+  "Manual grid & gutters" panel; the Piece pattern, Position, Gutter, Sides,
+  Orientation and Duplex controls were spread over four sections and several of them
+  hidden by product.
+
+  The fix is one card pinned to the top of the controls column, `data-sec="impose"`,
+  that never collapses, laid out in Fiery Impose's vocabulary:
+
+  - **Layout style** — `Repeat` (step and repeat) · `Unique` (gang in order) ·
+    `Unique-Collate Cut` (cut & stack) · `Each page its own sheet` = `spec.multiMode`,
+    `data-multi-mode`, always shown (the old control appeared only for multi-page
+    files). Books show their binding, greyed.
+  - **Columns × Rows** — `data-grid-across` / `data-grid-down`, pre-filled with the
+    live layout's grid; typing a number **dictates** the grid outright (`gridOn` with
+    no checkbox), seeded from the other axis as it stands. `= N-up · priced M-up` beside
+    it; `Back to auto` (`data-grid-auto`) returns to the priced count. Saddle: spreads
+    across/down (signature slots); perfect bound: the half the panel is pointed at.
+  - **Arrangements that fit** — `fitArrangements()` enumerates every a × d at both
+    orientations that fits the printable area at the current gutter (dashed tiles =
+    fits only butt-cut; a magenta tile = the dictated grid that does not fit), each
+    drawn to scale (`ArrTile`), `data-tile="2x1r"`; a click dictates columns, rows and
+    rotation together. `Auto` tile = the priced count.
+  - **Rotation** — flats `data-art-rotate` Auto/0°/90°/180°/270° (was a dropdown in
+    Job); saddle `data-spread-orient`; perfect bound `data-grid-orient` per half.
+  - **Piece pattern** — the six patterns, always visible (greyed for saddle with the
+    reason), manual cell editor underneath.
+  - **Duplex** — `Simplex` · `Duplex · SEF` · `Duplex · LEF` (`data-duplex`, wrapper
+    carries `data-sides` / `data-sheet-flip`) = `sides` + `sheetFlip`; back rotation
+    beside it. Replaces the Sides segment in Job and the whole Duplex section.
+  - **Position** and **Gutter** (moved from Layout), **Scale %** (`data-art-scale`)
+    and **Bleed** (`data-bleed`).
+
+  **Rule: a dictated grid is laid out exactly as typed.** The engine already did this
+  for flats and saddle since 1.56 (`footprintCheck` → OVERFLOW); the custom-sheet
+  minimum dropped from 3″ to 1″ so the 2 × 2 sheet is legal, and 5 × 3 of 9.18 × 12.6″
+  on it produces `IMPOSED_…_15up_custom2x2_OVERFLOW.pdf` with the spill named per edge,
+  never a refusal. The priced count is a fact printed beside the grid, never a gate.
+
+  The old "Layout on the sheet" section is now **Layout details** (per-gap gutters, full
+  -sheet fill, press sheet / orientation per perfect-bound half); the `GA` grid accessor
+  is hoisted to App scope so the box and the panel read and write the same G/setG.
+
+  **Skin, header, inspector (same release).** The tool wears the calculator's skin as
+  `proof-ui-draft.html` on `claude/proofer-parity` does: the `--bp-*` palette (light
+  default — wp-admin is light — and the calculator's dark palette under
+  `data-pps-theme="dark"`, toggle `data-theme-toggle`, remembered in
+  `localStorage.pps_impose_theme`), Montserrat for headings and Work Sans for UI, the
+  inset segmented control with the cyan thumb, pill chips, the hairline accordion with
+  a numbered step disc and a one-line summary of each section while closed
+  (`data-sec-summary`). 170 inline colour literals became tokens; a harness check
+  resolves every `var()` in both skins. Header: title, status, Order metadata
+  reference, theme toggle, and the **truth bar** (`data-truth`) — one pill per fact:
+  File, Approval, Colour, Placed = priced / Dictated grid / Mismatch, Overflow, Preview,
+  Fonts, Retouch, Security. Right column: the **inspector** (`data-inspector`) — *This
+  file* (name, pages, order, detected size, approval, producer, SHA-256), *Findings*
+  (`data-findings`: the proofer's condensed check list — Not passed · Notes · Passed,
+  one dot and a name per finding, explanation folded) and *Before it leaves* (output
+  filename, size, the flags the name carries, Drive state). Three columns at ≥1500 px;
+  the inspector drops under the viewport below that; everything stacks under 980 px.
+
+  Harness: `ui_box.mjs` (19 checks: box present, tokens resolve in both skins, fonts,
+  segmented control, the owner's file detected 12.6 × 9.18, 1-up auto, 2 × 1 tile
+  offered, typing 2 → 2-up download, tile click, back to auto, 15-up on 2 × 2 →
+  OVERFLOW with a file) and `ui_briefA.mjs` (25/25 unchanged).
+
   ### Brief A, release 1: flattened-proof guardrails, RGB diff, two-hash approval, OutputIntent (1.67)
 
   From `docs/PROOFING_PIPELINE_DESIGN.md` §4 (A.1 and A.4). Order 88056's
